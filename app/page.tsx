@@ -1,12 +1,24 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import confetti from 'canvas-confetti';
 import { Heart, MessageCircle, Camera, StickyNote, Star, X } from 'lucide-react';
 import styles from './page.module.css';
 import Link from 'next/link';
 import Countdown from './components/Countdown';
+
+// Dynamic import for 3D scene (client-side only)
+const KittyScene = dynamic(() => import('./components/KittyScene'), {
+  ssr: false,
+  loading: () => (
+    <div className={styles.loadingScene}>
+      <div className={styles.loadingSpinner}>🎀</div>
+      <p>正在召唤 Hello Kitty...</p>
+    </div>
+  )
+});
 
 const MENU_ITEMS = [
   { href: '/guestbook', icon: MessageCircle, label: '留言板', color: '#F48FB1' },
@@ -30,18 +42,11 @@ export default function Home() {
 
   return (
     <div className={styles.container}>
-      {/* Hello Kitty 3D Model */}
+      {/* 3D Model Scene */}
       <div className={styles.modelWrapper}>
-        <iframe
-          title="hello kitty blush"
-          className={styles.sketchfabEmbed}
-          frameBorder="0"
-          allowFullScreen
-          allow="autoplay; fullscreen; xr-spatial-tracking"
-          src="https://sketchfab.com/models/f5ffa040dff8471d9031d41f2047017c/embed?autostart=1&ui_hint=0&ui_infos=0&ui_stop=0&ui_inspector=0&ui_watermark_link=0&ui_watermark=0&ui_ar=0&ui_help=0&ui_settings=0&ui_vr=0&ui_fullscreen=0&ui_annotations=0&preload=1&transparent=1"
-        />
-        {/* Clickable overlay to capture clicks */}
-        <div className={styles.clickableOverlay} onClick={handleKittyClick} />
+        <Suspense fallback={<div className={styles.loadingScene}>加载中...</div>}>
+          <KittyScene onKittyClick={handleKittyClick} />
+        </Suspense>
       </div>
 
       {/* Welcome Title */}
@@ -155,7 +160,7 @@ export default function Home() {
                 </p>
                 <p className={styles.closing}>
                   永远爱你的，<br />
-                  ❤️ 爱你的老公
+                  ❤️ (你的名字)
                 </p>
               </div>
 

@@ -36,6 +36,36 @@
   z-index: 2;
 }
 
+/* Loading Scene */
+.loadingScene {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  color: #F48FB1;
+  font-size: 1rem;
+}
+
+.loadingSpinner {
+  font-size: 3rem;
+  animation: bounce 1s ease-in-out infinite;
+}
+
+@keyframes bounce {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-15px);
+  }
+}
+
 /* Title */
 .titleOverlay {
   position: absolute;
