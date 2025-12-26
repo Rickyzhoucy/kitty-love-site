@@ -1,0 +1,152 @@
+.container {
+    padding: 2rem 1rem;
+    padding-bottom: 120px;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(252, 228, 236, 0.9));
+    border-radius: 20px;
+    border: 2px solid #F8BBD0;
+}
+
+.kittyIcon {
+    width: 70px;
+    height: auto;
+}
+
+.header h1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.8rem;
+    color: #F48FB1;
+    margin-bottom: 0.3rem;
+}
+
+.header p {
+    color: #90A4AE;
+}
+
+.formSection {
+    margin-bottom: 2rem;
+}
+
+.form {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    border: 2px solid #FCE4EC;
+}
+
+.inputGroup {
+    margin-bottom: 1rem;
+}
+
+.input,
+.textarea {
+    width: 100%;
+    padding: 0.8rem;
+    border: 2px solid #E0E0E0;
+    border-radius: 10px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.3s;
+}
+
+.input:focus,
+.textarea:focus {
+    border-color: #F48FB1;
+}
+
+.textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+.button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #F48FB1, #F06292);
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 25px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(244, 143, 177, 0.4);
+}
+
+.button:disabled {
+    background: #B0BEC5;
+}
+
+.messagesSection {
+    margin-top: 2rem;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+.card {
+    background: linear-gradient(135deg, #FFFDE7, #FFF8E1);
+    padding: 1.5rem;
+    border-radius: 3px;
+    box-shadow: 2px 3px 10px rgba(0, 0, 0, 0.1);
+    position: relative;
+    border: 1px solid #FFE082;
+}
+
+.messageContent {
+    font-size: 1rem;
+    color: #546E7A;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+}
+
+.cardFooter {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nickname {
+    color: #F48FB1;
+    font-weight: 500;
+}
+
+.date {
+    font-size: 0.75rem;
+    color: #90A4AE;
+}
+
+.pin {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 1.2rem;
+}
+
+.loading,
+.empty {
+    text-align: center;
+    color: #78909C;
+    grid-column: 1 / -1;
+}

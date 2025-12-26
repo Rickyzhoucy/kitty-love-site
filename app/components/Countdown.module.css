@@ -1,0 +1,47 @@
+.container {
+    background: var(--white);
+    padding: 1rem 1.5rem;
+    border-radius: 20px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    border: 2px solid var(--secondary-blue);
+    margin-top: 2rem;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text-light);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.timer {
+    display: flex;
+    gap: 1rem;
+}
+
+.unit {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--dark-pink);
+    font-family: monospace;
+    line-height: 1;
+}
+
+.label {
+    font-size: 0.7rem;
+    color: var(--text-light);
+}

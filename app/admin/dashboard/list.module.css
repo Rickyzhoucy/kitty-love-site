@@ -1,0 +1,121 @@
+.container {
+    max-width: 1000px;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.header h1 {
+    color: #546E7A;
+}
+
+.filters {
+    display: flex;
+    gap: 1rem;
+}
+
+.grid {
+    display: grid;
+    gap: 1rem;
+}
+
+.card {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.content {
+    flex: 1;
+}
+
+.title {
+    font-weight: 600;
+    color: #37474F;
+    margin-bottom: 0.3rem;
+}
+
+.text {
+    color: #607D8B;
+    font-size: 0.95rem;
+}
+
+.meta {
+    font-size: 0.8rem;
+    color: #90A4AE;
+    margin-top: 0.5rem;
+}
+
+.actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: 1rem;
+}
+
+.deleteBtn {
+    color: #FF5252;
+    border: 1px solid #FFEDEA;
+    background: #FFEBEE;
+    padding: 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.deleteBtn:hover {
+    background: #FFCDD2;
+}
+
+.addForm {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+
+.inputGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 200px;
+}
+
+.inputGroup label {
+    font-size: 0.9rem;
+    color: #78909C;
+}
+
+.input {
+    padding: 0.8rem;
+    border: 1px solid #E0E0E0;
+    border-radius: 8px;
+    outline: none;
+}
+
+.submitBtn {
+    background: #00BCD4;
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    height: max-content;
+}
+
+.submitBtn:hover {
+    background: #00ACC1;
+}

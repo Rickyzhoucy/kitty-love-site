@@ -1,0 +1,197 @@
+.container {
+    padding: 2rem 1rem;
+    padding-bottom: 120px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(252, 228, 236, 0.9));
+    border-radius: 20px;
+    border: 2px solid #F8BBD0;
+}
+
+.kittyIcon {
+    width: 70px;
+    height: auto;
+}
+
+.header h1 {
+    font-size: 1.8rem;
+    color: #F48FB1;
+    margin-bottom: 0.3rem;
+}
+
+.header p {
+    color: #90A4AE;
+}
+
+.inputSection {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 15px;
+    margin-bottom: 2rem;
+    border: 2px solid #FCE4EC;
+}
+
+.categorySelector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.categoryBtn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.5rem 1rem;
+    border: 2px solid #E0E0E0;
+    border-radius: 20px;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #546E7A;
+}
+
+.activeCat {
+    border-color: transparent;
+    color: #333;
+}
+
+.form {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.input {
+    flex: 1;
+    padding: 0.8rem;
+    border: 2px solid #E0E0E0;
+    border-radius: 10px;
+    outline: none;
+    transition: border-color 0.3s;
+}
+
+.input:focus {
+    border-color: #F48FB1;
+}
+
+.addBtn {
+    background: linear-gradient(135deg, #F48FB1, #F06292);
+    color: white;
+    border: none;
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.listsContainer {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.column {
+    background: white;
+    border-radius: 15px;
+    padding: 1rem;
+    border: 2px solid #FCE4EC;
+}
+
+.columnTitle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 0.8rem;
+    margin-bottom: 1rem;
+    border-bottom: 3px solid;
+    color: #546E7A;
+    font-size: 1.1rem;
+    position: relative;
+}
+
+.bowCorner {
+    position: absolute;
+    right: 0;
+    top: -5px;
+    font-size: 1rem;
+}
+
+.list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.memoItem {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem;
+    background: #FAFAFA;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.completed {
+    opacity: 0.6;
+}
+
+.completed .memoText {
+    text-decoration: line-through;
+    color: #999;
+}
+
+.checkBox {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #F48FB1;
+    border-radius: 5px;
+    background: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #F48FB1;
+    flex-shrink: 0;
+}
+
+.memoText {
+    flex: 1;
+    color: #37474F;
+}
+
+.deleteBtn {
+    color: #BDBDBD;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.memoItem:hover .deleteBtn {
+    opacity: 1;
+}
+
+.deleteBtn:hover {
+    color: #FF5252;
+}
+
+.emptyText {
+    color: #B0BEC5;
+    text-align: center;
+    padding: 1rem;
+    font-size: 0.9rem;
+}

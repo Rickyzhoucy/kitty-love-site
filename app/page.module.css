@@ -1,141 +1,239 @@
-.page {
-  --background: #fafafa;
-  --foreground: #fff;
-
-  --text-primary: #000;
-  --text-secondary: #666;
-
-  --button-primary-hover: #383838;
-  --button-secondary-hover: #f2f2f2;
-  --button-secondary-border: #ebebeb;
-
-  display: flex;
+.container {
+  position: relative;
+  width: 100%;
   min-height: 100vh;
+  background: #E0F7FA;
+  /* Clean light blue, no gradient */
+  overflow: hidden;
+}
+
+/* 3D Model Wrapper */
+.modelWrapper {
+  position: relative;
+  width: 100%;
+  height: 70vh;
+  min-height: 400px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  font-family: var(--font-geist-sans);
-  background-color: var(--background);
-}
-
-.main {
-  display: flex;
-  min-height: 100vh;
-  width: 100%;
-  max-width: 800px;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  background-color: var(--foreground);
-  padding: 120px 60px;
-}
-
-.intro {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  gap: 24px;
-}
-
-.intro h1 {
-  max-width: 320px;
-  font-size: 40px;
-  font-weight: 600;
-  line-height: 48px;
-  letter-spacing: -2.4px;
-  text-wrap: balance;
-  color: var(--text-primary);
-}
-
-.intro p {
-  max-width: 440px;
-  font-size: 18px;
-  line-height: 32px;
-  text-wrap: balance;
-  color: var(--text-secondary);
-}
-
-.intro a {
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.ctas {
-  display: flex;
-  flex-direction: row;
-  width: 100%;
-  max-width: 440px;
-  gap: 16px;
-  font-size: 14px;
-}
-
-.ctas a {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 40px;
-  padding: 0 16px;
-  border-radius: 128px;
-  border: 1px solid transparent;
-  transition: 0.2s;
   cursor: pointer;
-  width: fit-content;
+}
+
+.sketchfabEmbed {
+  width: 100%;
+  height: 100%;
+  border: none;
+  pointer-events: auto;
+}
+
+/* Title */
+.titleOverlay {
+  position: absolute;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  text-align: center;
+}
+
+.titleOverlay h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.3rem;
+  color: #F48FB1;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.6rem 1.2rem;
+  border-radius: 25px;
+  box-shadow: 0 4px 15px rgba(244, 143, 177, 0.25);
+  border: 2px solid #FCE4EC;
+}
+
+/* Click Hint */
+.clickHint {
+  position: absolute;
+  bottom: 25%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #F48FB1;
+  padding: 0.4rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.85rem;
+  box-shadow: 0 2px 10px rgba(244, 143, 177, 0.2);
+  z-index: 5;
+}
+
+/* Speech Bubble */
+.speechBubble {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: white;
+  padding: 1rem 1.5rem;
+  border-radius: 20px;
+  box-shadow: 0 8px 30px rgba(244, 143, 177, 0.4);
+  border: 3px solid #F8BBD0;
+  max-width: 260px;
+  text-align: center;
+}
+
+.speechBubble::after {
+  content: '';
+  position: absolute;
+  bottom: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 12px 12px 0 12px;
+  border-style: solid;
+  border-color: #F8BBD0 transparent transparent transparent;
+}
+
+.bubbleEmoji {
+  font-size: 1.8rem;
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.speechBubble p {
+  color: #546E7A;
+  font-size: 0.95rem;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Floating Menu Button */
+.floatingMenuBtn {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  z-index: 200;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #F48FB1, #F06292);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 20px rgba(244, 143, 177, 0.5);
+}
+
+/* Floating Menu */
+.floatingMenu {
+  position: fixed;
+  bottom: 6rem;
+  right: 2rem;
+  z-index: 190;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: white;
+  padding: 0.6rem 1rem;
+  border-radius: 25px;
+  text-decoration: none;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.menuItem:hover {
+  transform: translateX(-5px);
+}
+
+.menuIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.menuItem span {
+  color: #546E7A;
   font-weight: 500;
+  font-size: 0.95rem;
 }
 
-a.primary {
-  background: var(--text-primary);
-  color: var(--background);
-  gap: 8px;
+/* Floating Decorations */
+.decorations {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
 }
 
-a.secondary {
-  border-color: var(--button-secondary-border);
+.floatItem1 {
+  position: absolute;
+  top: 20%;
+  left: 8%;
+  font-size: 1.8rem;
 }
 
-/* Enable hover only on non-touch devices */
-@media (hover: hover) and (pointer: fine) {
-  a.primary:hover {
-    background: var(--button-primary-hover);
-    border-color: transparent;
-  }
-
-  a.secondary:hover {
-    background: var(--button-secondary-hover);
-    border-color: transparent;
-  }
+.floatItem2 {
+  position: absolute;
+  top: 30%;
+  right: 10%;
+  font-size: 2rem;
 }
 
+.floatItem3 {
+  position: absolute;
+  bottom: 35%;
+  left: 12%;
+  font-size: 1.5rem;
+}
+
+/* Responsive */
 @media (max-width: 600px) {
-  .main {
-    padding: 48px 24px;
+  .modelWrapper {
+    height: 55vh;
+    min-height: 300px;
   }
 
-  .intro {
-    gap: 16px;
+  .titleOverlay h1 {
+    font-size: 1rem;
+    padding: 0.5rem 0.9rem;
   }
 
-  .intro h1 {
-    font-size: 32px;
-    line-height: 40px;
-    letter-spacing: -1.92px;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .logo {
-    filter: invert();
+  .floatingMenuBtn {
+    width: 50px;
+    height: 50px;
+    bottom: 1.5rem;
+    right: 1.5rem;
   }
 
-  .page {
-    --background: #000;
-    --foreground: #000;
+  .floatingMenu {
+    bottom: 5rem;
+    right: 1.5rem;
+  }
 
-    --text-primary: #ededed;
-    --text-secondary: #999;
+  .menuItem {
+    padding: 0.5rem 0.8rem;
+  }
 
-    --button-primary-hover: #ccc;
-    --button-secondary-hover: #1a1a1a;
-    --button-secondary-border: #1a1a1a;
+  .menuIcon {
+    width: 35px;
+    height: 35px;
+  }
+
+  .menuItem span {
+    font-size: 0.85rem;
   }
 }

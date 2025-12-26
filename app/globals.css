@@ -1,27 +1,18 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* Mizuiro / Light Blue Theme with Pink Accents */
+  --pk-blue-100: #E0F7FA;
+  --pk-blue-200: #B2EBF2;
+  --pk-blue-300: #80DEEA;
+  --pk-blue-400: #4DD0E1;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+  --pk-pink-100: #FCE4EC;
+  --pk-pink-200: #F8BBD0;
+  --pk-pink-300: #F48FB1;
 
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
+  --pk-text: #546E7A;
+  --pk-text-light: #90A4AE;
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --font-fredoka: 'Fredoka', sans-serif;
 }
 
 * {
@@ -30,13 +21,51 @@ body {
   margin: 0;
 }
 
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  font-family: var(--font-fredoka);
+  color: var(--pk-text);
+  background-color: var(--pk-blue-100);
+  /* Cute Polka Dot Background */
+  background-image: radial-gradient(var(--pk-blue-200) 15%, transparent 16%),
+    radial-gradient(var(--pk-pink-100) 15%, transparent 16%);
+  background-size: 60px 60px;
+  background-position: 0 0, 30px 30px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--pk-blue-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--pk-blue-300);
+  border-radius: 6px;
+  border: 3px solid var(--pk-blue-100);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--pk-pink-300);
+}
+
 a {
   color: inherit;
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+/* Global Kitty Elements */
+.kitty-bow-decoration {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  background: var(--pk-pink-300);
+  border-radius: 50%;
+  /* Simple CSS bow logic or use SVG/Img */
+  z-index: 10;
 }

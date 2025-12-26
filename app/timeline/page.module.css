@@ -1,0 +1,239 @@
+.container {
+    padding: 2rem 1rem;
+    padding-bottom: 120px;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(252, 228, 236, 0.9));
+    border-radius: 20px;
+    border: 2px solid #F8BBD0;
+}
+
+.kittyIcon {
+    width: 70px;
+    height: auto;
+}
+
+.header h1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.8rem;
+    color: #F48FB1;
+    margin-bottom: 0.3rem;
+}
+
+.header p {
+    color: #90A4AE;
+}
+
+/* Add Section */
+.addSection {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.addBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #F48FB1 0%, #F06292 100%);
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 25px;
+    font-size: 1rem;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(244, 143, 177, 0.4);
+    transition: all 0.3s;
+}
+
+.addBtn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(244, 143, 177, 0.5);
+}
+
+.addForm {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 15px;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: flex-end;
+    border: 2px solid #FCE4EC;
+}
+
+.formGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 200px;
+}
+
+.formGroup label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: #78909C;
+}
+
+.formGroup input {
+    padding: 0.7rem;
+    border: 2px solid #E0E0E0;
+    border-radius: 8px;
+    outline: none;
+    transition: border-color 0.3s;
+}
+
+.formGroup input:focus {
+    border-color: #F48FB1;
+}
+
+.submitBtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #4DD0E1;
+    color: white;
+    border: none;
+    padding: 0.8rem 1.2rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    height: max-content;
+}
+
+.submitBtn:hover {
+    background: #26C6DA;
+}
+
+.submitBtn:disabled {
+    background: #B0BEC5;
+    cursor: not-allowed;
+}
+
+/* Timeline */
+.timeline {
+    position: relative;
+    padding: 2rem 0;
+}
+
+.line {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 100%;
+    background: linear-gradient(180deg, #F8BBD0, #F48FB1, #F06292);
+    border-radius: 2px;
+}
+
+.item {
+    position: relative;
+    width: 45%;
+    margin-bottom: 3rem;
+}
+
+.left {
+    margin-right: auto;
+    text-align: right;
+    padding-right: 2rem;
+}
+
+.right {
+    margin-left: auto;
+    text-align: left;
+    padding-left: 2rem;
+}
+
+.content {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 15px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+    position: relative;
+    border: 2px solid #FCE4EC;
+}
+
+.content h3 {
+    color: #F48FB1;
+    margin-bottom: 0.5rem;
+    font-size: 1.2rem;
+}
+
+.content p {
+    color: #78909C;
+    line-height: 1.6;
+}
+
+.date {
+    display: inline-block;
+    background: linear-gradient(135deg, #F48FB1, #F06292);
+    color: white;
+    padding: 0.3rem 0.8rem;
+    border-radius: 15px;
+    font-size: 0.85rem;
+    margin-bottom: 0.8rem;
+}
+
+.marker {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, #F48FB1, #F06292);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(244, 143, 177, 0.4);
+}
+
+.left .marker {
+    right: -48px;
+}
+
+.right .marker {
+    left: -48px;
+}
+
+.loading,
+.empty {
+    text-align: center;
+    color: #78909C;
+    font-size: 1.1rem;
+    padding: 2rem;
+}
+
+@media (max-width: 768px) {
+    .line {
+        left: 20px;
+    }
+
+    .item {
+        width: calc(100% - 50px);
+        margin-left: 50px !important;
+        margin-right: 0 !important;
+        text-align: left !important;
+        padding-left: 1.5rem !important;
+        padding-right: 0 !important;
+    }
+
+    .marker {
+        left: -42px !important;
+        right: auto !important;
+    }
+}
