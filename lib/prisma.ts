@@ -1,7 +1,13 @@
 import { PrismaClient } from '@prisma/client';
 
 const prismaClientSingleton = () => {
-    return new PrismaClient();
+    return new PrismaClient({
+        datasources: {
+            db: {
+                url: process.env.DATABASE_URL || 'file:./prisma/dev.db',
+            },
+        },
+    });
 };
 
 type PrismaClientSingleton = ReturnType<typeof prismaClientSingleton>;
@@ -14,4 +20,5 @@ const prisma = globalForPrisma.prisma ?? prismaClientSingleton();
 
 export default prisma;
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+// Keep singleton in all environments
+globalForPrisma.prisma = prisma;
