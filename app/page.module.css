@@ -2,6 +2,8 @@
   position: relative;
   width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
+  /* Dynamic viewport height for mobile */
   background: #E0F7FA;
   overflow: hidden;
 }
@@ -10,12 +12,12 @@
 .modelWrapper {
   position: relative;
   width: 100%;
-  height: 75vh;
-  min-height: 400px;
+  height: 65vh;
+  height: 65dvh;
+  min-height: 350px;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
 }
 
 .sketchfabEmbed {
@@ -37,17 +39,22 @@
 /* Title */
 .titleOverlay {
   position: absolute;
-  top: 1.5rem;
+  top: 1rem;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
+  width: 90%;
+  max-width: 400px;
+  text-align: center;
 }
 
 .titleOverlay h1 {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 1.2rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: clamp(0.9rem, 4vw, 1.2rem);
   color: #F48FB1;
   background: rgba(255, 255, 255, 0.95);
   padding: 0.5rem 1rem;
@@ -59,17 +66,18 @@
 /* Click Hint */
 .clickHint {
   position: absolute;
-  bottom: 20%;
+  bottom: 18%;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(255, 255, 255, 0.9);
   color: #F48FB1;
   padding: 0.5rem 1rem;
   border-radius: 20px;
-  font-size: 0.9rem;
+  font-size: clamp(0.8rem, 3vw, 0.9rem);
   box-shadow: 0 2px 10px rgba(244, 143, 177, 0.2);
   z-index: 5;
   animation: pulse 2s ease-in-out infinite;
+  white-space: nowrap;
 }
 
 @keyframes pulse {
@@ -87,12 +95,12 @@
 /* Floating Bubble Menu */
 .bubbleMenu {
   position: fixed;
-  right: 1.5rem;
+  right: 1rem;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.8rem;
   z-index: 100;
 }
 
@@ -109,19 +117,19 @@
 }
 
 .bubbleIcon {
-  width: 50px;
-  height: 50px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .bubbleItem:hover .bubbleIcon {
   transform: scale(1.1);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
 }
 
 .bubbleLabel {
@@ -135,6 +143,7 @@
   opacity: 0;
   transform: translateX(10px);
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
 .bubbleItem:hover .bubbleLabel {
@@ -153,25 +162,26 @@
   z-index: 1;
 }
 
-.floatItem1 {
+.floatItem1,
+.floatItem2,
+.floatItem3 {
   position: absolute;
+  font-size: clamp(1.2rem, 4vw, 1.8rem);
+}
+
+.floatItem1 {
   top: 20%;
   left: 5%;
-  font-size: 1.8rem;
 }
 
 .floatItem2 {
-  position: absolute;
   bottom: 30%;
   left: 8%;
-  font-size: 2rem;
 }
 
 .floatItem3 {
-  position: absolute;
   top: 35%;
   left: 3%;
-  font-size: 1.5rem;
 }
 
 /* Letter Overlay */
@@ -181,6 +191,7 @@
   left: 0;
   width: 100%;
   height: 100%;
+  height: 100dvh;
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(5px);
   display: flex;
@@ -188,25 +199,28 @@
   justify-content: center;
   z-index: 200;
   padding: 1rem;
+  overflow-y: auto;
 }
 
 .letterCard {
   position: relative;
   background: linear-gradient(135deg, #FFF 0%, #FFF5F8 100%);
-  padding: 2rem;
+  padding: 1.5rem;
   border-radius: 20px;
   max-width: 450px;
   width: 100%;
-  max-height: 85vh;
+  max-height: 90vh;
+  max-height: 90dvh;
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(244, 143, 177, 0.4);
   border: 3px solid #F8BBD0;
+  margin: auto;
 }
 
 .closeBtn {
   position: absolute;
-  top: 1rem;
-  right: 1rem;
+  top: 0.8rem;
+  right: 0.8rem;
   background: #FCE4EC;
   border: none;
   width: 36px;
@@ -218,6 +232,7 @@
   justify-content: center;
   color: #F48FB1;
   transition: all 0.3s;
+  z-index: 10;
 }
 
 .closeBtn:hover {
@@ -228,83 +243,115 @@
 .letterHeader {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  gap: 0.8rem;
+  margin-bottom: 1.2rem;
   padding-bottom: 1rem;
   border-bottom: 2px dashed #F8BBD0;
+  flex-wrap: wrap;
 }
 
 .kittyImg {
-  width: 70px;
+  width: clamp(50px, 15vw, 70px);
   height: auto;
 }
 
 .letterTitle {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.3rem;
   flex-wrap: wrap;
 }
 
 .letterTitle h2 {
   color: #F48FB1;
-  font-size: 1.3rem;
+  font-size: clamp(1rem, 4vw, 1.3rem);
   margin: 0;
 }
 
 .letterContent {
   color: #546E7A;
-  line-height: 1.8;
+  line-height: 1.7;
+  font-size: clamp(0.9rem, 3vw, 1rem);
 }
 
 .letterContent p {
-  margin-bottom: 1rem;
+  margin-bottom: 0.8rem;
 }
 
 .closing {
   font-style: italic;
   color: #F48FB1;
-  margin-top: 1.5rem !important;
+  margin-top: 1.2rem !important;
 }
 
 .letterFooter {
-  margin-top: 1.5rem;
+  margin-top: 1.2rem;
   padding-top: 1rem;
   border-top: 2px dashed #F8BBD0;
 }
 
-/* Responsive */
+/* Tablet */
 @media (max-width: 768px) {
+  .modelWrapper {
+    height: 55vh;
+    height: 55dvh;
+    min-height: 300px;
+  }
+
   .bubbleMenu {
-    right: 1rem;
+    right: 0.6rem;
+    gap: 0.6rem;
   }
 
   .bubbleIcon {
-    width: 45px;
-    height: 45px;
+    width: 42px;
+    height: 42px;
   }
 
   .bubbleLabel {
     display: none;
   }
 
+  .floatItem1,
+  .floatItem2,
+  .floatItem3 {
+    display: none;
+  }
+}
+
+/* Mobile */
+@media (max-width: 480px) {
   .modelWrapper {
-    height: 60vh;
+    height: 50vh;
+    height: 50dvh;
+    min-height: 280px;
   }
 
-  .titleOverlay h1 {
-    font-size: 1rem;
+  .titleOverlay {
+    top: 0.8rem;
+  }
+
+  .clickHint {
+    bottom: 15%;
+    padding: 0.4rem 0.8rem;
+  }
+
+  .bubbleMenu {
+    right: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .bubbleIcon {
+    width: 38px;
+    height: 38px;
   }
 
   .letterCard {
-    padding: 1.5rem;
+    padding: 1rem;
+    border-radius: 15px;
   }
 
-  .kittyImg {
-    width: 55px;
-  }
-
-  .letterTitle h2 {
-    font-size: 1.1rem;
+  .letterHeader {
+    gap: 0.6rem;
   }
 }

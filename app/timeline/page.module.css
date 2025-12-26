@@ -1,43 +1,47 @@
 .container {
-    padding: 2rem 1rem;
-    padding-bottom: 120px;
+    padding: 1.5rem 1rem;
+    padding-bottom: 2rem;
     max-width: 900px;
     margin: 0 auto;
+    min-height: 100vh;
+    min-height: 100dvh;
 }
 
 .header {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-    padding: 1.5rem;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(252, 228, 236, 0.9));
-    border-radius: 20px;
+    border-radius: 15px;
     border: 2px solid #F8BBD0;
+    flex-wrap: wrap;
 }
 
 .kittyIcon {
-    width: 70px;
+    width: clamp(50px, 12vw, 70px);
     height: auto;
 }
 
 .header h1 {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 1.8rem;
+    gap: 8px;
+    font-size: clamp(1.2rem, 5vw, 1.8rem);
     color: #F48FB1;
-    margin-bottom: 0.3rem;
+    margin-bottom: 0.2rem;
 }
 
 .header p {
     color: #90A4AE;
+    font-size: clamp(0.85rem, 3vw, 1rem);
 }
 
 /* Add Section */
 .addSection {
     text-align: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
 }
 
 .addBtn {
@@ -47,9 +51,9 @@
     background: linear-gradient(135deg, #F48FB1 0%, #F06292 100%);
     color: white;
     border: none;
-    padding: 0.8rem 1.5rem;
+    padding: 0.7rem 1.2rem;
     border-radius: 25px;
-    font-size: 1rem;
+    font-size: 0.95rem;
     cursor: pointer;
     box-shadow: 0 4px 15px rgba(244, 143, 177, 0.4);
     transition: all 0.3s;
@@ -62,13 +66,13 @@
 
 .addForm {
     background: white;
-    padding: 1.5rem;
+    padding: 1rem;
     border-radius: 15px;
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
     display: flex;
     flex-wrap: wrap;
-    gap: 1rem;
+    gap: 0.8rem;
     align-items: flex-end;
     border: 2px solid #FCE4EC;
 }
@@ -76,24 +80,25 @@
 .formGroup {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.4rem;
     flex: 1;
-    min-width: 200px;
+    min-width: 180px;
 }
 
 .formGroup label {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.9rem;
+    gap: 5px;
+    font-size: 0.85rem;
     color: #78909C;
 }
 
 .formGroup input {
-    padding: 0.7rem;
+    padding: 0.6rem;
     border: 2px solid #E0E0E0;
     border-radius: 8px;
     outline: none;
+    font-size: 0.95rem;
     transition: border-color 0.3s;
 }
 
@@ -108,10 +113,11 @@
     background: #4DD0E1;
     color: white;
     border: none;
-    padding: 0.8rem 1.2rem;
+    padding: 0.7rem 1rem;
     border-radius: 8px;
     cursor: pointer;
     font-weight: 500;
+    font-size: 0.9rem;
     height: max-content;
 }
 
@@ -127,7 +133,7 @@
 /* Timeline */
 .timeline {
     position: relative;
-    padding: 2rem 0;
+    padding: 1.5rem 0;
 }
 
 .line {
@@ -143,25 +149,25 @@
 .item {
     position: relative;
     width: 45%;
-    margin-bottom: 3rem;
+    margin-bottom: 2rem;
 }
 
 .left {
     margin-right: auto;
     text-align: right;
-    padding-right: 2rem;
+    padding-right: 1.5rem;
 }
 
 .right {
     margin-left: auto;
     text-align: left;
-    padding-left: 2rem;
+    padding-left: 1.5rem;
 }
 
 .content {
     background: white;
-    padding: 1.5rem;
-    border-radius: 15px;
+    padding: 1rem;
+    border-radius: 12px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
     position: relative;
     border: 2px solid #FCE4EC;
@@ -169,31 +175,32 @@
 
 .content h3 {
     color: #F48FB1;
-    margin-bottom: 0.5rem;
-    font-size: 1.2rem;
+    margin-bottom: 0.4rem;
+    font-size: clamp(1rem, 4vw, 1.2rem);
 }
 
 .content p {
     color: #78909C;
-    line-height: 1.6;
+    line-height: 1.5;
+    font-size: clamp(0.85rem, 3vw, 0.95rem);
 }
 
 .date {
     display: inline-block;
     background: linear-gradient(135deg, #F48FB1, #F06292);
     color: white;
-    padding: 0.3rem 0.8rem;
-    border-radius: 15px;
-    font-size: 0.85rem;
-    margin-bottom: 0.8rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin-bottom: 0.6rem;
 }
 
 .marker {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     background: linear-gradient(135deg, #F48FB1, #F06292);
     border-radius: 50%;
     display: flex;
@@ -203,37 +210,59 @@
 }
 
 .left .marker {
-    right: -48px;
+    right: -42px;
 }
 
 .right .marker {
-    left: -48px;
+    left: -42px;
 }
 
 .loading,
 .empty {
     text-align: center;
     color: #78909C;
-    font-size: 1.1rem;
+    font-size: 1rem;
     padding: 2rem;
 }
 
+/* Tablet & Mobile: Single column timeline */
 @media (max-width: 768px) {
     .line {
-        left: 20px;
+        left: 16px;
     }
 
     .item {
-        width: calc(100% - 50px);
-        margin-left: 50px !important;
+        width: calc(100% - 40px);
+        margin-left: 40px !important;
         margin-right: 0 !important;
         text-align: left !important;
-        padding-left: 1.5rem !important;
+        padding-left: 1rem !important;
         padding-right: 0 !important;
     }
 
     .marker {
-        left: -42px !important;
+        left: -34px !important;
         right: auto !important;
+        width: 24px;
+        height: 24px;
+    }
+
+    .header {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .addForm {
+        flex-direction: column;
+    }
+
+    .formGroup {
+        width: 100%;
+        min-width: auto;
+    }
+
+    .submitBtn {
+        width: 100%;
+        justify-content: center;
     }
 }
