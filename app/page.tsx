@@ -160,7 +160,7 @@ export default function Home() {
                 </p>
                 <p className={styles.closing}>
                   永远爱你的，<br />
-                  ❤️ (你的名字)
+                  ❤️ 爱你的老公！
                 </p>
               </div>
 
