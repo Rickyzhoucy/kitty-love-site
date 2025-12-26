@@ -2,77 +2,69 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Clock } from 'lucide-react';
+import { Heart } from 'lucide-react';
 import styles from './Countdown.module.css';
 
 interface CountdownProps {
-    targetDate: string; // YYYY-MM-DD
+    startDate: string; // YYYY-MM-DD - 在一起的日期
     title: string;
 }
 
-export default function Countdown({ targetDate, title }: CountdownProps) {
-    const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
+export default function Countdown({ startDate, title }: CountdownProps) {
+    const [timeElapsed, setTimeElapsed] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
 
     useEffect(() => {
-        const calculateTimeLeft = () => {
-            const difference = +new Date(targetDate) - +new Date();
+        const calculateTimeElapsed = () => {
+            const start = new Date(startDate);
+            const now = new Date();
+            const difference = now.getTime() - start.getTime();
 
-            let diff = difference;
-
-            if (difference < 0) {
-                // Handle past dates if needed, or loop annually
-                // For now, if passed, just show 0 or handle externally
-                if (difference < -86400000) { // If more than a day passed
-                    // Logic to find next year's date could go here
-                }
-            }
-
-            if (diff > 0) {
-                setTimeLeft({
-                    days: Math.floor(diff / (1000 * 60 * 60 * 24)),
-                    hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
-                    minutes: Math.floor((diff / 1000 / 60) % 60),
-                    seconds: Math.floor((diff / 1000) % 60),
+            if (difference > 0) {
+                setTimeElapsed({
+                    days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+                    hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+                    minutes: Math.floor((difference / 1000 / 60) % 60),
+                    seconds: Math.floor((difference / 1000) % 60),
                 });
             } else {
-                setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+                setTimeElapsed({ days: 0, hours: 0, minutes: 0, seconds: 0 });
             }
         };
 
-        calculateTimeLeft();
-        const timer = setInterval(calculateTimeLeft, 1000);
+        calculateTimeElapsed();
+        const timer = setInterval(calculateTimeElapsed, 1000);
 
         return () => clearInterval(timer);
-    }, [targetDate]);
+    }, [startDate]);
 
-    if (!timeLeft) return null;
+    if (!timeElapsed) return null;
 
     return (
         <motion.div
             className={styles.container}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1 }}
+            transition={{ delay: 0.5 }}
         >
             <div className={styles.header}>
-                <Clock size={16} />
+                <Heart size={16} fill="#F48FB1" color="#F48FB1" />
                 <span>{title}</span>
             </div>
             <div className={styles.timer}>
                 <div className={styles.unit}>
-                    <span className={styles.value}>{timeLeft.days}</span>
+                    <span className={styles.value}>{timeElapsed.days}</span>
                     <span className={styles.label}>天</span>
                 </div>
                 <div className={styles.unit}>
-                    <span className={styles.value}>{timeLeft.hours}</span>
+                    <span className={styles.value}>{timeElapsed.hours}</span>
                     <span className={styles.label}>时</span>
                 </div>
                 <div className={styles.unit}>
-                    <span className={styles.value}>{timeLeft.minutes}</span>
+                    <span className={styles.value}>{timeElapsed.minutes}</span>
                     <span className={styles.label}>分</span>
                 </div>
                 <div className={styles.unit}>
-                    <span className={styles.value}>{timeLeft.seconds}</span>
+                    <span className={styles.value}>{timeElapsed.seconds}</span>
                     <span className={styles.label}>秒</span>
                 </div>
             </div>

@@ -65,7 +65,7 @@ export default function Home() {
         animate={{ opacity: 1 }}
         transition={{ delay: 2 }}
       >
-        💌 点击 Kitty 查看情书
+        💌 点击 Kitty 有惊喜
       </motion.div>
 
       {/* Floating Bubble Menu - Right Side */}
@@ -160,7 +160,7 @@ export default function Home() {
               </div>
 
               <div className={styles.letterFooter}>
-                <Countdown targetDate="2025-11-30" title="下一个纪念日" />
+                <Countdown startDate="2025-11-30" title="我们在一起已经" />
               </div>
             </motion.div>
           </motion.div>
