@@ -7,28 +7,28 @@ APP_NAME="kitty-love-site"
 APP_DIR="/home/kitty-love-site"
 LOG_FILE="$APP_DIR/app.log"
 PID_FILE="$APP_DIR/app.pid"
-PORT=3000
 
 # 加载环境变量
 export DATABASE_URL="file:./prisma/dev.db"
 
-# 杀掉占用端口的进程
-kill_port() {
-    local pid=$(lsof -t -i:$PORT 2>/dev/null)
-    if [ -n "$pid" ]; then
-        echo "⚠️ 发现端口 $PORT 被占用，正在清理..."
-        kill -9 $pid 2>/dev/null
-        sleep 1
-    fi
-    
-    # 也清理 next-server 进程
+# 检查 next-server 是否在运行
+is_running() {
+    pgrep -f "next-server" > /dev/null 2>&1
+}
+
+# 停止所有 next 相关进程
+kill_next() {
     pkill -9 -f "next-server" 2>/dev/null
     pkill -9 -f "next start" 2>/dev/null
+    pkill -9 -f "pnpm start" 2>/dev/null
+    sleep 1
 }
 
 start() {
-    # 先清理可能存在的进程
-    kill_port
+    if is_running; then
+        echo "⚠️ $APP_NAME 已经在运行，先停止..."
+        kill_next
+    fi
     
     echo "🚀 启动 $APP_NAME..."
     cd "$APP_DIR"
@@ -36,26 +36,25 @@ start() {
     echo $! > "$PID_FILE"
     sleep 3
     
-    # 检查是否启动成功
-    if lsof -i:$PORT > /dev/null 2>&1; then
+    if is_running; then
         echo "✅ $APP_NAME 启动成功"
         echo "📝 日志文件: $LOG_FILE"
-        echo "🌐 访问: http://localhost:$PORT"
+        echo "🌐 访问: http://localhost:3000"
+        pgrep -f "next-server"
     else
         echo "❌ 启动失败，请查看日志: tail -f $LOG_FILE"
-        rm -f "$PID_FILE"
         return 1
     fi
 }
 
 stop() {
     echo "🛑 停止 $APP_NAME..."
+    kill_next
+    rm -f "$PID_FILE"
     
-    # 清理所有相关进程
-    kill_port
-    
-    if [ -f "$PID_FILE" ]; then
-        rm -f "$PID_FILE"
+    if is_running; then
+        echo "⚠️ 无法停止，尝试强制终止..."
+        kill_next
     fi
     
     echo "✅ $APP_NAME 已停止"
@@ -68,9 +67,10 @@ restart() {
 }
 
 status() {
-    if lsof -i:$PORT > /dev/null 2>&1; then
-        echo "✅ $APP_NAME 正在运行 (端口 $PORT)"
-        lsof -i:$PORT | grep LISTEN
+    if is_running; then
+        echo "✅ $APP_NAME 正在运行"
+        echo "进程信息:"
+        ps aux | grep "next-server" | grep -v grep
     else
         echo "⚠️ $APP_NAME 没有在运行"
     fi
