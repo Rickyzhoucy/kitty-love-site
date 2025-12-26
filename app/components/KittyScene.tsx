@@ -11,8 +11,8 @@ function KittyModel({ onClick }: { onClick: () => void }) {
     const { scene } = useGLTF('/models/a5319345f5e44408a7fde7a36cbd45dd.gltf');
 
     useFrame((state) => {
-        // Gentle floating animation
-        groupRef.current.position.y = Math.sin(state.clock.elapsedTime * 1.5) * 0.1;
+        // Gentle floating animation (add to base position of -2)
+        groupRef.current.position.y = -2 + Math.sin(state.clock.elapsedTime * 1.5) * 0.1;
         groupRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
     });
 
@@ -39,7 +39,7 @@ function LoadingFallback() {
 export default function KittyScene({ onKittyClick }: { onKittyClick: () => void }) {
     return (
         <Canvas
-            camera={{ position: [0, 0, 5], fov: 45 }}
+            camera={{ position: [0, -2, 5], fov: 45 }}
             style={{ background: 'transparent' }}
         >
             {/* Lighting */}
