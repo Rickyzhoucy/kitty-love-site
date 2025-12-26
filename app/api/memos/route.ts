@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 
+// Force dynamic rendering for API routes
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
     try {
         const memos = await prisma.memo.findMany({
@@ -8,7 +11,8 @@ export async function GET() {
         });
         return NextResponse.json(memos);
     } catch (error) {
-        return NextResponse.json({ error: 'Failed to fetch memos' }, { status: 500 });
+        console.error('GET /api/memos error:', error);
+        return NextResponse.json({ error: 'Failed to fetch memos', details: String(error) }, { status: 500 });
     }
 }
 
