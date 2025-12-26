@@ -17,8 +17,8 @@ const navItems = [
 export default function Navbar() {
     const pathname = usePathname();
 
-    // Hide navbar on admin pages
-    if (pathname?.startsWith('/admin')) return null;
+    // Hide navbar on admin pages and homepage
+    if (pathname?.startsWith('/admin') || pathname === '/') return null;
 
     return (
         <nav className={styles.navbar}>

@@ -3,7 +3,6 @@
   width: 100%;
   min-height: 100vh;
   background: #E0F7FA;
-  /* Clean light blue, no gradient */
   overflow: hidden;
 }
 
@@ -11,7 +10,7 @@
 .modelWrapper {
   position: relative;
   width: 100%;
-  height: 70vh;
+  height: 75vh;
   min-height: 400px;
   display: flex;
   align-items: center;
@@ -23,7 +22,16 @@
   width: 100%;
   height: 100%;
   border: none;
-  pointer-events: auto;
+}
+
+.clickableOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  z-index: 2;
 }
 
 /* Title */
@@ -33,17 +41,16 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 10;
-  text-align: center;
 }
 
 .titleOverlay h1 {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 1.3rem;
+  font-size: 1.2rem;
   color: #F48FB1;
   background: rgba(255, 255, 255, 0.95);
-  padding: 0.6rem 1.2rem;
+  padding: 0.5rem 1rem;
   border-radius: 25px;
   box-shadow: 0 4px 15px rgba(244, 143, 177, 0.25);
   border: 2px solid #FCE4EC;
@@ -52,120 +59,87 @@
 /* Click Hint */
 .clickHint {
   position: absolute;
-  bottom: 25%;
+  bottom: 20%;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 6px;
   background: rgba(255, 255, 255, 0.9);
   color: #F48FB1;
-  padding: 0.4rem 0.8rem;
-  border-radius: 15px;
-  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
   box-shadow: 0 2px 10px rgba(244, 143, 177, 0.2);
   z-index: 5;
+  animation: pulse 2s ease-in-out infinite;
 }
 
-/* Speech Bubble */
-.speechBubble {
+@keyframes pulse {
+
+  0%,
+  100% {
+    transform: translateX(-50%) scale(1);
+  }
+
+  50% {
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
+/* Floating Bubble Menu */
+.bubbleMenu {
   position: fixed;
-  top: 18%;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 100;
-  background: white;
-  padding: 1rem 1.5rem;
-  border-radius: 20px;
-  box-shadow: 0 8px 30px rgba(244, 143, 177, 0.4);
-  border: 3px solid #F8BBD0;
-  max-width: 260px;
-  text-align: center;
-}
-
-.speechBubble::after {
-  content: '';
-  position: absolute;
-  bottom: -12px;
-  left: 50%;
-  transform: translateX(-50%);
-  border-width: 12px 12px 0 12px;
-  border-style: solid;
-  border-color: #F8BBD0 transparent transparent transparent;
-}
-
-.bubbleEmoji {
-  font-size: 1.8rem;
-  display: block;
-  margin-bottom: 0.4rem;
-}
-
-.speechBubble p {
-  color: #546E7A;
-  font-size: 0.95rem;
-  margin: 0;
-  line-height: 1.4;
-}
-
-/* Floating Menu Button */
-.floatingMenuBtn {
-  position: fixed;
-  bottom: 2rem;
-  right: 2rem;
-  z-index: 200;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #F48FB1, #F06292);
-  color: white;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 6px 20px rgba(244, 143, 177, 0.5);
-}
-
-/* Floating Menu */
-.floatingMenu {
-  position: fixed;
-  bottom: 6rem;
-  right: 2rem;
-  z-index: 190;
+  right: 1.5rem;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  gap: 0.8rem;
+  gap: 1rem;
+  z-index: 100;
 }
 
-.menuItem {
+.bubbleItem {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  background: white;
-  padding: 0.6rem 1rem;
-  border-radius: 25px;
+  gap: 0.6rem;
   text-decoration: none;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   transition: transform 0.2s;
 }
 
-.menuItem:hover {
-  transform: translateX(-5px);
+.bubbleItem:hover {
+  transform: translateX(-8px);
 }
 
-.menuIcon {
-  width: 40px;
-  height: 40px;
+.bubbleIcon {
+  width: 50px;
+  height: 50px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
 
-.menuItem span {
+.bubbleItem:hover .bubbleIcon {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.bubbleLabel {
+  background: white;
   color: #546E7A;
+  padding: 0.4rem 0.8rem;
+  border-radius: 15px;
+  font-size: 0.85rem;
   font-weight: 500;
-  font-size: 0.95rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  transform: translateX(10px);
+  transition: all 0.2s;
+}
+
+.bubbleItem:hover .bubbleLabel {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 /* Floating Decorations */
@@ -182,58 +156,155 @@
 .floatItem1 {
   position: absolute;
   top: 20%;
-  left: 8%;
+  left: 5%;
   font-size: 1.8rem;
 }
 
 .floatItem2 {
   position: absolute;
-  top: 30%;
-  right: 10%;
+  bottom: 30%;
+  left: 8%;
   font-size: 2rem;
 }
 
 .floatItem3 {
   position: absolute;
-  bottom: 35%;
-  left: 12%;
+  top: 35%;
+  left: 3%;
   font-size: 1.5rem;
 }
 
+/* Letter Overlay */
+.letterOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 1rem;
+}
+
+.letterCard {
+  position: relative;
+  background: linear-gradient(135deg, #FFF 0%, #FFF5F8 100%);
+  padding: 2rem;
+  border-radius: 20px;
+  max-width: 450px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(244, 143, 177, 0.4);
+  border: 3px solid #F8BBD0;
+}
+
+.closeBtn {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: #FCE4EC;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #F48FB1;
+  transition: all 0.3s;
+}
+
+.closeBtn:hover {
+  background: #F48FB1;
+  color: white;
+}
+
+.letterHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px dashed #F8BBD0;
+}
+
+.kittyImg {
+  width: 70px;
+  height: auto;
+}
+
+.letterTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.letterTitle h2 {
+  color: #F48FB1;
+  font-size: 1.3rem;
+  margin: 0;
+}
+
+.letterContent {
+  color: #546E7A;
+  line-height: 1.8;
+}
+
+.letterContent p {
+  margin-bottom: 1rem;
+}
+
+.closing {
+  font-style: italic;
+  color: #F48FB1;
+  margin-top: 1.5rem !important;
+}
+
+.letterFooter {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 2px dashed #F8BBD0;
+}
+
 /* Responsive */
-@media (max-width: 600px) {
+@media (max-width: 768px) {
+  .bubbleMenu {
+    right: 1rem;
+  }
+
+  .bubbleIcon {
+    width: 45px;
+    height: 45px;
+  }
+
+  .bubbleLabel {
+    display: none;
+  }
+
   .modelWrapper {
-    height: 55vh;
-    min-height: 300px;
+    height: 60vh;
   }
 
   .titleOverlay h1 {
     font-size: 1rem;
-    padding: 0.5rem 0.9rem;
   }
 
-  .floatingMenuBtn {
-    width: 50px;
-    height: 50px;
-    bottom: 1.5rem;
-    right: 1.5rem;
+  .letterCard {
+    padding: 1.5rem;
   }
 
-  .floatingMenu {
-    bottom: 5rem;
-    right: 1.5rem;
+  .kittyImg {
+    width: 55px;
   }
 
-  .menuItem {
-    padding: 0.5rem 0.8rem;
-  }
-
-  .menuIcon {
-    width: 35px;
-    height: 35px;
-  }
-
-  .menuItem span {
-    font-size: 0.85rem;
+  .letterTitle h2 {
+    font-size: 1.1rem;
   }
 }
