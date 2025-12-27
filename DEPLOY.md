@@ -127,23 +127,55 @@ pnpm dev
 
 服务默认运行在 3000 端口。
 
-## 7. 使用 Docker 部署应用 (Docker Deployment)
+## 7. 使用 Docker Compose 部署 (推荐)
 
-如果你希望将整个应用（包括前端）也跑在 Docker 里：
+这是最完整的部署方式，会同时启动数据库和网站服务。
 
-1.  构建镜像：
-    ```bash
-    docker build -t kitty-love-site .
+### 步骤 1: 启动服务
+
+```bash
+docker-compose up -d --build
+```
+这会构建镜像并在后台启动数据库 (port: 25432) 和网站 (port: 3000)。
+
+### 步骤 2: 初始化数据库 (必须执行)
+
+Docker 启动后数据库是空的。由于生产环境镜像极度精简（不含 Prisma CLI），你需要**在本地机器**上运行迁移命令，连接到 Docker 暴露出的 `25432` 端口。
+
+1.  确保你的 `.env` 文件指向 Docker 暴露的端口（默认配置已预设）：
+    ```env
+    # 注意端口是 25432，用户名密码与 docker-compose.yml 保持一致
+    DATABASE_URL="postgresql://ricky:lyh1226@localhost:25432/kitty_love_db?schema=public"
     ```
 
-2.  运行容器：
+2.  运行迁移：
     ```bash
-    docker run -p 3000:3000 -e DATABASE_URL="postgresql://..." kitty-love-site
+    npx prisma db push
     ```
 
-注意：确保 Docker 容器内的网络能访问到你的 PostgreSQL 数据库。
+### 步骤 3: 创建管理员
 
-## 8. 访问后台 (Access Admin Panel)
+同样，在本地运行脚本创建管理员：
+
+```bash
+npx ts-node scripts/create-admin.ts admin admin123
+```
+
+### 步骤 4: 访问
+
+现在访问 `http://localhost:3000` 即可。
+
+---
+
+## 8. 常见问题
+
+### Q: 为什么不能在这个 Docker 容器里运行 migrate？
+A: 为了安全和体积，我们的 Docker 镜像使用 `standalone` 模式，移除了所有开发工具（包括 Prisma CLI）。所以需要在外部（宿主机）执行数据库操作。
+
+### Q: 数据库连接失败？
+A: 检查 `.env` 里的 `DATABASE_URL` 端口是否为 `25432`（这是 docker-compose 暴露给宿主机的端口），而不是 `5432`（这是容器内部端口，仅供 webapp 使用）。
+
+## 9. 访问后台 (Access Admin Panel)
 
 访问 `/admin` 路径，使用刚才创建的管理员账号登录。
 首次设置建议先去 `/verify` 页面测试一下安全问答功能（如果开启了的话）。

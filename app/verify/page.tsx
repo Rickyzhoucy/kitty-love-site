@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Heart, Lock, Send, AlertCircle } from 'lucide-react';
@@ -12,7 +12,7 @@ interface Question {
     hint?: string;
 }
 
-export default function VerifyPage() {
+function VerifyContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const redirectPath = searchParams.get('redirect') || '/';
@@ -180,5 +180,13 @@ export default function VerifyPage() {
                 </div>
             </motion.div>
         </div>
+    );
+}
+
+export default function VerifyPage() {
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <VerifyContent />
+        </Suspense>
     );
 }
