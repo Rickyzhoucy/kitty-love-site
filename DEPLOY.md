@@ -185,3 +185,35 @@ A: 检查 `.env` 里的 `DATABASE_URL` 端口是否为 `25432`（这是 docker-c
 *   **查看数据库**: `npx prisma studio` (打开 Web 界面管理数据)
 *   **同步 Schema**: `npx prisma db push`
 *   **生成 Client**: `npx prisma generate`
+
+## 10. (可选) 配置腾讯云对象存储 (COS)
+
+如果你不想把图片存在服务器本地（避免占用空间或数据丢失风险），可以配置腾讯云 COS。
+
+### 1. 准备工作
+*   在腾讯云控制台开通 COS 服务。
+*   创建一个公有读私有写的 Bucket。
+*   获取 `SecretId` 和 `SecretKey` (访问管理 -> API密钥管理)。
+*   获取 Bucket 名称 (如 `my-bucket-1250000000`) 和 Region (如 `ap-guangzhou`)。
+
+### 2. 配置环境变量
+在 `.env` 文件中添加以下配置：
+
+```env
+# 存储类型：local (默认) 或 cos
+STORAGE_TYPE=cos
+
+# COS 配置 (仅当 STORAGE_TYPE=cos 时需要)
+COS_SECRET_ID="你的SecretId"
+COS_SECRET_KEY="你的SecretKey"
+COS_BUCKET="你的Bucket名称"
+COS_REGION="你的Region"
+```
+
+### 3. 应用配置
+修改完 `.env` 后，重启服务：
+```bash
+docker-compose up -d --force-recreate
+```
+
+现在上传的图片将自动存储到腾讯云 COS，并返回 CDN 加速链接。Local 模式下的 `public/uploads` 目录将不再使用。
