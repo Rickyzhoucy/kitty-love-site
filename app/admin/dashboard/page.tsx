@@ -45,10 +45,10 @@ export default function DashboardOverview() {
     };
 
     const cards = [
-        { title: '留言总数', count: counts.messages, icon: MessageCircle, color: '#FFCDD2' },
-        { title: '备忘录', count: counts.memos, icon: StickyNote, color: '#B2EBF2' },
-        { title: '照片', count: counts.photos, icon: ImageIcon, color: '#F0F4C3' },
-        { title: '里程碑', count: counts.milestones, icon: Star, color: '#E1BEE7' },
+        { title: '留言总数', count: counts.messages, icon: MessageCircle, color: '#FFCDD2', href: '/admin/messages' },
+        { title: '备忘录', count: counts.memos, icon: StickyNote, color: '#B2EBF2', href: '/admin/memos' },
+        { title: '照片', count: counts.photos, icon: ImageIcon, color: '#F0F4C3', href: '/admin/photos' },
+        { title: '里程碑', count: counts.milestones, icon: Star, color: '#E1BEE7', href: '/admin/milestones' },
     ];
 
     return (
@@ -66,13 +66,13 @@ export default function DashboardOverview() {
 
             <div className={styles.grid}>
                 {cards.map((card, idx) => (
-                    <div key={idx} className={styles.card} style={{ borderBottom: `4px solid ${card.color}` }}>
+                    <Link href={card.href} key={idx} className={styles.card} style={{ borderBottom: `4px solid ${card.color}`, textDecoration: 'none' }}>
                         <div className={styles.header}>
                             <h3>{card.title}</h3>
                             <card.icon color={card.color} size={24} />
                         </div>
                         <div className={styles.count}>{card.count}</div>
-                    </div>
+                    </Link>
                 ))}
             </div>
 
@@ -82,15 +82,29 @@ export default function DashboardOverview() {
                     <Link href="/admin/questions" className={styles.actionCard}>
                         <Lock size={24} color="#F48FB1" />
                         <div>
-                            <h3>安全问题管理</h3>
-                            <p>添加或删除验证问题</p>
+                            <h3>安全问题</h3>
+                            <p>管理验证问题</p>
                         </div>
                     </Link>
                     <Link href="/admin/manage" className={styles.actionCard}>
                         <Lock size={24} color="#42A5F5" />
                         <div>
-                            <h3>管理员账号</h3>
-                            <p>审核注册、修改密码</p>
+                            <h3>账号管理</h3>
+                            <p>修改密码等</p>
+                        </div>
+                    </Link>
+                    <Link href="/admin/config" className={styles.actionCard}>
+                        <Star size={24} color="#FFB74D" />
+                        <div>
+                            <h3>网站配置</h3>
+                            <p>首页、模型、信件</p>
+                        </div>
+                    </Link>
+                    <Link href="/admin/timers" className={styles.actionCard}>
+                        <StickyNote size={24} color="#4DD0E1" />
+                        <div>
+                            <h3>计时器</h3>
+                            <p>自定义倒计时</p>
                         </div>
                     </Link>
                 </div>

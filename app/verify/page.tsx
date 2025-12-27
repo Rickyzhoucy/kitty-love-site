@@ -9,6 +9,7 @@ import styles from './page.module.css';
 interface Question {
     id: string;
     question: string;
+    hint?: string;
 }
 
 export default function VerifyPage() {
@@ -125,6 +126,9 @@ export default function VerifyPage() {
                         <div className={styles.questionBox}>
                             <span className={styles.questionLabel}>问题</span>
                             <p className={styles.questionText}>{question.question}</p>
+                            {question.hint && (
+                                <p className={styles.hintText}>💡 提示: {question.hint}</p>
+                            )}
                         </div>
 
                         <div className={styles.inputGroup}>

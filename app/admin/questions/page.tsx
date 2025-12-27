@@ -9,6 +9,7 @@ import styles from './page.module.css';
 interface Question {
     id: string;
     question: string;
+    hint?: string;
     createdAt: string;
 }
 
@@ -17,8 +18,10 @@ export default function QuestionsManagement() {
     const [loading, setLoading] = useState(true);
     const [newQuestion, setNewQuestion] = useState('');
     const [newAnswer, setNewAnswer] = useState('');
+    const [newHint, setNewHint] = useState('');
     const [adding, setAdding] = useState(false);
     const [error, setError] = useState('');
+    const [deletingId, setDeletingId] = useState<string | null>(null);
 
     useEffect(() => {
         fetchQuestions();
@@ -53,7 +56,8 @@ export default function QuestionsManagement() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     question: newQuestion,
-                    answer: newAnswer
+                    answer: newAnswer,
+                    hint: newHint
                 })
             });
 
@@ -62,6 +66,7 @@ export default function QuestionsManagement() {
                 setQuestions([added, ...questions]);
                 setNewQuestion('');
                 setNewAnswer('');
+                setNewHint('');
             } else {
                 const data = await res.json();
                 setError(data.error || '添加失败');
@@ -73,19 +78,26 @@ export default function QuestionsManagement() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('确定要删除这个问题吗？')) return;
-
+    const confirmDelete = async (id: string) => {
+        console.log('Sending delete request for id:', id);
         try {
             const res = await fetch(`/api/admin/questions?id=${id}`, {
                 method: 'DELETE'
             });
+            console.log('Delete response status:', res.status);
 
             if (res.ok) {
+                console.log('Delete successful');
                 setQuestions(questions.filter(q => q.id !== id));
+                setDeletingId(null);
+            } else {
+                const errData = await res.json();
+                console.error('Delete failed:', errData);
+                alert('删除失败: ' + (errData.error || '未知错误'));
             }
         } catch (err) {
             console.error('Failed to delete', err);
+            alert('删除发生错误');
         }
     };
 
@@ -129,6 +141,16 @@ export default function QuestionsManagement() {
                         />
                         <small>答案不区分大小写</small>
                     </div>
+                    <div className={styles.inputGroup}>
+                        <label>提示（可选）</label>
+                        <input
+                            type="text"
+                            value={newHint}
+                            onChange={(e) => setNewHint(e.target.value)}
+                            placeholder="给爱人的小提示..."
+                            disabled={adding}
+                        />
+                    </div>
                     {error && <p className={styles.error}>{error}</p>}
                     <button type="submit" disabled={adding} className={styles.addBtn}>
                         {adding ? '添加中...' : '添加问题'}
@@ -157,14 +179,35 @@ export default function QuestionsManagement() {
                                 >
                                     <div className={styles.questionContent}>
                                         <p>{q.question}</p>
+                                        {q.hint && <p className={styles.hintText}>提示: {q.hint}</p>}
                                         <small>添加于 {new Date(q.createdAt).toLocaleDateString('zh-CN')}</small>
                                     </div>
-                                    <button
-                                        onClick={() => handleDelete(q.id)}
-                                        className={styles.deleteBtn}
-                                    >
-                                        <Trash2 size={18} />
-                                    </button>
+                                    <div className={styles.actions}>
+                                        {deletingId === q.id ? (
+                                            <div className={styles.confirmDelete}>
+                                                <span>确定删除?</span>
+                                                <button
+                                                    onClick={() => confirmDelete(q.id)}
+                                                    className={styles.confirmBtn}
+                                                >
+                                                    确定
+                                                </button>
+                                                <button
+                                                    onClick={() => setDeletingId(null)}
+                                                    className={styles.cancelBtn}
+                                                >
+                                                    取消
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                onClick={() => setDeletingId(q.id)}
+                                                className={styles.deleteBtn}
+                                            >
+                                                <Trash2 size={18} />
+                                            </button>
+                                        )}
+                                    </div>
                                 </motion.div>
                             ))}
                         </AnimatePresence>

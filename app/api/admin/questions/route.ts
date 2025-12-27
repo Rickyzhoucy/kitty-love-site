@@ -11,6 +11,7 @@ export async function GET() {
             select: {
                 id: true,
                 question: true,
+                hint: true,
                 createdAt: true
             },
             orderBy: { createdAt: 'desc' }
@@ -30,7 +31,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { question, answer } = body;
+        const { question, answer, hint } = body;
 
         if (!question || !answer) {
             return NextResponse.json(
@@ -48,11 +49,13 @@ export async function POST(request: NextRequest) {
         const newQuestion = await prisma.securityQuestion.create({
             data: {
                 question: question.trim(),
-                answer: hashedAnswer
+                answer: hashedAnswer,
+                hint: hint?.trim() || null
             },
             select: {
                 id: true,
                 question: true,
+                hint: true,
                 createdAt: true
             }
         });

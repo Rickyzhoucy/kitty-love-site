@@ -22,8 +22,16 @@ const ADMIN_PROTECTED_PATHS = [
     '/admin/dashboard',
     '/admin/questions',
     '/admin/manage',
+    '/admin/messages',
+    '/admin/memos',
+    '/admin/photos',
+    '/admin/milestones',
+    '/admin/config',
+    '/admin/timers',
     '/api/admin/questions',
     '/api/admin/manage',
+    '/api/admin/config',
+    '/api/admin/timers',
     '/api/admin/logout',
 ];
 
@@ -148,17 +156,31 @@ export function middleware(request: NextRequest) {
     // 3. 普通用户路径 - 这里只处理非管理员且非公开的路径
     // 如果没有通过上面所有的检查，说明这是普通页面，需要进行问答验证
     const userSession = verifyUserSession(request);
-    if (!userSession.valid) {
-        const verifyUrl = new URL('/verify', request.url);
-        verifyUrl.searchParams.set('redirect', pathname);
-        const response = NextResponse.redirect(verifyUrl);
-        if (userSession.expired) {
-            response.cookies.delete('auth_session');
-        }
-        return response;
+
+    // 如果用户验证有效，则放行
+    if (userSession.valid) {
+        return NextResponse.next();
     }
 
-    return NextResponse.next();
+    // 用户验证无效，但如果是管理员，也允许访问普通数据接口（如 /api/messages）
+    const adminSession = verifyAdminSession(request);
+    if (adminSession.valid) {
+        return NextResponse.next();
+    }
+
+    // 验证失败处理
+    // 如果是 API 请求，返回 JSON 而不是重定向 HTML
+    if (pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: '需要验证身份' }, { status: 401 });
+    }
+
+    const verifyUrl = new URL('/verify', request.url);
+    verifyUrl.searchParams.set('redirect', pathname);
+    const response = NextResponse.redirect(verifyUrl);
+    if (userSession.expired) {
+        response.cookies.delete('auth_session');
+    }
+    return response;
 }
 
 export const config = {

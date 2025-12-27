@@ -206,3 +206,16 @@
     color: #BDBDBD;
     font-size: 0.85rem;
 }
+
+.hintText {
+    margin-top: 8px;
+    font-size: 0.9rem;
+    color: #F48FB1 !important;
+    background: rgba(244, 143, 177, 0.1);
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px dashed #F48FB1;
+    text-align: left;
+    width: 100%;
+    margin-bottom: 5px;
+}

@@ -19,6 +19,7 @@ export async function GET() {
             select: {
                 id: true,
                 question: true,
+                hint: true
                 // 注意：不返回答案！
             }
         });

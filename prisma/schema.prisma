@@ -52,6 +52,7 @@ model SecurityQuestion {
   id        String   @id @default(cuid())
   question  String   // 问题文本
   answer    String   // bcrypt 加密的答案
+  hint      String?  // 答案提示（可选）
   createdAt DateTime @default(now())
 }
 
@@ -63,4 +64,32 @@ model AuthAttempt {
   createdAt DateTime @default(now())
 
   @@index([ip, createdAt])
+}
+
+// 站点全局配置 (Key-Value 存储)
+model SiteConfig {
+  key       String   @id
+  value     String   // JSON string or plain text
+  updatedAt DateTime @updatedAt
+}
+
+// 自定义计时器
+model EventTimer {
+  id          String   @id @default(cuid())
+  title       String
+  date        String   // ISO date string
+  type        String   // "countdown" (倒计时) or "countup" (正计时)
+  description String?
+  createdAt   DateTime @default(now())
+}
+
+// 全局配置历史记录
+model SiteConfigHistory {
+  id        String   @id @default(cuid())
+  key       String
+  value     String   // 记录当时的值
+  createdAt DateTime @default(now())
+  
+  // Optional: add author if we want to track who changed it
+  // adminId String? 
 }

@@ -180,3 +180,42 @@
     background: #E53935;
     color: white;
 }
+
+.actions {
+    display: flex;
+    align-items: center;
+}
+
+.confirmDelete {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #FFEBEE;
+    padding: 5px 10px;
+    border-radius: 8px;
+}
+
+.confirmDelete span {
+    font-size: 0.85rem;
+    color: #C62828;
+}
+
+.confirmBtn {
+    background: #E53935;
+    color: white;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.cancelBtn {
+    background: transparent;
+    color: #757575;
+    border: 1px solid #BDBDBD;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}

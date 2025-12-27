@@ -6,18 +6,25 @@ import { Heart } from 'lucide-react';
 import styles from './Countdown.module.css';
 
 interface CountdownProps {
-    startDate: string; // YYYY-MM-DD - 在一起的日期
+    startDate: string; // YYYY-MM-DD
     title: string;
+    type?: 'countup' | 'countdown';
 }
 
-export default function Countdown({ startDate, title }: CountdownProps) {
+export default function Countdown({ startDate, title, type = 'countup' }: CountdownProps) {
     const [timeElapsed, setTimeElapsed] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
 
     useEffect(() => {
         const calculateTimeElapsed = () => {
-            const start = new Date(startDate);
+            const date = new Date(startDate);
             const now = new Date();
-            const difference = now.getTime() - start.getTime();
+            let difference = 0;
+
+            if (type === 'countup') {
+                difference = now.getTime() - date.getTime();
+            } else {
+                difference = date.getTime() - now.getTime();
+            }
 
             if (difference > 0) {
                 setTimeElapsed({
@@ -27,6 +34,7 @@ export default function Countdown({ startDate, title }: CountdownProps) {
                     seconds: Math.floor((difference / 1000) % 60),
                 });
             } else {
+                // If countdown reached or countup invalid
                 setTimeElapsed({ days: 0, hours: 0, minutes: 0, seconds: 0 });
             }
         };
@@ -35,7 +43,7 @@ export default function Countdown({ startDate, title }: CountdownProps) {
         const timer = setInterval(calculateTimeElapsed, 1000);
 
         return () => clearInterval(timer);
-    }, [startDate]);
+    }, [startDate, type]);
 
     if (!timeElapsed) return null;
 

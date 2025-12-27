@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15.8
+    container_name: kitty_love
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kitty_love_db}
+      POSTGRES_USER: ${POSTGRES_USER:-ricky}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lyh1226}
+    ports:
+      - "25432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    restart: always
+    networks:
+      - backend
+
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kitty_love_webapp
+    environment:
+      # Database connection string used by Prisma
+      # Note: We use the service name 'postgres' as the host
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ricky}:${POSTGRES_PASSWORD:-lyh1226}@postgres:5432/${POSTGRES_DB:-kitty_love_db}?schema=public
+      # Admin Session Secret/Config (if any)
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    restart: always
+    depends_on:
+      - postgres
+    networks:
+      - backend
+
+volumes:
+  postgres_data:
+
+networks:
+  backend:
+    driver: bridge
