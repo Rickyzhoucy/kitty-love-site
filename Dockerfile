@@ -9,6 +9,11 @@ WORKDIR /app
 
 # Install dependencies
 COPY package.json package-lock.json* pnpm-lock.yaml* ./
+
+# CN Mirror Configuration
+ENV PRISMA_ENGINES_MIRROR=https://npmmirror.com/mirrors/prisma
+RUN npm config set registry https://mirrors.cloud.tencent.com/npm/
+
 RUN \
   if [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
   elif [ -f package-lock.json ]; then npm ci; \
