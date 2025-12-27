@@ -31,7 +31,7 @@ export async function uploadToCos(buffer: Buffer, filename: string, contentType:
             Key: key,
             Body: buffer,
             ContentType: contentType, // Important for browser to display images correctly
-        }, (err, data) => {
+        }, (err: any, data: any) => {
             if (err) {
                 console.error('COS Upload Error:', err);
                 return reject(err);
