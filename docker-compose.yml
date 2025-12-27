@@ -35,6 +35,8 @@ services:
       - postgres
     networks:
       - backend
+    volumes:
+      - ./public/uploads:/app/public/uploads
 
 volumes:
   postgres_data:
