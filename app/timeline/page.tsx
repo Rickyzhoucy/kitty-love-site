@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Star, Heart, Plus, Calendar } from 'lucide-react';
 import styles from './page.module.css';
+import KittyStickers from '../components/KittyStickers';
+import ParticleBackground from '../components/ParticleBackground';
 
 interface Milestone {
     id: string;
@@ -69,6 +71,10 @@ export default function Timeline() {
 
     return (
         <div className={styles.container}>
+            {/* 动态贴纸和粒子效果 */}
+            <KittyStickers count={6} />
+            <ParticleBackground particleCount={10} types={['star', 'heart', 'sparkle']} />
+
             <header className={styles.header}>
                 <img
                     src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"

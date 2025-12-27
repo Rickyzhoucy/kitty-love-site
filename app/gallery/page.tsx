@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Image as ImageIcon, Heart, Upload, Plus } from 'lucide-react';
 import styles from './page.module.css';
+import KittyStickers from '../components/KittyStickers';
+import ParticleBackground from '../components/ParticleBackground';
 
 interface Photo {
     id: string;
@@ -88,6 +90,10 @@ export default function Gallery() {
 
     return (
         <div className={styles.container}>
+            {/* 动态贴纸和粒子效果 */}
+            <KittyStickers count={6} />
+            <ParticleBackground particleCount={10} types={['heart', 'petal', 'sparkle']} />
+
             <header className={styles.header}>
                 <img
                     src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"

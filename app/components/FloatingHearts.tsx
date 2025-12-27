@@ -4,27 +4,29 @@ import { useEffect, useState } from 'react';
 import styles from './FloatingHearts.module.css';
 
 export default function FloatingHearts() {
-    const [hearts, setHearts] = useState<number[]>([]);
+    const [hearts, setHearts] = useState<Array<{ id: number; style: React.CSSProperties }>>([]);
 
     useEffect(() => {
-        // Generate static hearts on mount to avoid hydration mismatch
-        const initialHearts = Array.from({ length: 15 }, (_, i) => i);
+        const initialHearts = Array.from({ length: 15 }, (_, i) => ({
+            id: i,
+            style: {
+                left: `${Math.random() * 100}vw`,
+                animationDelay: `${Math.random() * 5}s`,
+                animationDuration: `${10 + Math.random() * 10}s`,
+                opacity: 0.3 + Math.random() * 0.5,
+                transform: `scale(${0.5 + Math.random() * 1})`
+            }
+        }));
         setHearts(initialHearts);
     }, []);
 
     return (
         <div className={styles.container}>
-            {hearts.map((i) => (
+            {hearts.map((heart) => (
                 <div
-                    key={i}
+                    key={heart.id}
                     className={styles.heart}
-                    style={{
-                        left: `${Math.random() * 100}vw`,
-                        animationDelay: `${Math.random() * 5}s`,
-                        animationDuration: `${10 + Math.random() * 10}s`,
-                        opacity: 0.3 + Math.random() * 0.5,
-                        transform: `scale(${0.5 + Math.random() * 1})`
-                    }}
+                    style={heart.style}
                 >
                     ❤️
                 </div>

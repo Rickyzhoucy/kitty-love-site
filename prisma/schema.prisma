@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -38,9 +38,29 @@ model Milestone {
   createdAt   DateTime @default(now())
 }
 
-// Simple Admin Auth
+// 管理员账号
 model Admin {
-  id       String @id @default(cuid())
-  username String @unique
-  password String // Will store a hashed PIN or password
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String   // bcrypt 加密的密码
+  status    String   @default("pending") // pending, approved, rejected
+  createdAt DateTime @default(now())
+}
+
+// 安全问题验证
+model SecurityQuestion {
+  id        String   @id @default(cuid())
+  question  String   // 问题文本
+  answer    String   // bcrypt 加密的答案
+  createdAt DateTime @default(now())
+}
+
+// 登录尝试记录（用于暴力破解防护）
+model AuthAttempt {
+  id        String   @id @default(cuid())
+  ip        String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
 }

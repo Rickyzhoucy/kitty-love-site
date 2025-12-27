@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Send, MessageCircle } from 'lucide-react';
 import styles from './page.module.css';
 import { format } from 'date-fns';
+import KittyStickers from '../components/KittyStickers';
+import ParticleBackground from '../components/ParticleBackground';
 
 interface Message {
     id: string;
@@ -64,6 +66,10 @@ export default function Guestbook() {
 
     return (
         <div className={styles.container}>
+            {/* 动态贴纸和粒子效果 */}
+            <KittyStickers count={6} />
+            <ParticleBackground particleCount={10} types={['heart', 'sparkle', 'petal']} />
+
             <header className={styles.header}>
                 <img
                     src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"

@@ -48,8 +48,8 @@ export default function KittyScene({ onKittyClick }: { onKittyClick: () => void 
             <directionalLight position={[-5, 5, -5]} intensity={0.5} color="#FFB6C1" />
             <pointLight position={[0, 3, 3]} intensity={0.5} color="#FFC0CB" />
 
-            {/* Environment for better reflections */}
-            <Environment preset="sunset" />
+            {/* 使用本地HDR环境贴图，避免从外部CDN加载 */}
+            <Environment files="/sunset.hdr" />
 
             {/* Model */}
             <Suspense fallback={<LoadingFallback />}>

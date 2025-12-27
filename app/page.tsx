@@ -8,6 +8,8 @@ import { Heart, MessageCircle, Camera, StickyNote, Star, X } from 'lucide-react'
 import styles from './page.module.css';
 import Link from 'next/link';
 import Countdown from './components/Countdown';
+import KittyStickers from './components/KittyStickers';
+import ParticleBackground from './components/ParticleBackground';
 
 // Dynamic import for 3D scene (client-side only)
 const KittyScene = dynamic(() => import('./components/KittyScene'), {
@@ -42,6 +44,10 @@ export default function Home() {
 
   return (
     <div className={styles.container}>
+      {/* 动态贴纸和粒子效果 */}
+      <KittyStickers count={8} />
+      <ParticleBackground particleCount={12} />
+
       {/* 3D Model Scene */}
       <div className={styles.modelWrapper}>
         <Suspense fallback={<div className={styles.loadingScene}>加载中...</div>}>

@@ -21,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={fredoka.className}>
         <FloatingHearts />
         <main style={{ paddingBottom: '100px', minHeight: '100vh', position: 'relative' }}>
