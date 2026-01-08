@@ -107,6 +107,7 @@ export default function FloatingPet() {
     // 显示对话气泡 (duration = 0 为永久)
     const showSpeech = useCallback((text: string, duration = 3000) => {
         setSpeech(text);
+        setMenuType('none'); // Show speech -> Close menu
         if (duration > 0) {
             setTimeout(() => setSpeech(prev => prev === text ? null : prev), duration);
         }
@@ -457,7 +458,13 @@ export default function FloatingPet() {
     const handlePetClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         if (!isDragging) {
-            setMenuType(prev => prev === 'none' ? 'main' : 'none');
+            setMenuType(prev => {
+                if (prev === 'none') {
+                    setSpeech(null); // Open menu -> Close speech
+                    return 'main';
+                }
+                return 'none';
+            });
         }
     };
 
@@ -529,7 +536,11 @@ export default function FloatingPet() {
         >
             {/* 聊天输入框 - 新设计 */}
             {isChatting && (
-                <div className={styles.chatPanel} {...onTouchClick(() => { })}>
+                <div
+                    className={styles.chatPanel}
+                    onClick={(e) => e.stopPropagation()}
+                    onTouchEnd={(e) => e.stopPropagation()}
+                >
                     <div className={styles.chatHeader}>
                         <span>与 {pet.name} 对话</span>
                         <div className={styles.closeBtn} {...onTouchClick(() => setIsChatting(false))}>✕</div>
@@ -822,7 +833,11 @@ export default function FloatingPet() {
 
             {/* 改名输入 */}
             {menuType === 'rename' && (
-                <div className={styles.statusPanel} {...onTouchClick(() => { })}>
+                <div
+                    className={styles.statusPanel}
+                    onClick={(e) => e.stopPropagation()}
+                    onTouchEnd={(e) => e.stopPropagation()}
+                >
                     <h3>给宠物起个名字 <span {...onTouchClick(() => setMenuType('main'))}>✕</span></h3>
                     <input
                         type="text"
