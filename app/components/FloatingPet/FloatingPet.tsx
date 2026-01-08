@@ -349,13 +349,20 @@ export default function FloatingPet() {
     if (loading || !pet) {
         return (
             <div className={styles.floatingPetContainer} style={{ right: 20, bottom: 120 }}>
-                <div className={styles.petLoading} style={{
-                    width: 150,
-                    height: 150,
-                    background: 'rgba(255,255,255,0.1)',
-                    borderRadius: '50%',
-                    backdropFilter: 'blur(4px)'
-                }}>
+                <div
+                    className={styles.petLoading}
+                    style={{
+                        width: 150,
+                        height: 150,
+                        background: 'linear-gradient(135deg, rgba(255,182,193,0.8), rgba(255,105,180,0.6))',
+                        borderRadius: '50%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '48px',
+                        boxShadow: '0 4px 15px rgba(255,105,180,0.3)'
+                    }}
+                >
                     🐾
                 </div>
             </div>
