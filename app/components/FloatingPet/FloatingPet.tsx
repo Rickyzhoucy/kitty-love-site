@@ -9,10 +9,15 @@ import { PET_CONFIG } from './petConfig';
 import { petEvents } from '@/lib/petEvents';
 import type { Live2DPetHandle, Live2DMotion } from './Live2DPet';
 
-// 动态导入 Live2D 组件避免 SSR 问题
+// 动态导入 Live2D 组件避免 SSR 问题，但优化加载体验
 const Live2DPet = dynamic(() => import('./Live2DPet'), {
     ssr: false,
-    loading: () => <div className={styles.petLoading}>🐾</div>
+    loading: () => (
+        <div className={styles.petLoading} style={{ width: 180, height: 180 }}>
+            {/* 这里的 Loading 可以做得更好看一点 */}
+            🐾
+        </div>
+    )
 });
 
 type MenuType = 'none' | 'main' | 'status' | 'color' | 'accessory' | 'rename' | 'actions';
@@ -340,8 +345,21 @@ export default function FloatingPet() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    // 初始加载状态
     if (loading || !pet) {
-        return null;
+        return (
+            <div className={styles.floatingPetContainer} style={{ right: 20, bottom: 120 }}>
+                <div className={styles.petLoading} style={{
+                    width: 150,
+                    height: 150,
+                    background: 'rgba(255,255,255,0.1)',
+                    borderRadius: '50%',
+                    backdropFilter: 'blur(4px)'
+                }}>
+                    🐾
+                </div>
+            </div>
+        );
     }
 
     const mood = PET_CONFIG.getMood(pet.hunger, pet.happiness);
