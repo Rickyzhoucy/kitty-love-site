@@ -12,9 +12,19 @@ interface CountdownProps {
 }
 
 export default function Countdown({ startDate, title, type = 'countup' }: CountdownProps) {
-    const [timeElapsed, setTimeElapsed] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
+    // Initialize with zeros to prevent hydration mismatch
+    const [timeElapsed, setTimeElapsed] = useState<{ days: number; hours: number; minutes: number; seconds: number }>({
+        days: 0, hours: 0, minutes: 0, seconds: 0
+    });
+    const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
+        setMounted(true);
+    }, []);
+
+    useEffect(() => {
+        if (!mounted) return;
+
         const calculateTimeElapsed = () => {
             const date = new Date(startDate);
             const now = new Date();
@@ -43,9 +53,9 @@ export default function Countdown({ startDate, title, type = 'countup' }: Countd
         const timer = setInterval(calculateTimeElapsed, 1000);
 
         return () => clearInterval(timer);
-    }, [startDate, type]);
+    }, [startDate, type, mounted]);
 
-    if (!timeElapsed) return null;
+    // Don't return null - always show the component with zeros initially
 
     return (
         <motion.div
