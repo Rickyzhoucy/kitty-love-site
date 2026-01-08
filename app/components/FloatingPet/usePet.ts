@@ -24,6 +24,11 @@ export function usePet(): UsePetReturn {
     const fetchPet = useCallback(async () => {
         try {
             const res = await fetch('/api/pet');
+            if (res.status === 401) {
+                // 如果 API 返回 401，说明 Session 失效，跳转验证
+                window.location.href = '/verify?redirect=/';
+                return;
+            }
             if (!res.ok) throw new Error('Failed to fetch pet');
             const data = await res.json();
             setPet(data);

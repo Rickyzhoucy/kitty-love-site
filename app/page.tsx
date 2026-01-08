@@ -37,8 +37,16 @@ export default function Home() {
 
   useEffect(() => {
     fetch('/api/admin/config')
-      .then(res => res.json())
-      .then(data => setConfig(data))
+      .then(res => {
+        if (res.status === 401) {
+          window.location.href = '/verify?redirect=/';
+          return null;
+        }
+        return res.json();
+      })
+      .then(data => {
+        if (data) setConfig(data);
+      })
       .catch(e => console.error("Failed to fetch config", e));
   }, []);
 

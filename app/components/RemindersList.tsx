@@ -25,6 +25,10 @@ export default function RemindersList() {
     const fetchReminders = async () => {
         try {
             const res = await fetch('/api/reminders');
+            if (res.status === 401) {
+                window.location.href = '/verify?redirect=/';
+                return;
+            }
             if (res.ok) {
                 const data = await res.json();
                 setReminders(data);
