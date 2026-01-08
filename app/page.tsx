@@ -39,7 +39,10 @@ export default function Home() {
     fetch('/api/admin/config')
       .then(res => {
         if (res.status === 401) {
-          window.location.href = '/verify?redirect=/';
+          // Don't redirect if already on verify page
+          if (!window.location.pathname.startsWith('/verify')) {
+            window.location.href = '/verify?redirect=/';
+          }
           return null;
         }
         return res.json();
