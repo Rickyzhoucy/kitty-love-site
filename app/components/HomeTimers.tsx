@@ -25,9 +25,18 @@ export default function HomeTimers() {
 
     useEffect(() => {
         fetch('/api/timers')
-            .then(res => res.json())
+            .then(res => {
+                if (res.status === 401) {
+                    // Don't redirect if already on verify page
+                    if (!window.location.pathname.startsWith('/verify')) {
+                        window.location.href = '/verify?redirect=/';
+                    }
+                    return null;
+                }
+                return res.json();
+            })
             .then(data => {
-                if (Array.isArray(data)) setTimers(data);
+                if (data && Array.isArray(data)) setTimers(data);
             })
             .catch(err => console.error("Failed to fetch timers", err));
     }, []);
@@ -66,7 +75,7 @@ export default function HomeTimers() {
                             key={t.id}
                             initial={{ opacity: 0, x: -50 }}
                             animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 1 + idx * 0.2 }}
+                            transition={{ delay: 0.3 + idx * 0.15 }}
                             style={{ marginBottom: '10px' }}
                         >
                             <Countdown startDate={t.date} title={t.title} type={t.type} />
@@ -78,7 +87,7 @@ export default function HomeTimers() {
                 <motion.button
                     initial={{ opacity: 0, scale: 0 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 2 }}
+                    transition={{ delay: 0.5 }}
                     onClick={() => setShowAddTimer(true)}
                     style={{
                         background: 'rgba(255, 255, 255, 0.8)',
