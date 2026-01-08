@@ -296,6 +296,9 @@
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   min-width: 120px;
   animation: fadeInUp 0.2s ease;
+  touch-action: manipulation;
+  /* Enable touch events */
+  z-index: 100;
 }
 
 .menuItem {
@@ -308,6 +311,10 @@
   transition: background 0.2s ease;
   font-size: 14px;
   white-space: nowrap;
+  touch-action: manipulation;
+  /* Enable touch events */
+  -webkit-tap-highlight-color: rgba(255, 105, 180, 0.3);
+  /* Visible tap feedback */
 }
 
 .menuItem:hover {

@@ -326,7 +326,7 @@ export default function FloatingPet() {
         setMenuType('none');
     };
 
-    // 拖拽处理
+    // 拖拽处理 - Mouse Events
     const handleMouseDown = (e: React.MouseEvent) => {
         if ((e.target as HTMLElement).closest(`.${styles.menu}`) ||
             (e.target as HTMLElement).closest(`.${styles.statusPanel}`)) {
@@ -338,6 +338,25 @@ export default function FloatingPet() {
             dragOffset.current = {
                 x: e.clientX - rect.left,
                 y: e.clientY - rect.top,
+                w: rect.width,
+                h: rect.height
+            };
+        }
+    };
+
+    // 拖拽处理 - Touch Events
+    const handleTouchStart = (e: React.TouchEvent) => {
+        if ((e.target as HTMLElement).closest(`.${styles.menu}`) ||
+            (e.target as HTMLElement).closest(`.${styles.statusPanel}`)) {
+            return;
+        }
+        const touch = e.touches[0];
+        setIsDragging(true);
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+            dragOffset.current = {
+                x: touch.clientX - rect.left,
+                y: touch.clientY - rect.top,
                 w: rect.width,
                 h: rect.height
             };
@@ -357,18 +376,43 @@ export default function FloatingPet() {
         });
     };
 
+    const handleTouchMove = (e: TouchEvent) => {
+        if (!isDragging) return;
+        const touch = e.touches[0];
+        const { w, h, x: offsetX, y: offsetY } = dragOffset.current;
+        const newX = window.innerWidth - touch.clientX - (w - offsetX);
+        const newY = window.innerHeight - touch.clientY - (h - offsetY);
+
+        setPosition({
+            x: Math.max(0, Math.min(window.innerWidth - w, newX)),
+            y: Math.max(0, Math.min(window.innerHeight - h, newY))
+        });
+    };
+
     const handleMouseUp = () => {
+        setIsDragging(false);
+    };
+
+    const handleTouchEnd = () => {
         setIsDragging(false);
     };
 
     useEffect(() => {
         if (shouldSkip) return;
         if (isDragging) {
+            // Mouse events
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
+            // Touch events
+            window.addEventListener('touchmove', handleTouchMove, { passive: false });
+            window.addEventListener('touchend', handleTouchEnd);
+            window.addEventListener('touchcancel', handleTouchEnd);
             return () => {
                 window.removeEventListener('mousemove', handleMouseMove);
                 window.removeEventListener('mouseup', handleMouseUp);
+                window.removeEventListener('touchmove', handleTouchMove);
+                window.removeEventListener('touchend', handleTouchEnd);
+                window.removeEventListener('touchcancel', handleTouchEnd);
             };
         }
     }, [isDragging, shouldSkip]);
@@ -501,7 +545,15 @@ export default function FloatingPet() {
             <div
                 className={styles.petWrapper}
                 onMouseDown={handleMouseDown}
+                onTouchStart={handleTouchStart}
                 onClick={handlePetClick}
+                onTouchEnd={(e) => {
+                    // Prevent ghost click on mobile
+                    if (!isDragging) {
+                        e.preventDefault();
+                        handlePetClick(e as unknown as React.MouseEvent);
+                    }
+                }}
             >
                 <div
                     className={`${styles.petBody} ${styles.live2dBody} ${isAnimating && animationType ? styles[animationType] : ''}`}
