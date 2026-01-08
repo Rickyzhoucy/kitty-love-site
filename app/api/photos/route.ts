@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { addPetExperience } from '@/lib/petExperience';
 
 // Force dynamic rendering for API routes
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,9 @@ export async function POST(request: Request) {
                 date,
             },
         });
+
+        // 给宠物增加经验值 (上传照片 +25)
+        await addPetExperience(25, 'photo');
 
         return NextResponse.json(newPhoto, { status: 201 });
     } catch (error) {

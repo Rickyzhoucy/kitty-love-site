@@ -7,6 +7,7 @@ import styles from './page.module.css';
 import { cn } from '@/lib/utils';
 import KittyStickers from '../components/KittyStickers';
 import ParticleBackground from '../components/ParticleBackground';
+import { notifyPetExperience } from '@/lib/petEvents';
 
 interface Memo {
     id: string;
@@ -58,6 +59,8 @@ export default function MemoPage() {
             const newMemo = await res.json();
             setMemos([newMemo, ...memos]);
             setNewMemoText('');
+            // 通知宠物获得经验
+            notifyPetExperience(10, 'memo_add');
         }
     };
 
@@ -70,6 +73,10 @@ export default function MemoPage() {
 
         if (res.ok) {
             setMemos(memos.map(m => m.id === id ? { ...m, completed: !currentStatus } : m));
+            // 完成备忘录通知宠物
+            if (!currentStatus) {
+                notifyPetExperience(20, 'memo_complete');
+            }
         }
     };
 

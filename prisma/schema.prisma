@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -92,4 +93,35 @@ model SiteConfigHistory {
   
   // Optional: add author if we want to track who changed it
   // adminId String? 
+}
+
+// 悬浮窗宠物
+model Pet {
+  id            String   @id @default(cuid())
+  name          String   @default("小猫咪")
+  level         Int      @default(1)
+  experience    Int      @default(0)
+  happiness     Int      @default(100)   // 0-100 开心值
+  hunger        Int      @default(100)   // 0-100 饱腹度
+  evolution     Int      @default(1)     // 进化阶段 1-4
+  color         String   @default("pink") // 宠物颜色
+  mode          String   @default("live2d") // live2d, classic
+  accessories   Json     @default("[]")  // 已解锁配饰
+  equippedItems Json     @default("{}") // 当前装备
+  customSprite  String?                  // 自定义外观URL
+  lastFedAt     DateTime @default(now())
+  lastPlayAt    DateTime @default(now())
+  lastVisitAt   DateTime @default(now()) // 用于计算离线衰减
+  dailyActions  Json     @default("{}") // 每日动作次数记录
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// 首页通用提醒 (Reminder)
+model Reminder {
+  id        String   @id @default(cuid())
+  content   String
+  dueDate   String   // ISO date time string
+  completed Boolean  @default(false)
+  createdAt DateTime @default(now())
 }

@@ -6,6 +6,7 @@ import { Star, Heart, Plus, Calendar } from 'lucide-react';
 import styles from './page.module.css';
 import KittyStickers from '../components/KittyStickers';
 import ParticleBackground from '../components/ParticleBackground';
+import { notifyPetExperience } from '@/lib/petEvents';
 
 interface Milestone {
     id: string;
@@ -60,6 +61,8 @@ export default function Timeline() {
                 setMilestones(updated);
                 setNewMilestone({ title: '', date: '', description: '' });
                 setShowForm(false);
+                // 通知宠物获得经验
+                notifyPetExperience(30, 'milestone');
             }
         } catch (error) {
             console.error('Failed to add milestone', error);

@@ -4,12 +4,14 @@ import { useState, Suspense, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import confetti from 'canvas-confetti';
-import { Heart, MessageCircle, Camera, StickyNote, Star, X } from 'lucide-react';
+import { Heart, MessageCircle, Camera, StickyNote, Star } from 'lucide-react';
 import styles from './page.module.css';
 import Link from 'next/link';
-import Countdown from './components/Countdown';
 import KittyStickers from './components/KittyStickers';
 import ParticleBackground from './components/ParticleBackground';
+import RemindersList from './components/RemindersList';
+import HomeTimers from './components/HomeTimers';
+import LoveLetter from './components/LoveLetter';
 
 // Dynamic import for 3D scene (client-side only)
 const KittyScene = dynamic(() => import('./components/KittyScene'), {
@@ -29,33 +31,15 @@ const MENU_ITEMS = [
   { href: '/timeline', icon: Star, label: '我们的故事', color: '#BA68C8' },
 ];
 
-interface EventTimer {
-  id: string;
-  title: string;
-  date: string;
-  type: 'countup' | 'countdown';
-}
-
 export default function Home() {
   const [showLetter, setShowLetter] = useState(false);
   const [config, setConfig] = useState<Record<string, string>>({});
-  const [timers, setTimers] = useState<EventTimer[]>([]);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [configRes, timersRes] = await Promise.all([
-          fetch('/api/admin/config'),
-          fetch('/api/timers')
-        ]);
-
-        if (configRes.ok) setConfig(await configRes.json());
-        if (timersRes.ok) setTimers(await timersRes.json());
-      } catch (e) {
-        console.error("Failed to fetch data", e);
-      }
-    };
-    fetchData();
+    fetch('/api/admin/config')
+      .then(res => res.json())
+      .then(data => setConfig(data))
+      .catch(e => console.error("Failed to fetch config", e));
   }, []);
 
   const handleKittyClick = () => {
@@ -105,22 +89,8 @@ export default function Home() {
         💌 点击 Kitty 有惊喜
       </motion.div>
 
-      {/* Custom Timers List - Left Top */}
-      <div className={styles.timersList} style={{ position: 'fixed', top: '20px', left: '20px', zIndex: 10 }}>
-        <AnimatePresence>
-          {timers.map((t, idx) => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: -50 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 1 + idx * 0.2 }}
-              style={{ marginBottom: '10px' }}
-            >
-              <Countdown startDate={t.date} title={t.title} type={t.type} />
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+      {/* Custom Timers List (Refactored) */}
+      <HomeTimers />
 
       {/* Floating Bubble Menu - Right Side */}
       <div className={styles.bubbleMenu}>
@@ -160,76 +130,18 @@ export default function Home() {
         >⭐</motion.span>
       </div>
 
-      {/* Love Letter Modal */}
-      <AnimatePresence>
-        {showLetter && (
-          <motion.div
-            className={styles.letterOverlay}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setShowLetter(false)}
-          >
-            <motion.div
-              className={styles.letterCard}
-              initial={{ scale: 0.5, y: 100, rotateX: 30 }}
-              animate={{ scale: 1, y: 0, rotateX: 0 }}
-              exit={{ scale: 0.5, y: 100 }}
-              transition={{ type: "spring", damping: 20 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button className={styles.closeBtn} onClick={() => setShowLetter(false)}>
-                <X size={22} />
-              </button>
+      {/* Love Letter Modal (Refactored) */}
+      <LoveLetter
+        isOpen={showLetter}
+        onClose={() => setShowLetter(false)}
+        config={config}
+      />
 
-              <div className={styles.letterHeader}>
-                <img
-                  src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"
-                  alt="Hello Kitty"
-                  className={styles.kittyImg}
-                />
-                <div className={styles.letterTitle}>
-                  <Heart fill="#F48FB1" color="#F48FB1" size={20} />
-                  <h2>{config.letter_title || '致我最爱的人'}</h2>
-                  <Heart fill="#F48FB1" color="#F48FB1" size={20} />
-                </div>
-              </div>
+      {/* Reminders List - Bottom Left */}
+      <div style={{ position: 'fixed', bottom: '100px', left: '20px', zIndex: 10 }}>
+        <RemindersList />
+      </div>
 
-              <div className={styles.letterContent}>
-                {config.letter_content ? (
-                  <div dangerouslySetInnerHTML={{ __html: config.letter_content }} />
-                ) : (
-                  <>
-                    <p>亲爱的，</p>
-                    <p>
-                      自从你走进我的生活，一切都变得更加明亮和美好。
-                      这个小小的网页是专门为你准备的——一个保存我们回忆、发送小纸条，
-                      并提醒我有多么爱你的地方。
-                    </p>
-                    <p>
-                      如果你是 Hello Kitty，那我就是永远守护你的 Daniel。
-                      你是我的星辰，也是我的闪光。
-                      希望你会喜欢这个小惊喜！
-                    </p>
-                    <p className={styles.closing}>
-                      永远爱你的，<br />
-                      ❤️ 爱你的老公！
-                    </p>
-                  </>
-                )}
-              </div>
-
-              <div className={styles.letterFooter}>
-                <Countdown
-                  startDate={config.main_timer_date || "2025-11-30"}
-                  title="我们在一起已经"
-                  type="countup"
-                />
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

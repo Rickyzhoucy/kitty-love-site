@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { Settings, Save, Upload, ArrowLeft, RefreshCw, Calendar, FileText, Box } from 'lucide-react';
+import { Settings, Save, Upload, ArrowLeft, RefreshCw, Calendar, FileText, Box, Server } from 'lucide-react';
 import Link from 'next/link';
 import styles from '../questions/page.module.css';
 
@@ -10,6 +10,7 @@ interface ConfigState {
     letter_content: string;
     main_timer_date: string;
     home_model_url: string;
+    mcp_config: string;
 }
 
 // 1. Move Card component outside to prevent re-rendering and focus loss
@@ -59,7 +60,128 @@ const DEFAULT_CONFIG = {
     letter_title: '致我最爱的人',
     letter_content: '<p>亲爱的...</p>',
     main_timer_date: '2025-11-30',
-    home_model_url: ''
+    home_model_url: '',
+    mcp_config: '{\n  "servers": []\n}'
+};
+
+// 宠物设置卡片
+const PetConfigCard = () => {
+    const [petMode, setPetMode] = useState<'live2d' | 'classic'>('live2d');
+    const [customSprite, setCustomSprite] = useState<string | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        fetch('/api/pet').then(res => res.json()).then(data => {
+            if (data && !data.error) {
+                setPetMode(data.mode || 'live2d');
+                setCustomSprite(data.customSprite);
+            }
+            setLoading(false);
+        });
+    }, []);
+
+    const handleSave = async () => {
+        setSaving(true);
+        try {
+            await fetch('/api/pet', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'updateMode', mode: petMode, customSprite })
+            });
+            alert('宠物设置已保存');
+        } catch {
+            alert('保存失败');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const res = await fetch('/api/upload', { method: 'POST', body: formData });
+            if (res.ok) {
+                const data = await res.json();
+                setCustomSprite(data.url);
+            }
+        } catch {
+            alert('上传失败');
+        }
+    };
+
+    if (loading) return <div>Loading...</div>;
+
+    return (
+        <div style={{
+            background: 'white', padding: '20px', borderRadius: '15px',
+            marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+            border: '1px solid #F0F0F0'
+        }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ background: '#FFF3E0', padding: '8px', borderRadius: '8px' }}>
+                        <Box size={20} color="#FFB74D" />
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#333' }}>悬浮宠物设置</h3>
+                </div>
+                <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    style={{
+                        background: '#4DD0E1', border: 'none', color: 'white',
+                        padding: '6px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem'
+                    }}
+                >
+                    {saving ? '...' : '保存'}
+                </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '15px' }}>
+                <label>
+                    <input
+                        type="radio"
+                        name="petMode"
+                        checked={petMode === 'live2d'}
+                        onChange={() => setPetMode('live2d')}
+                    /> Live2D 模式 (动态)
+                </label>
+                <label>
+                    <input
+                        type="radio"
+                        name="petMode"
+                        checked={petMode === 'classic'}
+                        onChange={() => setPetMode('classic')}
+                    /> 传统模式 (自定义图片)
+                </label>
+            </div>
+
+            {petMode === 'classic' && (
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    {customSprite ? (
+                        <img src={customSprite} alt="Custom" style={{ width: 50, height: 50, borderRadius: '50%', objectFit: 'cover' }} />
+                    ) : (
+                        <span style={{ fontSize: '2rem' }}>😺</span>
+                    )}
+                    <label style={{
+                        background: '#4DD0E1', color: 'white', padding: '6px 12px',
+                        borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem'
+                    }}>
+                        上传图片
+                        <input type="file" hidden accept="image/*" onChange={handleUpload} />
+                    </label>
+                    {customSprite && (
+                        <button onClick={() => setCustomSprite(null)} style={{ border: '1px solid red', background: 'transparent', color: 'red', borderRadius: '6px', padding: '6px 12px', cursor: 'pointer' }}>
+                            清除图片
+                        </button>
+                    )}
+                </div>
+            )}
+        </div>
+    );
 };
 
 export default function SiteConfigPage() {
@@ -98,7 +220,8 @@ export default function SiteConfigPage() {
                     letter_title: data.letter_title || DEFAULT_CONFIG.letter_title,
                     letter_content: data.letter_content || '',
                     main_timer_date: data.main_timer_date || '2025-11-30',
-                    home_model_url: data.home_model_url || ''
+                    home_model_url: data.home_model_url || '',
+                    mcp_config: data.mcp_config || DEFAULT_CONFIG.mcp_config
                 });
             }
         } catch (err) {
@@ -117,7 +240,7 @@ export default function SiteConfigPage() {
         }
     };
 
-    const handleSave = async (section: 'anniversary' | 'letter' | 'model') => {
+    const handleSave = async (section: 'anniversary' | 'letter' | 'model' | 'mcp') => {
         setSaving(section);
         const dataToSave: Partial<ConfigState> = {};
 
@@ -128,6 +251,8 @@ export default function SiteConfigPage() {
             dataToSave.letter_content = config.letter_content;
         } else if (section === 'model') {
             dataToSave.home_model_url = config.home_model_url;
+        } else if (section === 'mcp') {
+            dataToSave.mcp_config = config.mcp_config;
         }
 
         try {
@@ -379,6 +504,36 @@ export default function SiteConfigPage() {
                             </div>
                         </div>
                     </Card>
+
+                    {/* MCP Configuration Module */}
+                    <Card
+                        title="MCP 协议配置 (Model Context Protocol)"
+                        icon={Server}
+                        saving={saving === 'mcp'}
+                        onSave={() => handleSave('mcp')}
+                        onReset={() => handleReset(['mcp_config'])}
+                    >
+                        <div className={styles.inputGroup}>
+                            <label>MCP Server Config (JSON)</label>
+                            <textarea
+                                style={{
+                                    width: '100%', minHeight: '150px', padding: '10px',
+                                    border: '2px solid #E0E0E0', borderRadius: '10px',
+                                    fontSize: '0.9rem', outline: 'none', fontFamily: 'monospace',
+                                    backgroundColor: '#f8f9fa'
+                                }}
+                                value={config.mcp_config || ''}
+                                onChange={(e) => setConfig({ ...config, mcp_config: e.target.value })}
+                                placeholder='{ "servers": [] }'
+                            />
+                            <div style={{ marginTop: '8px', fontSize: '0.8rem', color: '#666' }}>
+                                配置用于连接外部 MCP 服务器的 JSON 参数。修改后需重启服务生效。
+                            </div>
+                        </div>
+                    </Card>
+
+                    {/* Floating Pet Settings */}
+                    <PetConfigCard />
 
                 </div>
             ) : (

@@ -1,0 +1,218 @@
+.container {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    border-radius: 16px;
+    padding: 15px;
+    width: 260px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    color: #444;
+}
+
+.header h3 {
+    margin: 0;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.addBtn {
+    background: #E1BEE7;
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: white;
+    transition: transform 0.2s;
+}
+
+.addBtn:hover {
+    transform: scale(1.1);
+    background: #CE93D8;
+}
+
+.list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.empty {
+    font-size: 12px;
+    color: #999;
+    text-align: center;
+    margin-top: 10px;
+}
+
+.item {
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 8px;
+    padding: 8px 10px;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s;
+}
+
+.item:hover {
+    background: rgba(255, 255, 255, 0.95);
+}
+
+.content {
+    flex: 1;
+}
+
+.text {
+    font-size: 13px;
+    color: #333;
+    font-weight: 500;
+    margin-bottom: 2px;
+}
+
+.time {
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.item:hover .actions {
+    opacity: 1;
+}
+
+.checkBtn,
+.deleteBtn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.checkBtn {
+    color: #4CAF50;
+}
+
+.checkBtn:hover {
+    background: #E8F5E9;
+}
+
+.deleteBtn {
+    color: #ff5252;
+}
+
+.deleteBtn:hover {
+    background: #FFEBEE;
+}
+
+/* Modal */
+.addModalOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    display: flex;
+    /* Center it locally relative to Post-it? No, fixed. */
+    align-items: center;
+    justify-content: center;
+    /* Invisible backdrop primarily to catch clicks */
+}
+
+.addModal {
+    background: white;
+    padding: 20px;
+    border-radius: 16px;
+    width: 280px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    border: 1px solid #eee;
+    z-index: 1001;
+}
+
+.addModal h4 {
+    margin: 0 0 15px 0;
+    text-align: center;
+    color: #333;
+}
+
+.input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    outline: none;
+    font-size: 14px;
+}
+
+.dateInputWrapper {
+    display: flex;
+    align-items: center;
+    background: #f9f9f9;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid #eee;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+.dateInput {
+    border: none;
+    background: transparent;
+    outline: none;
+    font-size: 13px;
+    color: #555;
+    flex: 1;
+}
+
+.modalActions {
+    display: flex;
+    gap: 10px;
+}
+
+.cancelBtn,
+.saveBtn {
+    flex: 1;
+    padding: 8px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.cancelBtn {
+    background: #f5f5f5;
+    color: #666;
+}
+
+.saveBtn {
+    background: #E1BEE7;
+    color: white;
+    font-weight: bold;
+}

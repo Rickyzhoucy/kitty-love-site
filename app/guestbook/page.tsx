@@ -7,6 +7,7 @@ import styles from './page.module.css';
 import { format } from 'date-fns';
 import KittyStickers from '../components/KittyStickers';
 import ParticleBackground from '../components/ParticleBackground';
+import { notifyPetExperience } from '@/lib/petEvents';
 
 interface Message {
     id: string;
@@ -56,6 +57,8 @@ export default function Guestbook() {
                 const newMessage = await res.json();
                 setMessages([newMessage, ...messages]);
                 setContent('');
+                // 通知宠物获得经验
+                notifyPetExperience(15, 'message');
             }
         } catch (error) {
             console.error('Failed to post message', error);

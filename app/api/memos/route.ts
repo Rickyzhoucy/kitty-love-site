@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { addPetExperience } from '@/lib/petExperience';
 
 // Force dynamic rendering for API routes
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,9 @@ export async function POST(request: Request) {
             },
         });
 
+        // 给宠物增加经验值 (添加备忘录 +10)
+        await addPetExperience(10, 'memo_add');
+
         return NextResponse.json(newMemo, { status: 201 });
     } catch (error) {
         return NextResponse.json({ error: 'Failed to save memo' }, { status: 500 });
@@ -52,6 +56,11 @@ export async function PUT(request: Request) {
             where: { id },
             data: { completed },
         });
+
+        // 完成备忘录给宠物增加经验值 (+20)
+        if (completed) {
+            await addPetExperience(20, 'memo_complete');
+        }
 
         return NextResponse.json(updatedMemo);
     } catch (error) {
