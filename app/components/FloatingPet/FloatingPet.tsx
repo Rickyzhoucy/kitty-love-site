@@ -103,6 +103,42 @@ export default function FloatingPet() {
         }
     }, [position, shouldSkip]);
 
+    // 动态加载 Live2D 脚本 - 只在使用 Live2D 模式时加载
+    const [scriptsLoaded, setScriptsLoaded] = useState(false);
+    useEffect(() => {
+        if (shouldSkip || !pet || pet.mode !== 'live2d') return;
+        if (scriptsLoaded) return;
+
+        const loadScript = (src: string): Promise<void> => {
+            return new Promise((resolve, reject) => {
+                // Check if already loaded
+                if (document.querySelector(`script[src="${src}"]`)) {
+                    resolve();
+                    return;
+                }
+                const script = document.createElement('script');
+                script.src = src;
+                script.async = true;
+                script.onload = () => resolve();
+                script.onerror = () => reject(new Error(`Failed to load ${src}`));
+                document.head.appendChild(script);
+            });
+        };
+
+        const loadAllScripts = async () => {
+            try {
+                await loadScript('/live2dcubismcore.min.js');
+                await loadScript('/pixi.min.js');
+                await loadScript('/pixi-live2d-display.min.js');
+                setScriptsLoaded(true);
+            } catch (err) {
+                console.error('Failed to load Live2D scripts:', err);
+            }
+        };
+
+        loadAllScripts();
+    }, [shouldSkip, pet?.mode, scriptsLoaded]);
+
     // NOTE: Do NOT return null here - it would break hooks order
     // The conditional rendering is handled at the final return statement
 

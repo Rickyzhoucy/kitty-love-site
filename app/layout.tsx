@@ -17,11 +17,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Live2D Cubism 4 Core SDK (本地) */}
-        <script src="/live2dcubismcore.min.js" defer />
-        {/* PixiJS v7 & Live2D Display (本地) */}
-        <script src="/pixi.min.js" defer />
-        <script src="/pixi-live2d-display.min.js" defer />
+        {/* Live2D scripts are now loaded dynamically in FloatingPet when needed */}
       </head>
       <body>
         <FloatingHearts />
