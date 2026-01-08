@@ -59,9 +59,6 @@ export default function FloatingPet() {
     const containerRef = useRef<HTMLDivElement>(null);
     const live2dRef = useRef<Live2DPetHandle>(null);
 
-    // Return null if should skip (after all hooks are called)
-    if (shouldSkip) return null;
-
     const handleLive2DLoad = useCallback(() => setLive2dLoaded(true), []);
     const handleLive2DError = useCallback((e: Error) => console.error('Live2D error:', e), []);
 
@@ -75,6 +72,7 @@ export default function FloatingPet() {
 
     // 监听宠物事件
     useEffect(() => {
+        if (shouldSkip) return;
         const unsubscribe = petEvents.subscribe((type, data) => {
             if (type === 'experience_gained' && data.message) {
                 showSpeech(data.message);
@@ -84,24 +82,29 @@ export default function FloatingPet() {
             }
         });
         return unsubscribe;
-    }, [showSpeech, refetch]);
+    }, [showSpeech, refetch, shouldSkip]);
 
     // 加载保存的位置
     useEffect(() => {
+        if (shouldSkip) return;
         const saved = localStorage.getItem('petPosition');
         if (saved) {
             try {
                 setPosition(JSON.parse(saved));
             } catch { }
         }
-    }, []);
+    }, [shouldSkip]);
 
     // 保存位置
     useEffect(() => {
+        if (shouldSkip) return;
         if (position.x !== 0 || position.y !== 0) {
             localStorage.setItem('petPosition', JSON.stringify(position));
         }
-    }, [position]);
+    }, [position, shouldSkip]);
+
+    // Return null if should skip (after ALL hooks are called)
+    if (shouldSkip) return null;
 
     // 播放动画
     const playAnimation = (type: 'levelUp' | 'evolving') => {
@@ -210,6 +213,7 @@ export default function FloatingPet() {
 
     // 主动触发逻辑
     useEffect(() => {
+        if (shouldSkip) return;
         // 页面加载时的问候
         if (pet && !isSending) {
             // 延迟一点触发，避免和加载冲突
@@ -219,10 +223,11 @@ export default function FloatingPet() {
             }, 2000);
             return () => clearTimeout(timer);
         }
-    }, [pet?.id]); // 依赖 pet.id 避免重复
+    }, [pet?.id, shouldSkip]); // 依赖 pet.id 避免重复
 
     // 监听事件触发对话
     useEffect(() => {
+        if (shouldSkip) return;
         const unsubscribe = petEvents.subscribe((type, data) => {
             if (type === 'experience_gained') {
                 // 原有的消息显示
@@ -244,7 +249,7 @@ export default function FloatingPet() {
             }
         });
         return unsubscribe;
-    }, [showSpeech, refetch]);
+    }, [showSpeech, refetch, shouldSkip]);
 
     // 处理颜色更换
     const handleColorChange = async (colorId: string) => {
@@ -315,6 +320,7 @@ export default function FloatingPet() {
     };
 
     useEffect(() => {
+        if (shouldSkip) return;
         if (isDragging) {
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
@@ -323,7 +329,7 @@ export default function FloatingPet() {
                 window.removeEventListener('mouseup', handleMouseUp);
             };
         }
-    }, [isDragging]);
+    }, [isDragging, shouldSkip]);
 
     // 点击宠物切换菜单
     const handlePetClick = (e: React.MouseEvent) => {
@@ -335,6 +341,7 @@ export default function FloatingPet() {
 
     // 关闭菜单 - 使用 mousedown 避免与菜单项 click 冲突
     useEffect(() => {
+        if (shouldSkip) return;
         const handleClickOutside = (e: MouseEvent) => {
             // 延迟检查，让菜单项的点击先执行
             setTimeout(() => {
@@ -347,7 +354,7 @@ export default function FloatingPet() {
 
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+    }, [shouldSkip]);
 
     // 初始加载状态
     if (loading || !pet) {
