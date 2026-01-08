@@ -12,7 +12,7 @@ services:
     ports:
       - "25432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - /home/app/pgvolume:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d
     restart: always
     networks:
@@ -39,9 +39,6 @@ services:
       - backend
     volumes:
       - ./public/uploads:/app/public/uploads
-
-volumes:
-  postgres_data:
 
 networks:
   backend:
