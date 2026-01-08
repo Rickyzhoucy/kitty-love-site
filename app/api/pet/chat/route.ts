@@ -55,9 +55,21 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Message is required' }, { status: 400 });
         }
 
-        const apiKey = process.env.OPENAI_API_KEY;
-        const baseURL = process.env.OPENAI_BASE_URL;
-        const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+
+        // Fetch AI Config from DB
+        const configItems = await prisma.siteConfig.findMany({
+            where: {
+                key: { in: ['openai_api_key', 'openai_base_url', 'openai_model'] }
+            }
+        });
+        const configMap = configItems.reduce((acc, curr) => {
+            acc[curr.key] = curr.value;
+            return acc;
+        }, {} as Record<string, string>);
+
+        const apiKey = configMap['openai_api_key'];
+        const baseURL = configMap['openai_base_url'];
+        const model = configMap['openai_model'] || 'gpt-3.5-turbo';
 
         if (!apiKey) {
             return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });

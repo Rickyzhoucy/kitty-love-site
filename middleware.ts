@@ -66,33 +66,7 @@ function verifyUserSession(request: NextRequest): { valid: boolean; expired: boo
     }
 }
 
-// 验证管理员 Session
-function verifyAdminSession(request: NextRequest): { valid: boolean; expired: boolean; reason?: string } {
-    const adminCookie = request.cookies.get('admin_session');
-
-    if (!adminCookie?.value) {
-        return { valid: false, expired: false, reason: 'no_cookie' };
-    }
-
-    try {
-        // 使用 atob 兼容 Edge Runtime
-        const decoded = atob(adminCookie.value);
-        const sessionData = JSON.parse(decoded);
-
-        if (!sessionData.adminId) {
-            return { valid: false, expired: false, reason: 'no_admin_id' };
-        }
-
-        const expiryTime = sessionData.timestamp + (ADMIN_SESSION_HOURS * 60 * 60 * 1000);
-        if (Date.now() > expiryTime) {
-            return { valid: false, expired: true, reason: 'expired' };
-        }
-
-        return { valid: true, expired: false };
-    } catch (e: any) {
-        return { valid: false, expired: false, reason: `error:${e.message}` };
-    }
-}
+import { verifyAdminSession } from '@/lib/auth';
 
 // 精确匹配或前缀匹配
 function matchPath(pathname: string, patterns: string[]): boolean {
@@ -131,22 +105,30 @@ export function middleware(request: NextRequest) {
     if (isAdminProtected || isAdminPublic) {
         // 只有受保护的管理员路径才需要鉴权
         if (isAdminProtected) {
-            const adminSession = verifyAdminSession(request);
-            if (!adminSession.valid) {
-                // API 返回 401
-                if (pathname.startsWith('/api/')) {
-                    return NextResponse.json({ error: '需要管理员权限' }, { status: 401 });
+            // Special Exception: Allow GET /api/admin/config for public (it loads model URL/letter)
+            // But still requires User session? No, home page needs it even if just verified.
+            // Wait, middleware falls through to User check if we skip this.
+            // So if we skip admin check, it will verify user session.
+            if (pathname === '/api/admin/config' && request.method === 'GET') {
+                // Skip admin check, let it fall through to user check or pass
+                // We intentionally do nothing here to fall through
+
+            } else {
+                const adminSession = verifyAdminSession(request.cookies);
+                if (!adminSession.valid) {
+                    if (pathname.startsWith('/api/')) {
+                        return NextResponse.json({ error: '需要管理员权限' }, { status: 401 });
+                    }
+                    const adminLoginUrl = new URL('/admin', request.url);
+                    if (adminSession.reason) {
+                        adminLoginUrl.searchParams.set('debug_error', adminSession.reason);
+                    }
+                    const response = NextResponse.redirect(adminLoginUrl);
+                    if (adminSession.expired) {
+                        response.cookies.delete('admin_session');
+                    }
+                    return response;
                 }
-                // 页面重定向到管理员登录
-                const adminLoginUrl = new URL('/admin', request.url);
-                if (adminSession.reason) {
-                    adminLoginUrl.searchParams.set('debug_error', adminSession.reason);
-                }
-                const response = NextResponse.redirect(adminLoginUrl);
-                if (adminSession.expired) {
-                    response.cookies.delete('admin_session');
-                }
-                return response;
             }
         }
         // 是管理员公开路径 OR 管理员保护路径鉴权通过，直接放行
@@ -163,7 +145,7 @@ export function middleware(request: NextRequest) {
     }
 
     // 用户验证无效，但如果是管理员，也允许访问普通数据接口（如 /api/messages）
-    const adminSession = verifyAdminSession(request);
+    const adminSession = verifyAdminSession(request.cookies);
     if (adminSession.valid) {
         return NextResponse.next();
     }

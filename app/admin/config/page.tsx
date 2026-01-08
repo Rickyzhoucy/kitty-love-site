@@ -11,6 +11,9 @@ interface ConfigState {
     main_timer_date: string;
     home_model_url: string;
     mcp_config: string;
+    openai_api_key: string;
+    openai_base_url: string;
+    openai_model: string;
 }
 
 // 1. Move Card component outside to prevent re-rendering and focus loss
@@ -61,7 +64,10 @@ const DEFAULT_CONFIG = {
     letter_content: '<p>亲爱的...</p>',
     main_timer_date: '2025-11-30',
     home_model_url: '',
-    mcp_config: '{\n  "servers": []\n}'
+    mcp_config: '{\n  "servers": []\n}',
+    openai_api_key: '',
+    openai_base_url: 'https://api.openai.com/v1',
+    openai_model: 'gpt-3.5-turbo'
 };
 
 // 宠物设置卡片
@@ -221,7 +227,10 @@ export default function SiteConfigPage() {
                     letter_content: data.letter_content || '',
                     main_timer_date: data.main_timer_date || '2025-11-30',
                     home_model_url: data.home_model_url || '',
-                    mcp_config: data.mcp_config || DEFAULT_CONFIG.mcp_config
+                    mcp_config: data.mcp_config || DEFAULT_CONFIG.mcp_config,
+                    openai_api_key: data.openai_api_key || '',
+                    openai_base_url: data.openai_base_url || DEFAULT_CONFIG.openai_base_url,
+                    openai_model: data.openai_model || DEFAULT_CONFIG.openai_model
                 });
             }
         } catch (err) {
@@ -240,7 +249,7 @@ export default function SiteConfigPage() {
         }
     };
 
-    const handleSave = async (section: 'anniversary' | 'letter' | 'model' | 'mcp') => {
+    const handleSave = async (section: 'anniversary' | 'letter' | 'model' | 'mcp' | 'ai') => {
         setSaving(section);
         const dataToSave: Partial<ConfigState> = {};
 
@@ -253,6 +262,10 @@ export default function SiteConfigPage() {
             dataToSave.home_model_url = config.home_model_url;
         } else if (section === 'mcp') {
             dataToSave.mcp_config = config.mcp_config;
+        } else if (section === 'ai') {
+            dataToSave.openai_api_key = config.openai_api_key;
+            dataToSave.openai_base_url = config.openai_base_url;
+            dataToSave.openai_model = config.openai_model;
         }
 
         try {
@@ -529,6 +542,43 @@ export default function SiteConfigPage() {
                             <div style={{ marginTop: '8px', fontSize: '0.8rem', color: '#666' }}>
                                 配置用于连接外部 MCP 服务器的 JSON 参数。修改后需重启服务生效。
                             </div>
+                        </div>
+                    </Card>
+
+                    {/* AI Chat Configuration Module */}
+                    <Card
+                        title="AI 聊天配置"
+                        icon={Server}
+                        saving={saving === 'ai'}
+                        onSave={() => handleSave('ai')}
+                        onReset={() => handleReset(['openai_api_key', 'openai_base_url', 'openai_model'])}
+                    >
+                        <div className={styles.inputGroup}>
+                            <label>OpenAI API Key</label>
+                            <input
+                                type="password"
+                                value={config.openai_api_key || ''}
+                                onChange={(e) => setConfig({ ...config, openai_api_key: e.target.value })}
+                                placeholder="sk-..."
+                            />
+                        </div>
+                        <div className={styles.inputGroup}>
+                            <label>OpenAI Base URL</label>
+                            <input
+                                type="text"
+                                value={config.openai_base_url || ''}
+                                onChange={(e) => setConfig({ ...config, openai_base_url: e.target.value })}
+                                placeholder="https://api.openai.com/v1"
+                            />
+                        </div>
+                        <div className={styles.inputGroup}>
+                            <label>Model Name</label>
+                            <input
+                                type="text"
+                                value={config.openai_model || ''}
+                                onChange={(e) => setConfig({ ...config, openai_model: e.target.value })}
+                                placeholder="gpt-3.5-turbo"
+                            />
                         </div>
                     </Card>
 

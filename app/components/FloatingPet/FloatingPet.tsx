@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import styles from './FloatingPet.module.css';
 import { usePet } from './usePet';
@@ -30,6 +31,7 @@ const getAccessoryPosition = (id: string) => {
 };
 
 export default function FloatingPet() {
+    const pathname = usePathname();
     const { pet, loading, feed, play, rename, changeColor, equipItem, refetch } = usePet();
     const [menuType, setMenuType] = useState<MenuType>('none');
     const [speech, setSpeech] = useState<string | null>(null);
@@ -47,6 +49,9 @@ export default function FloatingPet() {
     const dragOffset = useRef({ x: 0, y: 0, w: 0, h: 0 }); // Added w, h
     const containerRef = useRef<HTMLDivElement>(null);
     const live2dRef = useRef<Live2DPetHandle>(null);
+
+    // Hide on admin pages
+    if (pathname?.startsWith('/admin')) return null;
 
     const handleLive2DLoad = useCallback(() => setLive2dLoaded(true), []);
     const handleLive2DError = useCallback((e: Error) => console.error('Live2D error:', e), []);
