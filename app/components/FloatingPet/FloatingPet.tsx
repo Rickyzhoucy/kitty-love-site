@@ -37,11 +37,17 @@ const getAccessoryPosition = (id: string) => {
 
 export default function FloatingPet() {
     const pathname = usePathname();
+    const [mounted, setMounted] = useState(false);
+
+    // Ensure hydration safety - set mounted after client render
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     // Hide on admin and verify pages (check BEFORE any other hooks)
     const shouldSkip = pathname?.startsWith('/admin') || pathname?.startsWith('/verify');
 
-    const { pet, loading, feed, play, rename, changeColor, equipItem, refetch } = usePet(shouldSkip);
+    const { pet, loading, feed, play, rename, changeColor, equipItem, refetch } = usePet(shouldSkip || !mounted);
     const [menuType, setMenuType] = useState<MenuType>('none');
     const [speech, setSpeech] = useState<string | null>(null);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -392,8 +398,8 @@ export default function FloatingPet() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [shouldSkip]);
 
-    // Return null if should skip - this is AFTER all hooks, so it's safe
-    if (shouldSkip) return null;
+    // Return null if should skip or not mounted - this is AFTER all hooks, so it's safe
+    if (shouldSkip || !mounted) return null;
 
     // 初始加载状态
     if (loading || !pet) {

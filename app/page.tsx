@@ -32,10 +32,17 @@ const MENU_ITEMS = [
 ];
 
 export default function Home() {
+  const [mounted, setMounted] = useState(false);
   const [showLetter, setShowLetter] = useState(false);
   const [config, setConfig] = useState<Record<string, string>>({});
 
+  // Ensure hydration safety
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     fetch('/api/admin/config')
       .then(res => {
         if (res.status === 401) {
@@ -51,7 +58,7 @@ export default function Home() {
         if (data) setConfig(data);
       })
       .catch(e => console.error("Failed to fetch config", e));
-  }, []);
+  }, [mounted]);
 
   const handleKittyClick = () => {
     confetti({
