@@ -25,8 +25,11 @@ export function usePet(): UsePetReturn {
         try {
             const res = await fetch('/api/pet');
             if (res.status === 401) {
-                // 如果 API 返回 401，说明 Session 失效，跳转验证
-                window.location.href = '/verify?redirect=/';
+                // 如果 API 返回 401，说明 Session 失效
+                // 但如果已经在验证页，不要循环跳转
+                if (!window.location.pathname.startsWith('/verify')) {
+                    window.location.href = '/verify?redirect=/';
+                }
                 return;
             }
             if (!res.ok) throw new Error('Failed to fetch pet');

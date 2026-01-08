@@ -55,8 +55,8 @@ export default function FloatingPet() {
     const containerRef = useRef<HTMLDivElement>(null);
     const live2dRef = useRef<Live2DPetHandle>(null);
 
-    // Hide on admin pages
-    if (pathname?.startsWith('/admin')) return null;
+    // Hide on admin and verify pages
+    if (pathname?.startsWith('/admin') || pathname?.startsWith('/verify')) return null;
 
     const handleLive2DLoad = useCallback(() => setLive2dLoaded(true), []);
     const handleLive2DError = useCallback((e: Error) => console.error('Live2D error:', e), []);
