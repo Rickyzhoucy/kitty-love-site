@@ -37,7 +37,11 @@ const getAccessoryPosition = (id: string) => {
 
 export default function FloatingPet() {
     const pathname = usePathname();
-    const { pet, loading, feed, play, rename, changeColor, equipItem, refetch } = usePet();
+
+    // Hide on admin and verify pages (check BEFORE any other hooks)
+    const shouldSkip = pathname?.startsWith('/admin') || pathname?.startsWith('/verify');
+
+    const { pet, loading, feed, play, rename, changeColor, equipItem, refetch } = usePet(shouldSkip);
     const [menuType, setMenuType] = useState<MenuType>('none');
     const [speech, setSpeech] = useState<string | null>(null);
     const [isAnimating, setIsAnimating] = useState(false);
@@ -55,8 +59,8 @@ export default function FloatingPet() {
     const containerRef = useRef<HTMLDivElement>(null);
     const live2dRef = useRef<Live2DPetHandle>(null);
 
-    // Hide on admin and verify pages
-    if (pathname?.startsWith('/admin') || pathname?.startsWith('/verify')) return null;
+    // Return null if should skip (after all hooks are called)
+    if (shouldSkip) return null;
 
     const handleLive2DLoad = useCallback(() => setLive2dLoaded(true), []);
     const handleLive2DError = useCallback((e: Error) => console.error('Live2D error:', e), []);

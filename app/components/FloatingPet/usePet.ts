@@ -16,12 +16,14 @@ interface UsePetReturn {
     refetch: () => Promise<void>;
 }
 
-export function usePet(): UsePetReturn {
+export function usePet(skip: boolean = false): UsePetReturn {
     const [pet, setPet] = useState<PetState | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(!skip); // Don't show loading if skipped
     const [error, setError] = useState<string | null>(null);
 
     const fetchPet = useCallback(async () => {
+        if (skip) return; // Skip fetch if on admin/verify pages
+
         try {
             const res = await fetch('/api/pet');
             if (res.status === 401) {
@@ -41,15 +43,17 @@ export function usePet(): UsePetReturn {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [skip]);
 
     useEffect(() => {
+        if (skip) return; // Don't fetch or set interval if skipped
+
         fetchPet();
 
         // 每分钟刷新一次状态
         const interval = setInterval(fetchPet, 60000);
         return () => clearInterval(interval);
-    }, [fetchPet]);
+    }, [fetchPet, skip]);
 
     const performAction = async (action: string, data?: Record<string, unknown>) => {
         try {
