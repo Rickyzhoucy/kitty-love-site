@@ -146,9 +146,11 @@ export default function RemindersList() {
                                         <button onClick={() => toggleComplete(r.id, r.completed)} className={styles.checkBtn}>
                                             <Check size={14} />
                                         </button>
-                                        <button onClick={() => deleteReminder(r.id)} className={styles.deleteBtn}>
-                                            <Trash2 size={14} />
-                                        </button>
+                                        {timeLeft.text === '已过期' && (
+                                            <button onClick={() => deleteReminder(r.id)} className={styles.deleteBtn}>
+                                                <Trash2 size={14} />
+                                            </button>
+                                        )}
                                     </div>
                                 </motion.div>
                             );

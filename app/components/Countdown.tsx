@@ -66,7 +66,7 @@ export default function Countdown({ startDate, title, type = 'countup', onDelete
                 <span style={isExpired ? { textDecoration: 'line-through', color: '#888' } : undefined}>
                     {title}
                 </span>
-                {onDelete && (
+                {onDelete && isExpired && (
                     <button
                         onClick={(e) => { e.stopPropagation(); onDelete(); }}
                         style={{
