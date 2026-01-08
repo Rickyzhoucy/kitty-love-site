@@ -56,10 +56,12 @@ export default function FloatingPet() {
     const handleLive2DLoad = useCallback(() => setLive2dLoaded(true), []);
     const handleLive2DError = useCallback((e: Error) => console.error('Live2D error:', e), []);
 
-    // 显示对话气泡
+    // 显示对话气泡 (duration = 0 为永久)
     const showSpeech = useCallback((text: string, duration = 3000) => {
         setSpeech(text);
-        setTimeout(() => setSpeech(null), duration);
+        if (duration > 0) {
+            setTimeout(() => setSpeech(prev => prev === text ? null : prev), duration);
+        }
     }, []);
 
     // 监听宠物事件
@@ -172,7 +174,8 @@ export default function FloatingPet() {
             if (res.ok) {
                 const data = await res.json();
                 if (data.reply) {
-                    showSpeech(data.reply, 6000);
+                    // Chat replies are now sticky until closed or replaced
+                    showSpeech(data.reply, 0);
                     // 仅保存用户对话历史，跳过系统触发的上下文（保持历史清晰）
                     if (!triggerContext) {
                         setChatHistory(prev => [
@@ -401,7 +404,16 @@ export default function FloatingPet() {
 
             {/* 对话气泡 */}
             {speech && (
-                <div className={styles.speechBubble}>{speech}</div>
+                <div className={styles.speechBubble}>
+                    {speech}
+                    <div
+                        className={styles.closeSpeech}
+                        onClick={(e) => { e.stopPropagation(); setSpeech(null); }}
+                        title="关闭"
+                    >
+                        ✕
+                    </div>
+                </div>
             )}
 
             {/* 宠物主体 */}
