@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import Navbar from './components/Navbar';
 import FloatingHearts from './components/FloatingHearts';
-import FloatingPet from './components/FloatingPet/FloatingPet';
+import FloatingPetWrapper from './components/FloatingPetWrapper';
 
 export const metadata: Metadata = {
   title: 'For My Love - Hello Kitty Edition',
@@ -25,7 +25,7 @@ export default function RootLayout({
           {children}
         </main>
         <Navbar />
-        <FloatingPet />
+        <FloatingPetWrapper />
       </body>
     </html>
   );

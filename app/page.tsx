@@ -9,11 +9,9 @@ import styles from './page.module.css';
 import Link from 'next/link';
 import KittyStickers from './components/KittyStickers';
 import ParticleBackground from './components/ParticleBackground';
-import RemindersList from './components/RemindersList';
-import HomeTimers from './components/HomeTimers';
 import LoveLetter from './components/LoveLetter';
 
-// Dynamic import for 3D scene (client-side only)
+// Dynamic imports with SSR disabled to prevent hydration mismatch
 const KittyScene = dynamic(() => import('./components/KittyScene'), {
   ssr: false,
   loading: () => (
@@ -24,6 +22,14 @@ const KittyScene = dynamic(() => import('./components/KittyScene'), {
   )
 });
 
+const HomeTimers = dynamic(() => import('./components/HomeTimers'), {
+  ssr: false
+});
+
+const RemindersList = dynamic(() => import('./components/RemindersList'), {
+  ssr: false
+});
+
 const MENU_ITEMS = [
   { href: '/guestbook', icon: MessageCircle, label: '留言板', color: '#F48FB1' },
   { href: '/memo', icon: StickyNote, label: '备忘录', color: '#4DD0E1' },
@@ -32,17 +38,10 @@ const MENU_ITEMS = [
 ];
 
 export default function Home() {
-  const [mounted, setMounted] = useState(false);
   const [showLetter, setShowLetter] = useState(false);
   const [config, setConfig] = useState<Record<string, string>>({});
 
-  // Ensure hydration safety
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (!mounted) return;
     fetch('/api/admin/config')
       .then(res => {
         if (res.status === 401) {
@@ -58,7 +57,7 @@ export default function Home() {
         if (data) setConfig(data);
       })
       .catch(e => console.error("Failed to fetch config", e));
-  }, [mounted]);
+  }, []);
 
   const handleKittyClick = () => {
     confetti({

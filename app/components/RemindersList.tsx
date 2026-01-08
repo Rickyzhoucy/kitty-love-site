@@ -13,21 +13,14 @@ interface Reminder {
 }
 
 export default function RemindersList() {
-    const [mounted, setMounted] = useState(false);
     const [reminders, setReminders] = useState<Reminder[]>([]);
     const [showAdd, setShowAdd] = useState(false);
     const [newReminder, setNewReminder] = useState({ content: '', dueDate: '' });
     const [loading, setLoading] = useState(false);
 
-    // Ensure hydration safety - only render after mount
     useEffect(() => {
-        setMounted(true);
-    }, []);
-
-    useEffect(() => {
-        if (!mounted) return;
         fetchReminders();
-    }, [mounted]);
+    }, []);
 
     const fetchReminders = async () => {
         try {
@@ -113,8 +106,6 @@ export default function RemindersList() {
 
     const activeReminders = reminders.filter(r => !r.completed);
 
-    // Return null on server and first client render to prevent hydration mismatch
-    if (!mounted) return null;
 
     return (
         <div className={styles.container}>

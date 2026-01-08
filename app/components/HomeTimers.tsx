@@ -18,19 +18,12 @@ interface EventTimer {
 }
 
 export default function HomeTimers() {
-    const [mounted, setMounted] = useState(false);
     const [timers, setTimers] = useState<EventTimer[]>([]);
     const [showAddTimer, setShowAddTimer] = useState(false);
     const [addingTimer, setAddingTimer] = useState(false);
     const [newTimer, setNewTimer] = useState({ title: '', date: '', type: 'countup' as 'countup' | 'countdown' });
 
-    // Ensure hydration safety - only render after mount
     useEffect(() => {
-        setMounted(true);
-    }, []);
-
-    useEffect(() => {
-        if (!mounted) return;
         fetch('/api/timers')
             .then(res => {
                 if (res.status === 401) {
@@ -46,7 +39,7 @@ export default function HomeTimers() {
                 if (data && Array.isArray(data)) setTimers(data);
             })
             .catch(err => console.error("Failed to fetch timers", err));
-    }, [mounted]);
+    }, []);
 
     const handleAddTimer = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -71,9 +64,6 @@ export default function HomeTimers() {
             setAddingTimer(false);
         }
     };
-
-    // Return null on server and first client render to prevent hydration mismatch
-    if (!mounted) return null;
 
     return (
         <>
