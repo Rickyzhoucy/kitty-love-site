@@ -60,7 +60,49 @@ export default function FloatingPet() {
     const live2dRef = useRef<Live2DPetHandle>(null);
 
     const handleLive2DLoad = useCallback(() => setLive2dLoaded(true), []);
+    // Live2D 错误处理
     const handleLive2DError = useCallback((e: Error) => console.error('Live2D error:', e), []);
+
+    // 统处理点击和触摸交互，防止移动端幽灵点击 (Ghost Click)
+    const handleInteraction = (e: React.MouseEvent | React.TouchEvent, action: () => void) => {
+        // 如果是触摸事件，阻止默认行为（防止触发后续的模拟点击）
+        // 如果是点击事件，正常执行
+        e.stopPropagation();
+
+        // 简单的防抖机制或事件类型检查
+        // 移动端会触发 touchstart -> touchend -> mousemove -> mousedown -> mouseup -> click
+        // 我们在 onTouchEnd 或 onClick 中调用此函数
+
+        // 如果是 TouchEvent，必须阻止默认行为以防止 click 触发
+        if ('touches' in e) {
+            // e.preventDefault(); // 注意：React 的 SyntheticEvent 中 preventDefault 可能无效，或者导致滚动失效
+            // 更好的方式是只绑定 onClick 并使用 CSS touch-action: manipulation
+            // 或者只处理 onClick，但在 TouchEnd 中阻止 Click
+        } else {
+            // Mouse Event
+            action();
+        }
+    };
+
+    // 更好的策略：
+    // 只使用 onClick，但在移动端确保 touch-action: manipulation
+    // 并且在关键交互元素上添加 onTouchEnd={(e) => { e.preventDefault(); action(); }} 
+    // e.preventDefault() on Touchend prevents the mouse events from firing!
+
+    const onTouchClick = (action: () => void) => {
+        return {
+            onClick: (e: React.MouseEvent) => {
+                e.stopPropagation();
+                // 仅当非触摸设备或点击事件未被触摸阻止时触发（其实有了 preventDefault 就不需要这个判断了）
+                action();
+            },
+            onTouchEnd: (e: React.TouchEvent) => {
+                e.preventDefault(); // 阻止模拟的鼠标事件
+                e.stopPropagation();
+                action();
+            }
+        };
+    };
 
     // 显示对话气泡 (duration = 0 为永久)
     const showSpeech = useCallback((text: string, duration = 3000) => {
@@ -487,17 +529,17 @@ export default function FloatingPet() {
         >
             {/* 聊天输入框 - 新设计 */}
             {isChatting && (
-                <div className={styles.chatPanel} onClick={e => e.stopPropagation()}>
+                <div className={styles.chatPanel} {...onTouchClick(() => { })}>
                     <div className={styles.chatHeader}>
                         <span>与 {pet.name} 对话</span>
-                        <div className={styles.closeBtn} onClick={() => setIsChatting(false)}>✕</div>
+                        <div className={styles.closeBtn} {...onTouchClick(() => setIsChatting(false))}>✕</div>
                     </div>
 
                     <div className={styles.presetChips}>
-                        <div className={styles.chip} onClick={() => sendChatMessage("帮我查一下待办事项")}>📝 查待办</div>
-                        <div className={styles.chip} onClick={() => sendChatMessage("查看你的状态")}>📊 查状态</div>
-                        <div className={styles.chip} onClick={() => sendChatMessage("讲个笑话吧")}>😄 讲笑话</div>
-                        <div className={styles.chip} onClick={() => sendChatMessage("夸夸我")}>🥰 夸夸我</div>
+                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("帮我查一下待办事项"))}>📝 查待办</div>
+                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("查看你的状态"))}>📊 查状态</div>
+                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("讲个笑话吧"))}>😄 讲笑话</div>
+                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("夸夸我"))}>🥰 夸夸我</div>
                     </div>
 
                     <div className={styles.inputGroup}>
@@ -512,7 +554,7 @@ export default function FloatingPet() {
                         />
                         <button
                             className={styles.sendBtn}
-                            onClick={() => sendChatMessage()}
+                            {...onTouchClick(() => sendChatMessage())}
                             disabled={isSending}
                         >
                             {isSending ? '...' : '➤'}
@@ -527,7 +569,7 @@ export default function FloatingPet() {
                     {speech}
                     <div
                         className={styles.closeSpeech}
-                        onClick={(e) => { e.stopPropagation(); setSpeech(null); }}
+                        {...onTouchClick(() => setSpeech(null))}
                         title="关闭"
                     >
                         ✕
@@ -646,7 +688,7 @@ export default function FloatingPet() {
             {/* 独立聊天按钮 */}
             {!isChatting && (
                 <div
-                    onClick={handleChat}
+                    {...onTouchClick(handleChat)}
                     style={{
                         position: 'absolute',
                         left: -40,
@@ -671,31 +713,30 @@ export default function FloatingPet() {
 
             {/* 主菜单 */}
             {menuType === 'main' && (
-                <div className={styles.menu} onClick={(e) => e.stopPropagation()}>
-                    <div className={styles.menuItem} onClick={handleFeed}>🍎 喂食</div>
-                    <div className={styles.menuItem} onClick={handlePlay}>🎮 玩耍</div>
-                    {/* Chat removed from here */}
-                    <div className={styles.menuItem} onClick={() => setMenuType('actions')}>⚡ 动作</div>
-                    <div className={styles.menuItem} onClick={() => setMenuType('status')}>📊 状态</div>
-                    <div className={styles.menuItem} onClick={() => setMenuType('color')}>🎨 换色</div>
-                    <div className={styles.menuItem} onClick={() => setMenuType('accessory')}>👑 配饰</div>
-                    <div className={styles.menuItem} onClick={() => setMenuType('rename')}>✏️ 改名</div>
+                <div className={styles.menu} {...onTouchClick(() => { })}>
+                    <div className={styles.menuItem} {...onTouchClick(handleFeed)}>🍎 喂食</div>
+                    <div className={styles.menuItem} {...onTouchClick(handlePlay)}>🎮 玩耍</div>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('actions'))}>⚡ 动作</div>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('status'))}>📊 状态</div>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('color'))}>🎨 换色</div>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('accessory'))}>👑 配饰</div>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('rename'))}>✏️ 改名</div>
                 </div>
             )}
 
             {/* 动作菜单 */}
             {menuType === 'actions' && (
                 <div className={styles.menu}>
-                    <div className={styles.menuItem} onClick={() => setMenuType('main')}>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('main'))}>
                         <span>🔙</span> 返回
                     </div>
-                    <div className={styles.menuItem} onClick={() => { live2dRef.current?.playMotion('Tap'); setMenuType('none'); }}>
+                    <div className={styles.menuItem} {...onTouchClick(() => { live2dRef.current?.playMotion('Tap'); setMenuType('none'); })}>
                         <span>👆</span> 点击
                     </div>
-                    <div className={styles.menuItem} onClick={() => { live2dRef.current?.playMotion('Shake'); setMenuType('none'); }}>
+                    <div className={styles.menuItem} {...onTouchClick(() => { live2dRef.current?.playMotion('Shake'); setMenuType('none'); })}>
                         <span>👋</span> 摇晃
                     </div>
-                    <div className={styles.menuItem} onClick={() => { live2dRef.current?.playMotion('Flick'); setMenuType('none'); }}>
+                    <div className={styles.menuItem} {...onTouchClick(() => { live2dRef.current?.playMotion('Flick'); setMenuType('none'); })}>
                         <span>✨</span> 抚摸
                     </div>
                 </div>
@@ -703,8 +744,8 @@ export default function FloatingPet() {
 
             {/* 状态面板 */}
             {menuType === 'status' && (
-                <div className={styles.statusPanel} onClick={(e) => e.stopPropagation()}>
-                    <h3>{pet.name} <span onClick={() => setMenuType('main')}>✕</span></h3>
+                <div className={styles.statusPanel} {...onTouchClick(() => { })}>
+                    <h3>{pet.name} <span {...onTouchClick(() => setMenuType('main'))}>✕</span></h3>
                     <div className={styles.statRow}>
                         <span className={styles.statLabel}>阶段</span>
                         <span className={styles.statValue}>{evolutionName}</span>
@@ -733,17 +774,17 @@ export default function FloatingPet() {
 
             {/* 颜色选择 */}
             {menuType === 'color' && (
-                <div className={styles.menu} onClick={(e) => e.stopPropagation()}>
-                    <div className={styles.menuItem} onClick={() => setMenuType('main')}>← 返回</div>
+                <div className={styles.menu} {...onTouchClick(() => { })}>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('main'))}>← 返回</div>
                     {/* 清除按钮 */}
-                    <div className={styles.menuItem} onClick={() => handleColorChange('none')}>
+                    <div className={styles.menuItem} {...onTouchClick(() => handleColorChange('none'))}>
                         🚫 清除/默认
                     </div>
                     {PET_CONFIG.colors.map(c => (
                         <div
                             key={c.id}
                             className={`${styles.menuItem} ${pet.level < c.unlockLevel ? styles.disabled : ''}`}
-                            onClick={() => pet.level >= c.unlockLevel && handleColorChange(c.id)}
+                            {...onTouchClick(() => pet.level >= c.unlockLevel && handleColorChange(c.id))}
                         >
                             <span style={{
                                 width: 16, height: 16, borderRadius: '50%',
@@ -757,10 +798,10 @@ export default function FloatingPet() {
 
             {/* 配饰选择 */}
             {menuType === 'accessory' && (
-                <div className={styles.menu} onClick={(e) => e.stopPropagation()}>
-                    <div className={styles.menuItem} onClick={() => setMenuType('main')}>← 返回</div>
+                <div className={styles.menu} {...onTouchClick(() => { })}>
+                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('main'))}>← 返回</div>
                     {/* 清除按钮 */}
-                    <div className={styles.menuItem} onClick={() => handleEquip('none')}>
+                    <div className={styles.menuItem} {...onTouchClick(() => handleEquip('none'))}>
                         🚫 摘下所有
                     </div>
                     {PET_CONFIG.accessories.map(a => {
@@ -770,7 +811,7 @@ export default function FloatingPet() {
                             <div
                                 key={a.id}
                                 className={`${styles.menuItem} ${!unlocked ? styles.disabled : ''}`}
-                                onClick={() => unlocked && handleEquip(a.id)}
+                                {...onTouchClick(() => unlocked && handleEquip(a.id))}
                             >
                                 {a.emoji} {a.name} {!unlocked && `(${PET_CONFIG.evolutionNames[a.evolution]}解锁)`}
                             </div>
@@ -781,8 +822,8 @@ export default function FloatingPet() {
 
             {/* 改名输入 */}
             {menuType === 'rename' && (
-                <div className={styles.statusPanel} onClick={(e) => e.stopPropagation()}>
-                    <h3>给宠物起个名字 <span onClick={() => setMenuType('main')}>✕</span></h3>
+                <div className={styles.statusPanel} {...onTouchClick(() => { })}>
+                    <h3>给宠物起个名字 <span {...onTouchClick(() => setMenuType('main'))}>✕</span></h3>
                     <input
                         type="text"
                         value={newName}
@@ -798,7 +839,7 @@ export default function FloatingPet() {
                         onKeyDown={(e) => e.key === 'Enter' && handleRename()}
                     />
                     <button
-                        onClick={handleRename}
+                        {...onTouchClick(handleRename)}
                         style={{
                             width: '100%',
                             padding: '8px',
