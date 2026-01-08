@@ -103,8 +103,8 @@ export default function FloatingPet() {
         }
     }, [position, shouldSkip]);
 
-    // Return null if should skip (after ALL hooks are called)
-    if (shouldSkip) return null;
+    // NOTE: Do NOT return null here - it would break hooks order
+    // The conditional rendering is handled at the final return statement
 
     // 播放动画
     const playAnimation = (type: 'levelUp' | 'evolving') => {
@@ -355,6 +355,9 @@ export default function FloatingPet() {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [shouldSkip]);
+
+    // Return null if should skip - this is AFTER all hooks, so it's safe
+    if (shouldSkip) return null;
 
     // 初始加载状态
     if (loading || !pet) {
