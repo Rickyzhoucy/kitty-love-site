@@ -90,9 +90,11 @@ export default function RemindersList() {
 
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
         const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
 
-        if (days > 0) return { text: `${days}天 ${hours}小时`, color: '#4CAF50' };
-        return { text: `${hours}小时`, color: '#FF9800' };
+        if (days > 0) return { text: `${days}天 ${hours}小时 ${minutes}分`, color: '#4CAF50' };
+        if (hours > 0) return { text: `${hours}小时 ${minutes}分`, color: '#FF9800' };
+        return { text: `${minutes}分`, color: '#FF5722' };
     };
 
     const activeReminders = reminders.filter(r => !r.completed);

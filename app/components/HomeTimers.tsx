@@ -131,7 +131,7 @@ export default function HomeTimers() {
                                     <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: '#666' }}>日期</label>
                                     <input
                                         required
-                                        type="date"
+                                        type="datetime-local"
                                         value={newTimer.date}
                                         onChange={e => setNewTimer({ ...newTimer, date: e.target.value })}
                                         style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', outline: 'none' }}
