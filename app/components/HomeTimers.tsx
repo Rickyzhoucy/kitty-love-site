@@ -65,6 +65,23 @@ export default function HomeTimers() {
         }
     };
 
+    const handleDeleteTimer = async (id: string) => {
+        if (!confirm('确认删除此计时器？')) return;
+
+        // Optimistic update
+        const previousTimers = [...timers];
+        setTimers(timers.filter(t => t.id !== id));
+
+        try {
+            const res = await fetch(`/api/timers?id=${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Delete failed');
+        } catch (err) {
+            console.error(err);
+            alert('删除失败，请重试');
+            setTimers(previousTimers); // Revert
+        }
+    };
+
     return (
         <>
             {/* Timers List - Top Left */}
@@ -78,7 +95,12 @@ export default function HomeTimers() {
                             transition={{ delay: 0.3 + idx * 0.15 }}
                             style={{ marginBottom: '10px' }}
                         >
-                            <Countdown startDate={t.date} title={t.title} type={t.type} />
+                            <Countdown
+                                startDate={t.date}
+                                title={t.title}
+                                type={t.type}
+                                onDelete={() => handleDeleteTimer(t.id)}
+                            />
                         </motion.div>
                     ))}
                 </AnimatePresence>

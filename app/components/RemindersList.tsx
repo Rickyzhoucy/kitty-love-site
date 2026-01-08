@@ -132,7 +132,12 @@ export default function RemindersList() {
                                     className={styles.item}
                                 >
                                     <div className={styles.content}>
-                                        <div className={styles.text}>{r.content}</div>
+                                        <div
+                                            className={styles.text}
+                                            style={timeLeft.text === '已过期' ? { textDecoration: 'line-through', color: '#888' } : undefined}
+                                        >
+                                            {r.content}
+                                        </div>
                                         <div className={styles.time} style={{ color: timeLeft.color }}>
                                             <Clock size={12} /> {timeLeft.text}
                                         </div>
