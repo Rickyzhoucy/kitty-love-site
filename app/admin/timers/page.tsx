@@ -89,8 +89,8 @@ export default function TimersManagement() {
                         <input required type="text" value={newTimer.title} onChange={e => setNewTimer({ ...newTimer, title: e.target.value })} placeholder="例如：她的生日 / 考研倒计时" />
                     </div>
                     <div className={styles.inputGroup}>
-                        <label>日期</label>
-                        <input required type="date" value={newTimer.date} onChange={e => setNewTimer({ ...newTimer, date: e.target.value })} />
+                        <label>日期时间</label>
+                        <input required type="datetime-local" value={newTimer.date} onChange={e => setNewTimer({ ...newTimer, date: e.target.value })} />
                     </div>
                     <div className={styles.inputGroup}>
                         <label>类型</label>
