@@ -195,6 +195,8 @@ export default function RemindersList() {
                                         onChange={e => setNewReminder({ ...newReminder, dueDate: e.target.value })}
                                         className={styles.dateInput}
                                         required
+                                        onClick={(e) => e.stopPropagation()}
+                                        onTouchEnd={(e) => e.stopPropagation()}
                                     />
                                 </div>
                                 <div className={styles.modalActions}>
