@@ -158,7 +158,7 @@ export default function MemoPage() {
                                 exit={{ opacity: 0, scale: 0.9 }}
                                 className={styles.emptyState}
                             >
-                                <activeCatData.icon size={48} color={`${activeCatData?.color}40`} />
+                                {activeCatData && <activeCatData.icon size={48} color={`${activeCatData.color}40`} />}
                                 <p>还没有计划哦，快来添加一个吧！</p>
                             </motion.div>
                         ) : (
