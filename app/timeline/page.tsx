@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Star, Heart, Plus, Calendar } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Star, Heart, Plus, Calendar, Sparkles, X, ChevronRight } from 'lucide-react';
 import styles from './page.module.css';
-import KittyStickers from '../components/KittyStickers';
 import ParticleBackground from '../components/ParticleBackground';
 import { notifyPetExperience } from '@/lib/petEvents';
 
@@ -18,7 +17,7 @@ interface Milestone {
 export default function Timeline() {
     const [milestones, setMilestones] = useState<Milestone[]>([]);
     const [loading, setLoading] = useState(true);
-    const [showForm, setShowForm] = useState(false);
+    const [showModal, setShowModal] = useState(false);
     const [newMilestone, setNewMilestone] = useState({ title: '', date: '', description: '' });
     const [submitting, setSubmitting] = useState(false);
 
@@ -56,12 +55,10 @@ export default function Timeline() {
 
             if (res.ok) {
                 const added = await res.json();
-                // Insert in sorted order
                 const updated = [...milestones, added].sort((a, b) => a.date.localeCompare(b.date));
                 setMilestones(updated);
                 setNewMilestone({ title: '', date: '', description: '' });
-                setShowForm(false);
-                // 通知宠物获得经验
+                setShowModal(false);
                 notifyPetExperience(30, 'milestone');
             }
         } catch (error) {
@@ -74,104 +71,148 @@ export default function Timeline() {
 
     return (
         <div className={styles.container}>
-            {/* 动态贴纸和粒子效果 */}
-            <KittyStickers count={6} />
             <ParticleBackground particleCount={10} types={['star', 'heart', 'sparkle']} />
 
             <header className={styles.header}>
-                <img
-                    src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"
-                    alt="Hello Kitty"
-                    className={styles.kittyIcon}
-                />
-                <div>
-                    <h1><Star className={styles.icon} /> 我们的故事</h1>
-                    <p>一路走来，风景是你。</p>
+                <div className={styles.headerContent}>
+                    <div className={styles.titleWrapper}>
+                        <Star className={styles.headerIcon} size={36} />
+                        <h1>我们的故事</h1>
+                        <Sparkles className={styles.headerSparkle} size={24} />
+                    </div>
+                    <p>把时间酿成酒，把沿途的风景写成诗。</p>
                 </div>
+                
+                <button
+                    onClick={() => setShowModal(true)}
+                    className={styles.addRecordBtn}
+                >
+                    <Plus size={20} /> 记录新的一页
+                </button>
             </header>
 
-            {/* Add Button */}
-            <div className={styles.addSection}>
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    className={styles.addBtn}
-                >
-                    <Plus size={18} /> {showForm ? '取消' : '记录新的故事'}
-                </button>
-            </div>
-
-            {/* Add Form */}
-            {showForm && (
-                <motion.form
-                    onSubmit={handleSubmit}
-                    className={styles.addForm}
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                >
-                    <div className={styles.formGroup}>
-                        <label><Calendar size={14} /> 日期 *</label>
-                        <input
-                            type="date"
-                            value={newMilestone.date}
-                            onChange={(e) => setNewMilestone({ ...newMilestone, date: e.target.value })}
-                            required
-                        />
-                    </div>
-                    <div className={styles.formGroup}>
-                        <label>标题 *</label>
-                        <input
-                            type="text"
-                            value={newMilestone.title}
-                            onChange={(e) => setNewMilestone({ ...newMilestone, title: e.target.value })}
-                            placeholder="例如：我们在一起啦"
-                            required
-                        />
-                    </div>
-                    <div className={styles.formGroup} style={{ flexBasis: '100%' }}>
-                        <label>描述</label>
-                        <input
-                            type="text"
-                            value={newMilestone.description}
-                            onChange={(e) => setNewMilestone({ ...newMilestone, description: e.target.value })}
-                            placeholder="那天阳光很好..."
-                        />
-                    </div>
-                    <button type="submit" disabled={submitting} className={styles.submitBtn}>
-                        {submitting ? '保存中...' : <><Heart size={16} /> 添加到故事</>}
-                    </button>
-                </motion.form>
-            )}
-
             {loading ? (
-                <p className={styles.loading}>加载故事中...</p>
+                <div className={styles.loadingState}>
+                    <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 1.5 }}>
+                        <Heart size={40} color="#ff758c" />
+                    </motion.div>
+                    <p>正在穿梭时光机...</p>
+                </div>
             ) : (
-                <div className={styles.timeline}>
-                    <div className={styles.line}></div>
+                <div className={styles.timelineWrapper}>
+                    <div className={styles.glowingSpine}>
+                        <motion.div 
+                            className={styles.spineProgress}
+                            initial={{ height: 0 }}
+                            animate={{ height: "100%" }}
+                            transition={{ duration: 2, ease: "easeOut" }}
+                        />
+                    </div>
+
                     {milestones.length === 0 ? (
-                        <p className={styles.empty}>还没有记录故事，点击上方按钮添加吧...</p>
+                        <div className={styles.emptyState}>
+                            <p>时间的长河还是一片空白，快来写下第一笔吧！</p>
+                        </div>
                     ) : (
-                        milestones.map((item, index) => (
-                            <motion.div
-                                key={item.id}
-                                initial={{ opacity: 0, x: index % 2 === 0 ? -50 : 50 }}
-                                whileInView={{ opacity: 1, x: 0 }}
-                                viewport={{ once: true }}
-                                transition={{ duration: 0.5, delay: index * 0.2 }}
-                                className={`${styles.item} ${index % 2 === 0 ? styles.left : styles.right}`}
-                            >
-                                <div className={styles.content}>
-                                    <div className={styles.date}>{item.date}</div>
-                                    <h3>{item.title}</h3>
-                                    <p>{item.description}</p>
-                                    <div className={styles.marker}>
-                                        <Heart size={16} fill="white" color="white" />
+                        <div className={styles.timelineList}>
+                            {milestones.map((item, index) => (
+                                <motion.div
+                                    key={item.id}
+                                    initial={{ opacity: 0, x: index % 2 === 0 ? -50 : 50, y: 20 }}
+                                    whileInView={{ opacity: 1, x: 0, y: 0 }}
+                                    viewport={{ once: true, margin: "-100px" }}
+                                    transition={{ duration: 0.6, delay: index * 0.1, type: 'spring', bounce: 0.4 }}
+                                    className={`${styles.timelineNode} ${index % 2 === 0 ? styles.nodeLeft : styles.nodeRight}`}
+                                >
+                                    <div className={styles.nodeMarker}>
+                                        <div className={styles.markerInner}>
+                                            <Heart size={14} fill="white" color="white" />
+                                        </div>
                                     </div>
-                                </div>
-                            </motion.div>
-                        ))
+                                    
+                                    <div className={styles.nodeCard}>
+                                        <div className={styles.cardHeader}>
+                                            <span className={styles.dateBadge}>
+                                                <Calendar size={14} /> {item.date}
+                                            </span>
+                                        </div>
+                                        <h3 className={styles.cardTitle}>{item.title}</h3>
+                                        {item.description && (
+                                            <p className={styles.cardDesc}>{item.description}</p>
+                                        )}
+                                        <div className={styles.cardFooter}>
+                                            <ChevronRight size={18} className={styles.hoverArrow} />
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            ))}
+                        </div>
                     )}
                 </div>
             )}
+
+            {/* Premium Add Modal */}
+            <AnimatePresence>
+                {showModal && (
+                    <div className={styles.modalOverlay}>
+                        <motion.div 
+                            className={styles.modalBackdrop}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => !submitting && setShowModal(false)}
+                        />
+                        <motion.div 
+                            className={styles.modalContent}
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                        >
+                            <button className={styles.closeBtn} onClick={() => !submitting && setShowModal(false)}>
+                                <X size={24} />
+                            </button>
+                            <h2>翻开新的一页</h2>
+                            <p className={styles.modalSubtitle}>将这一刻的感动永远刻印在时间轴上。</p>
+                            
+                            <form onSubmit={handleSubmit} className={styles.modalForm}>
+                                <div className={styles.formGroup}>
+                                    <label>这是哪一天发生的故事？ *</label>
+                                    <input
+                                        type="date"
+                                        value={newMilestone.date}
+                                        onChange={(e) => setNewMilestone({ ...newMilestone, date: e.target.value })}
+                                        required
+                                        className={styles.input}
+                                    />
+                                </div>
+                                <div className={styles.formGroup}>
+                                    <label>给这个故事起个名字 *</label>
+                                    <input
+                                        type="text"
+                                        value={newMilestone.title}
+                                        onChange={(e) => setNewMilestone({ ...newMilestone, title: e.target.value })}
+                                        placeholder="例如：第一次看雪"
+                                        required
+                                        className={styles.input}
+                                    />
+                                </div>
+                                <div className={styles.formGroup}>
+                                    <label>详细写下那天的细节吧</label>
+                                    <textarea
+                                        value={newMilestone.description}
+                                        onChange={(e) => setNewMilestone({ ...newMilestone, description: e.target.value })}
+                                        placeholder="那天阳光很好，我们走在街上..."
+                                        className={styles.textarea}
+                                    />
+                                </div>
+                                <button type="submit" disabled={submitting} className={styles.submitBtn}>
+                                    {submitting ? '时空跃迁中...' : '✨ 刻印这段记忆'}
+                                </button>
+                            </form>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }

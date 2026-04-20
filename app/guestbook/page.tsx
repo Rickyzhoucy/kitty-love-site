@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, MessageCircle } from 'lucide-react';
+import { Send, MessageCircle, Heart } from 'lucide-react';
 import styles from './page.module.css';
 import { format } from 'date-fns';
-import KittyStickers from '../components/KittyStickers';
 import ParticleBackground from '../components/ParticleBackground';
 import { notifyPetExperience } from '@/lib/petEvents';
 
@@ -57,7 +56,6 @@ export default function Guestbook() {
                 const newMessage = await res.json();
                 setMessages([newMessage, ...messages]);
                 setContent('');
-                // 通知宠物获得经验
                 notifyPetExperience(15, 'message');
             }
         } catch (error) {
@@ -69,91 +67,104 @@ export default function Guestbook() {
 
     return (
         <div className={styles.container}>
-            {/* 动态贴纸和粒子效果 */}
-            <KittyStickers count={6} />
             <ParticleBackground particleCount={10} types={['heart', 'sparkle', 'petal']} />
 
-            <header className={styles.header}>
-                <img
-                    src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"
-                    alt="Hello Kitty"
-                    className={styles.kittyIcon}
-                />
-                <div>
-                    <h1><MessageCircle className={styles.icon} /> 留言板</h1>
-                    <p>写下你想对我说的话吧！</p>
+            <div className={styles.layout}>
+                {/* Left Side - Sticky Composer */}
+                <div className={styles.composerColumn}>
+                    <div className={styles.stickyComposer}>
+                        <header className={styles.header}>
+                            <h1>
+                                <MessageCircle size={28} className={styles.headerIcon} /> 
+                                留言板
+                            </h1>
+                            <p>写下你想对我说的话，让时间记住我们的点滴。</p>
+                        </header>
+
+                        <form onSubmit={handleSubmit} className={styles.formCard}>
+                            <div className={styles.inputGroup}>
+                                <label>你是谁？</label>
+                                <input
+                                    type="text"
+                                    placeholder="你的昵称"
+                                    value={nickname}
+                                    onChange={(e) => setNickname(e.target.value)}
+                                    maxLength={20}
+                                    required
+                                    className={styles.input}
+                                />
+                            </div>
+                            <div className={styles.inputGroup}>
+                                <label>想对我说的话</label>
+                                <textarea
+                                    placeholder="在这里写下你的专属留言..."
+                                    value={content}
+                                    onChange={(e) => setContent(e.target.value)}
+                                    maxLength={200}
+                                    required
+                                    className={styles.textarea}
+                                />
+                            </div>
+                            <button type="submit" disabled={loading} className={styles.submitBtn}>
+                                {loading ? '发送中...' : (
+                                    <>
+                                        送出真心 <Send size={18} />
+                                    </>
+                                )}
+                            </button>
+                        </form>
+                    </div>
                 </div>
-            </header>
 
-            <section className={styles.formSection}>
-                <form onSubmit={handleSubmit} className={styles.form}>
-                    <div className={styles.inputGroup}>
-                        <input
-                            type="text"
-                            placeholder="你的昵称"
-                            value={nickname}
-                            onChange={(e) => setNickname(e.target.value)}
-                            maxLength={20}
-                            required
-                            className={styles.input}
-                        />
-                    </div>
-                    <div className={styles.inputGroup}>
-                        <textarea
-                            placeholder="在这里写下你的留言..."
-                            value={content}
-                            onChange={(e) => setContent(e.target.value)}
-                            maxLength={200}
-                            required
-                            className={styles.textarea}
-                        />
-                    </div>
-                    <button type="submit" disabled={loading} className={styles.button}>
-                        {loading ? '发送中...' : (
-                            <>
-                                发送 <Send size={16} />
-                            </>
-                        )}
-                    </button>
-                </form>
-            </section>
-
-            <section className={styles.messagesSection}>
-                {fetching ? (
-                    <p className={styles.loading}>加载留言中...</p>
-                ) : (
-                    <div className={styles.grid}>
-                        <AnimatePresence>
-                            {messages.map((msg, index) => (
-                                <motion.div
-                                    key={msg.id}
-                                    layout
-                                    initial={{ opacity: 0, scale: 0.8 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.8 }}
-                                    transition={{ duration: 0.3 }}
-                                    className={styles.card}
-                                    style={{
-                                        rotate: index % 2 === 0 ? '2deg' : '-2deg',
-                                    }}
-                                >
-                                    <p className={styles.messageContent}>{msg.content}</p>
-                                    <div className={styles.cardFooter}>
-                                        <span className={styles.nickname}>- {msg.nickname}</span>
-                                        <span className={styles.date}>
-                                            {format(new Date(msg.createdAt), 'MMM d, yyyy')}
-                                        </span>
-                                    </div>
-                                    <div className={styles.pin}>🎀</div>
-                                </motion.div>
-                            ))}
-                        </AnimatePresence>
-                        {messages.length === 0 && (
-                            <p className={styles.empty}>还没有留言哦，快来抢沙发！</p>
-                        )}
-                    </div>
-                )}
-            </section>
+                {/* Right Side - Masonry Messages */}
+                <div className={styles.messagesColumn}>
+                    {fetching ? (
+                        <div className={styles.loadingState}>
+                            <motion.div
+                                animate={{ scale: [1, 1.2, 1] }}
+                                transition={{ repeat: Infinity, duration: 1.5 }}
+                            >
+                                <Heart size={40} color="#ff758c" />
+                            </motion.div>
+                            <p>正在读取回忆...</p>
+                        </div>
+                    ) : (
+                        <div className={styles.masonryGrid}>
+                            <AnimatePresence>
+                                {messages.map((msg, index) => (
+                                    <motion.div
+                                        key={msg.id}
+                                        layout
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, scale: 0.9 }}
+                                        transition={{ delay: index * 0.05 }}
+                                        className={styles.messageCard}
+                                    >
+                                        <p className={styles.messageContent}>"{msg.content}"</p>
+                                        <div className={styles.cardFooter}>
+                                            <div className={styles.authorInfo}>
+                                                <div className={styles.avatar}>
+                                                    {msg.nickname.charAt(0).toUpperCase()}
+                                                </div>
+                                                <span className={styles.nickname}>{msg.nickname}</span>
+                                            </div>
+                                            <span className={styles.date}>
+                                                {format(new Date(msg.createdAt), 'MM/dd')}
+                                            </span>
+                                        </div>
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
+                            {messages.length === 0 && (
+                                <div className={styles.emptyState}>
+                                    <p>还没有留言哦，快来抢沙发！</p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 }

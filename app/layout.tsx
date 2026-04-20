@@ -20,7 +20,6 @@ export default function RootLayout({
         {/* Live2D scripts are now loaded dynamically in FloatingPet when needed */}
       </head>
       <body>
-        <FloatingHearts />
         <main style={{ paddingBottom: '100px', minHeight: '100vh', position: 'relative' }}>
           {children}
         </main>

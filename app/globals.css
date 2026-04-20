@@ -25,26 +25,21 @@ html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  font-family: var(--font-fredoka);
-  color: var(--pk-text);
-  background-color: var(--pk-blue-100);
-  /* Cute Polka Dot Background */
-  background-image: radial-gradient(var(--pk-blue-200) 15%, transparent 16%),
-    radial-gradient(var(--pk-pink-100) 15%, transparent 16%);
-  background-size: 60px 60px;
-  background-position: 0 0, 30px 30px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #444;
+  background-color: #fdfbfb;
+  /* Premium modern romantic gradient base */
+  background-image: linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%);
+  background-attachment: fixed;
   /* Responsive font size */
   font-size: 16px;
 }
 
 /* Mobile font adjustment */
 @media (max-width: 480px) {
-
   html,
   body {
     font-size: 14px;
-    background-size: 40px 40px;
-    background-position: 0 0, 20px 20px;
   }
 }
 

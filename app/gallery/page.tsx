@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Image as ImageIcon, Heart, Upload, Plus, Download, X } from 'lucide-react';
+import { Image as ImageIcon, Heart, Upload, Plus, Download, X, Sparkles, Calendar } from 'lucide-react';
 import styles from './page.module.css';
-import KittyStickers from '../components/KittyStickers';
 import ParticleBackground from '../components/ParticleBackground';
 import { notifyPetExperience } from '@/lib/petEvents';
 
@@ -19,9 +18,10 @@ export default function Gallery() {
     const [photos, setPhotos] = useState<Photo[]>([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
-    const [showUploadForm, setShowUploadForm] = useState(false);
+    const [showUploadModal, setShowUploadModal] = useState(false);
     const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
     const [newPhoto, setNewPhoto] = useState({ caption: '', date: '' });
+    const [dragActive, setDragActive] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -52,7 +52,6 @@ export default function Gallery() {
         setUploading(true);
         try {
             const uploadedPhotos = [];
-            // Batch upload loop
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
                 const formData = new FormData();
@@ -65,8 +64,6 @@ export default function Gallery() {
 
                 if (uploadRes.ok) {
                     const { url } = await uploadRes.json();
-
-                    // Create record
                     const photoRes = await fetch('/api/photos', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -84,16 +81,12 @@ export default function Gallery() {
             }
 
             if (uploadedPhotos.length > 0) {
-                setPhotos([...uploadedPhotos.reverse(), ...photos]); // Add new ones to top
+                setPhotos([...uploadedPhotos.reverse(), ...photos]);
                 setNewPhoto({ caption: '', date: '' });
-                setShowUploadForm(false);
+                setShowUploadModal(false);
                 if (fileInputRef.current) fileInputRef.current.value = '';
                 notifyPetExperience(25 * uploadedPhotos.length, 'photo');
-                alert(`成功上传 ${uploadedPhotos.length} 张照片`);
-            } else {
-                throw new Error('No photos uploaded successfully');
             }
-
         } catch (error) {
             console.error('Upload error:', error);
             alert('部分或全部上传失败，请重试');
@@ -102,164 +95,169 @@ export default function Gallery() {
         }
     };
 
+    // Advanced Masonry rendering using columns (CSS column-count approach)
     return (
         <div className={styles.container}>
-            {/* 动态贴纸和粒子效果 */}
-            <KittyStickers count={6} />
             <ParticleBackground particleCount={10} types={['heart', 'petal', 'sparkle']} />
 
             <header className={styles.header}>
-                <img
-                    src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"
-                    alt="Hello Kitty"
-                    className={styles.kittyIcon}
-                />
-                <div>
-                    <h1><ImageIcon className={styles.icon} /> 甜蜜回忆</h1>
-                    <p>和你在一起的每一刻都值得珍藏。</p>
+                <div className={styles.headerText}>
+                    <h1>
+                        <ImageIcon size={32} className={styles.headerIcon} /> 
+                        甜蜜画廊 
+                        <Sparkles size={24} className={styles.headerSparkle} />
+                    </h1>
+                    <p>收集每一次心动，定格我们最美的瞬间。</p>
                 </div>
             </header>
 
-            {/* Upload Button */}
-            <div className={styles.uploadSection}>
-                <button
-                    onClick={() => setShowUploadForm(!showUploadForm)}
-                    className={styles.uploadBtn}
-                >
-                    <Upload size={18} /> {showUploadForm ? '取消' : '上传新照片'}
-                </button>
-            </div>
-
-            {/* Upload Form */}
-            {showUploadForm && (
-                <motion.form
-                    onSubmit={handleUpload}
-                    className={styles.uploadForm}
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                >
-                    <div className={styles.formGroup}>
-                        <label>选择图片 (支持多选) *</label>
-                        <input type="file" ref={fileInputRef} accept="image/*" multiple required />
-                    </div>
-                    <div className={styles.formGroup}>
-                        <label>描述/标题 (批量上传时共用) *</label>
-                        <input
-                            type="text"
-                            value={newPhoto.caption}
-                            onChange={(e) => setNewPhoto({ ...newPhoto, caption: e.target.value })}
-                            placeholder="例如：我们的第一次约会"
-                            required
-                        />
-                    </div>
-                    <div className={styles.formGroup}>
-                        <label>日期</label>
-                        <input
-                            type="date"
-                            value={newPhoto.date}
-                            onChange={(e) => setNewPhoto({ ...newPhoto, date: e.target.value })}
-                        />
-                    </div>
-                    <button type="submit" disabled={uploading} className={styles.submitBtn}>
-                        {uploading ? '上传中...' : <><Plus size={16} /> 批量添加到相册</>}
-                    </button>
-                </motion.form>
-            )}
-
+            {/* Masonry Grid */}
             {loading ? (
-                <p className={styles.loading}>加载回忆中...</p>
+                <div className={styles.loadingState}>
+                    <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 1.5 }}>
+                        <Heart size={40} color="#ff758c" />
+                    </motion.div>
+                    <p>正在冲洗照片...</p>
+                </div>
             ) : (
-                <div className={styles.grid}>
-                    {photos.length === 0 ? (
-                        <p className={styles.empty}>还没有照片哦，快来上传吧！</p>
-                    ) : (
-                        photos.map((photo, index) => (
+                <div className={styles.masonryGrid}>
+                    
+                    {/* The First Item is the Upload Action Card */}
+                    <div className={styles.uploadCardWrapper}>
+                        <motion.button
+                            className={styles.uploadCard}
+                            onClick={() => setShowUploadModal(true)}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            <div className={styles.uploadIconCircle}>
+                                <Plus size={32} color="#ff758c" />
+                            </div>
+                            <h3>添加新回忆</h3>
+                            <p>上传照片或视频</p>
+                        </motion.button>
+                    </div>
+
+                    <AnimatePresence>
+                        {photos.map((photo, index) => (
                             <motion.div
                                 key={photo.id}
-                                initial={{ opacity: 0, scale: 0.8 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                transition={{ delay: index * 0.1 }}
-                                className={styles.polaroid}
-                                whileHover={{ scale: 1.05, rotate: 0, zIndex: 10 }}
-                                style={{ rotate: index % 2 === 0 ? '3deg' : '-3deg', cursor: 'pointer' }}
+                                layout
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: index * 0.05 }}
+                                className={styles.photoCard}
                                 onClick={() => setSelectedPhoto(photo)}
                             >
-                                <div className={styles.imagePlaceholder}>
+                                <div className={styles.imageWrapper}>
                                     {photo.url ? (
-                                        <img src={photo.url} alt={photo.caption} className={styles.photoImg} />
+                                        <img src={photo.url} alt={photo.caption} loading="lazy" />
                                     ) : (
-                                        <>
+                                        <div className={styles.placeholderImg}>
                                             <Heart color="white" fill="rgba(255,255,255,0.5)" size={48} />
-                                            <span className={styles.placeholderText}>No Image</span>
-                                        </>
+                                        </div>
                                     )}
                                 </div>
-                                <div className={styles.caption}>
+                                <div className={styles.captionArea}>
                                     <h3>{photo.caption}</h3>
-                                    <span className={styles.date}>{photo.date}</span>
+                                    {photo.date && (
+                                        <div className={styles.dateLabel}>
+                                            <Calendar size={12} /> {photo.date}
+                                        </div>
+                                    )}
                                 </div>
-                                {/* Hello Kitty Bow Decoration */}
-                                <span className={styles.bowDecoration}>🎀</span>
                             </motion.div>
-                        ))
-                    )}
+                        ))}
+                    </AnimatePresence>
                 </div>
             )}
+
+            {/* Upload Modal Overlay */}
+            <AnimatePresence>
+                {showUploadModal && (
+                    <div className={styles.modalOverlay}>
+                        <motion.div 
+                            className={styles.modalBackdrop}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => !uploading && setShowUploadModal(false)}
+                        />
+                        <motion.div 
+                            className={styles.modalContent}
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                        >
+                            <button className={styles.closeBtn} onClick={() => !uploading && setShowUploadModal(false)}>
+                                <X size={24} />
+                            </button>
+                            <h2>上传新的心动瞬间</h2>
+                            <form onSubmit={handleUpload} className={styles.uploadForm}>
+                                <div className={styles.dragDropArea}>
+                                    <Upload size={32} color="#ff758c" />
+                                    <p>点击选择照片 (支持多选)</p>
+                                    <input type="file" ref={fileInputRef} accept="image/*" multiple required className={styles.hiddenInput} />
+                                </div>
+                                <div className={styles.formGroup}>
+                                    <label>这组照片的故事是？</label>
+                                    <input
+                                        type="text"
+                                        value={newPhoto.caption}
+                                        onChange={(e) => setNewPhoto({ ...newPhoto, caption: e.target.value })}
+                                        placeholder="例如：第一次一起去游乐园"
+                                        required
+                                        className={styles.input}
+                                    />
+                                </div>
+                                <div className={styles.formGroup}>
+                                    <label>发生在哪一天？</label>
+                                    <input
+                                        type="date"
+                                        value={newPhoto.date}
+                                        onChange={(e) => setNewPhoto({ ...newPhoto, date: e.target.value })}
+                                        className={styles.input}
+                                    />
+                                </div>
+                                <button type="submit" disabled={uploading} className={styles.submitBtn}>
+                                    {uploading ? '上传中，请稍候...' : '✨ 存入回忆画廊'}
+                                </button>
+                            </form>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
             {/* Lightbox Overlay */}
             <AnimatePresence>
                 {selectedPhoto && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        style={{
-                            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                            background: 'rgba(0,0,0,0.9)', zIndex: 9999,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            flexDirection: 'column', padding: '20px'
-                        }}
-                        onClick={() => setSelectedPhoto(null)}
-                    >
-                        <button
+                    <div className={styles.lightboxOverlay}>
+                        <motion.div 
+                            className={styles.lightboxBackdrop}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
                             onClick={() => setSelectedPhoto(null)}
-                            style={{
-                                position: 'absolute', top: '20px', right: '20px',
-                                background: 'transparent', border: 'none', color: 'white',
-                                cursor: 'pointer', padding: '10px'
-                            }}
-                        >
-                            <X size={32} />
-                        </button>
-
-                        <motion.img
-                            src={selectedPhoto.url}
-                            alt={selectedPhoto.caption}
-                            initial={{ scale: 0.8, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.8, opacity: 0 }}
-                            style={{ maxWidth: '90%', maxHeight: '80vh', objectFit: 'contain', borderRadius: '4px' }}
-                            onClick={(e) => e.stopPropagation()}
                         />
-
-                        <div style={{ marginTop: '20px', textAlign: 'center', color: 'white' }} onClick={(e) => e.stopPropagation()}>
-                            <h2 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>{selectedPhoto.caption}</h2>
-                            <p style={{ opacity: 0.8, marginBottom: '15px' }}>{selectedPhoto.date}</p>
-                            <a
-                                href={selectedPhoto.url}
-                                download
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{
-                                    display: 'inline-flex', alignItems: 'center', gap: '8px',
-                                    background: 'white', color: 'black', padding: '10px 20px',
-                                    borderRadius: '20px', textDecoration: 'none', fontWeight: 'bold'
-                                }}
-                            >
-                                <Download size={20} /> 下载原图
-                            </a>
-                        </div>
-                    </motion.div>
+                        <motion.div
+                            className={styles.lightboxContent}
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.8 }}
+                        >
+                            <button className={styles.lightboxCloseBtn} onClick={() => setSelectedPhoto(null)}>
+                                <X size={32} />
+                            </button>
+                            <img src={selectedPhoto.url} alt={selectedPhoto.caption} className={styles.lightboxImage} />
+                            <div className={styles.lightboxInfo}>
+                                <h2>{selectedPhoto.caption}</h2>
+                                {selectedPhoto.date && <p>{selectedPhoto.date}</p>}
+                                <a href={selectedPhoto.url} download target="_blank" rel="noopener noreferrer" className={styles.downloadBtn}>
+                                    <Download size={18} /> 保存原图
+                                </a>
+                            </div>
+                        </motion.div>
+                    </div>
                 )}
             </AnimatePresence>
         </div>

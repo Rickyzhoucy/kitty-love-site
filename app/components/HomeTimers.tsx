@@ -84,8 +84,8 @@ export default function HomeTimers() {
 
     return (
         <>
-            {/* Timers List - Top Left */}
-            <div style={{ position: 'fixed', top: '20px', left: '20px', zIndex: 10 }}>
+            {/* Timers List */}
+            <div style={{ position: 'relative', width: '100%', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <AnimatePresence>
                     {timers.map((t, idx) => (
                         <motion.div

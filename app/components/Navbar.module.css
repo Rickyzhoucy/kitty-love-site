@@ -1,80 +1,109 @@
-/* Floating Bubble Menu */
-.floatingMenu {
+.dockContainer {
     position: fixed;
-    right: 1.5rem;
-    top: 50%;
-    transform: translateY(-50%);
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%) !important;
+    z-index: 1000;
     display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-    z-index: 100;
+    justify-content: center;
+    pointer-events: none;
 }
 
-.bubbleItem {
+.dock {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.5rem;
+    padding: 0.6rem;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 30px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.9);
+    pointer-events: auto;
+}
+
+.dockItemWrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     text-decoration: none;
-    transition: transform 0.2s;
 }
 
-.bubbleItem:hover {
-    transform: translateX(-8px);
-}
-
-.bubbleIcon {
-    width: 46px;
-    height: 46px;
-    border-radius: 50%;
+.dockItem {
+    position: relative;
+    width: 50px;
+    height: 50px;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    transition: transform 0.2s, box-shadow 0.2s;
+    border-radius: 18px;
+    cursor: pointer;
+    background: transparent;
 }
 
-.bubbleItem:hover .bubbleIcon {
-    transform: scale(1.1);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+.iconContainer {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 16px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.active {
-    transform: scale(1.15);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+.active .iconContainer {
+    border-radius: 20px;
 }
 
-.bubbleLabel {
-    background: white;
-    color: #546E7A;
-    padding: 0.4rem 0.8rem;
-    border-radius: 15px;
+.tooltip {
+    position: absolute;
+    top: -45px;
+    background: rgba(30, 30, 30, 0.8);
+    backdrop-filter: blur(10px);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
     font-size: 0.85rem;
     font-weight: 500;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    pointer-events: none;
     opacity: 0;
-    transform: translateX(10px);
+    transform: translateY(10px);
     transition: all 0.2s;
     white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
-.bubbleItem:hover .bubbleLabel {
+.dockItem:hover .tooltip {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateY(0);
+}
+
+.indicator {
+    position: absolute;
+    bottom: -6px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    box-shadow: 0 0 8px currentColor;
 }
 
 /* Responsive */
 @media (max-width: 768px) {
-    .floatingMenu {
-        right: 0.8rem;
-        gap: 0.6rem;
+    .dockContainer {
+        bottom: 1.5rem;
+        width: 90%;
     }
 
-    .bubbleIcon {
-        width: 40px;
-        height: 40px;
+    .dock {
+        width: 100%;
+        justify-content: space-between;
+        padding: 0.5rem 1rem;
     }
 
-    .bubbleLabel {
-        display: none;
+    .dockItem {
+        width: 44px;
+        height: 44px;
     }
 }
