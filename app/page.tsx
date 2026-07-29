@@ -11,7 +11,6 @@ import RemindersList from './components/RemindersList';
 import { configApi, photosApi } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
-import { getPet } from '@/lib/api/pet';
 import ManifestFrameRenderer from './components/FloatingPet/renderers/ManifestFrameRenderer';
 
 const QUICK_LINKS = [
@@ -63,7 +62,6 @@ export default function Home() {
   const [config, setConfig] = useState<Record<string, string>>({});
   const [daysTogether, setDaysTogether] = useState<number | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
-  const [petAssetId, setPetAssetId] = useState('kitty');
 
   useEffect(() => {
     configApi.get()
@@ -75,12 +73,6 @@ export default function Home() {
         if (diff > 0) setDaysTogether(Math.floor(diff / 86400000));
       })
       .catch(e => console.error('Failed to fetch config', e));
-  }, []);
-
-  useEffect(() => {
-    getPet()
-      .then(pet => setPetAssetId(pet.assetId || 'kitty'))
-      .catch(() => undefined);
   }, []);
 
   // 照片墙入口的缩略图：取最新 3 张真实照片
@@ -182,7 +174,7 @@ export default function Home() {
               aria-label="点击伙伴打开情书"
             >
               <ManifestFrameRenderer
-                assetId={petAssetId}
+                assetId="kitty"
                 action="idle"
                 className="h-[82%] w-[82%] object-contain [filter:drop-shadow(0_12px_18px_rgba(0,0,0,0.14))]"
               />
