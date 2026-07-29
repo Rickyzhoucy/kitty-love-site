@@ -38,7 +38,7 @@ from app.models import (
     UserSession,
     utcnow,
 )
-from app.photo_service import PhotoService
+from app.photo_service import ALLOWED_PHOTO_TYPES, PhotoService
 from app.schemas import (
     AttachmentRead,
     ChatMessageRead,
@@ -97,12 +97,7 @@ def get_agent_runtime(request: Request) -> AgentRuntime:
 
 Runtime = Annotated[AgentRuntime, Depends(get_agent_runtime)]
 conversation_service = ConversationService()
-INLINE_ATTACHMENT_TYPES = {
-    "image/gif",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-}
+INLINE_ATTACHMENT_TYPES = ALLOWED_PHOTO_TYPES
 
 
 def attachment_response_headers(attachment: Attachment) -> dict[str, str]:

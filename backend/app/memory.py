@@ -210,11 +210,17 @@ class MemoryService:
         items = await self.list(db, owner_id, companion_id)
         if not items:
             return []
-        query_vector = await self.embedding_provider.embed_query(query)
         if db.get_bind().dialect.name == "postgresql":
+            query_vector: list[float] | None = None
+            # 无 active profile 或 profile 与 provider 不匹配时走纯词法检索，
+            # 避免白调一次必然浪费/失败的 embedding API
+            profile = await self.current_profile(db)
+            if profile is not None and self._profile_matches_provider(profile):
+                query_vector = await self.embedding_provider.embed_query(query)
             return await self._postgres_search(
-                db, items, query, query_vector, limit=limit
+                db, items, query, query_vector, profile, limit=limit
             )
+        query_vector = await self.embedding_provider.embed_query(query)
         return await self._python_search(db, items, query, query_vector, limit=limit)
 
     async def _postgres_search(
@@ -222,7 +228,8 @@ class MemoryService:
         db: AsyncSession,
         items: list[MemoryItem],
         query: str,
-        query_vector: list[float],
+        query_vector: list[float] | None,
+        profile: EmbeddingProfile | None,
         *,
         limit: int,
     ) -> list[MemoryItem]:
@@ -235,8 +242,7 @@ class MemoryService:
                 .limit(limit * 3)
             )
         )
-        profile = await self.current_profile(db)
-        if profile is None or not self._profile_matches_provider(profile):
+        if profile is None or query_vector is None:
             return lexical[:limit]
         semantic = list(
             await db.scalars(

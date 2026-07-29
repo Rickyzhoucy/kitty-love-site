@@ -10,7 +10,6 @@ from langchain.agents.middleware import (
     after_agent,
     before_model,
     dynamic_prompt,
-    wrap_model_call,
 )
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_openai import ChatOpenAI
@@ -61,25 +60,6 @@ def validate_agent_context(state, runtime) -> None:
     return None
 
 
-@wrap_model_call
-async def retry_model_call(request, handler):
-    for attempt in range(1, 4):
-        try:
-            return await handler(request)
-        except Exception:
-            if attempt == 3:
-                raise
-            delay = 2 ** (attempt - 1)
-            logger.warning(
-                "Agent model call failed; retrying in %s seconds (attempt %s/3)",
-                delay,
-                attempt,
-                exc_info=True,
-            )
-            await asyncio.sleep(delay)
-    raise RuntimeError("unreachable")
-
-
 @after_agent
 def log_agent_completion(state, runtime) -> None:
     context: AgentContext = runtime.context
@@ -101,6 +81,8 @@ def build_chat_model(settings: Settings | None = None) -> ChatOpenAI:
         api_key=config.chat_api_key,
         temperature=config.chat_temperature,
         timeout=config.chat_timeout,
+        # SDK 级重试只发生在连接建立/首字节前，不会重复已流出的 token
+        max_retries=3,
         streaming=True,
     )
 
@@ -120,7 +102,6 @@ def build_agent(
         middleware=[
             companion_prompt,
             validate_agent_context,
-            retry_model_call,
             log_agent_completion,
             build_tool_audit_middleware(session_maker),
         ],
@@ -209,6 +190,8 @@ class AgentRuntime:
         self.settings = settings or get_settings()
         self.storage = storage or ObjectStorage(self.settings)
         self.embedding_enabled = embedding_enabled
+        # 后台持久化任务的强引用集合，防止 asyncio 弱引用导致 task 被 GC
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def _persist_assistant(
         self,
@@ -422,21 +405,28 @@ class AgentRuntime:
             raise
         finally:
             if not stream_completed:
-                persist_task = asyncio.create_task(
-                    self._persist_interrupted_reply(
-                        user_id,
-                        conversation.id,
-                        answer_parts,
-                        interruption_reason,
-                    )
-                )
                 try:
-                    await asyncio.shield(persist_task)
-                except asyncio.CancelledError:
-                    logger.info(
-                        "Reply persistence continues after stream cancellation",
-                        extra={"conversation_id": conversation.id},
+                    persist_task = asyncio.create_task(
+                        self._persist_interrupted_reply(
+                            user_id,
+                            conversation.id,
+                            answer_parts,
+                            interruption_reason,
+                        )
                     )
+                except RuntimeError:
+                    # 事件循环关闭中（GeneratorExit 场景），无法再调度任务
+                    persist_task = None
+                if persist_task is not None:
+                    self._background_tasks.add(persist_task)
+                    persist_task.add_done_callback(self._background_tasks.discard)
+                    try:
+                        await asyncio.shield(persist_task)
+                    except asyncio.CancelledError:
+                        logger.info(
+                            "Reply persistence continues after stream cancellation",
+                            extra={"conversation_id": conversation.id},
+                        )
 
         answer = "".join(answer_parts).strip()
         assistant_message, message_count = await self._persist_assistant(

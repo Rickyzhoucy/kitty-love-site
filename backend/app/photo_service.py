@@ -5,6 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Attachment, OutboxEvent, Photo
 from app.schemas import PhotoCreate, PhotoRead, PhotoUpdate
 
+# 相册允许展示的图片类型（与附件内联白名单一致；SVG 因 XSS 风险不放行）
+ALLOWED_PHOTO_TYPES = frozenset({"image/gif", "image/jpeg", "image/png", "image/webp"})
+
 
 class PhotoService:
     @staticmethod
@@ -42,6 +45,11 @@ class PhotoService:
             or attachment.status != "ready"
         ):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "附件不存在")
+        if attachment.content_type.lower() not in ALLOWED_PHOTO_TYPES:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "仅支持 JPG/PNG/WebP/GIF 图片",
+            )
         existing = await db.scalar(
             select(Photo).where(Photo.attachment_id == attachment.id)
         )

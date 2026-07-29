@@ -132,7 +132,7 @@ export default function Gallery() {
                                     id="photo-file"
                                     type="file"
                                     ref={fileInputRef}
-                                    accept="image/*"
+                                    accept="image/jpeg,image/png,image/webp,image/gif"
                                     multiple
                                     required
                                     className="sr-only"
