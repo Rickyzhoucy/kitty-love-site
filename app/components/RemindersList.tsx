@@ -1,45 +1,56 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bell, Plus, X, Check, Trash2, Calendar, Clock } from 'lucide-react';
-import styles from './RemindersList.module.css';
+import { Plus, Check, Trash2, Clock } from 'lucide-react';
+import Modal from './ui/Modal';
+import Button from './ui/Button';
+import { Input } from './ui/Input';
+import EmptyState from './ui/EmptyState';
+import { useToast } from './ui/Toast';
+import { remindersApi, type Reminder } from '@/lib/api/resources';
+import { useResourceEvents } from '@/lib/api/useResourceEvents';
+import { cn } from '@/lib/utils';
 
-interface Reminder {
-    id: string;
-    content: string;
-    dueDate: string;
-    completed: boolean;
+function getTimeLeft(dateStr: string): { text: string; tone: 'danger' | 'warning' | 'success' } {
+    const diff = new Date(dateStr).getTime() - Date.now();
+    if (diff < 0) return { text: '已过期', tone: 'danger' };
+
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (days > 0) return { text: `${days}天 ${hours}小时 ${minutes}分`, tone: 'success' };
+    if (hours > 0) return { text: `${hours}小时 ${minutes}分`, tone: 'warning' };
+    return { text: `${minutes}分`, tone: 'danger' };
 }
 
+const toneStyles = {
+    success: 'text-success',
+    warning: 'text-warning',
+    danger: 'text-danger',
+};
+
+/** 首页提醒区块：文档流内卡片 */
 export default function RemindersList() {
     const [reminders, setReminders] = useState<Reminder[]>([]);
     const [showAdd, setShowAdd] = useState(false);
     const [newReminder, setNewReminder] = useState({ content: '', dueDate: '' });
     const [loading, setLoading] = useState(false);
+    const { toast } = useToast();
 
-    useEffect(() => {
-        fetchReminders();
+    const loadReminders = useCallback(async () => {
+        try {
+            setReminders(await remindersApi.list());
+        } catch (error) {
+            console.error('Fetch reminders failed', error);
+        }
     }, []);
 
-    const fetchReminders = async () => {
-        try {
-            const res = await fetch('/api/reminders');
-            if (res.status === 401) {
-                // Don't redirect if already on verify page
-                if (!window.location.pathname.startsWith('/verify')) {
-                    window.location.href = '/verify?redirect=/';
-                }
-                return;
-            }
-            if (res.ok) {
-                const data = await res.json();
-                setReminders(data);
-            }
-        } catch (e) {
-            console.error("Fetch reminders failed", e);
-        }
-    };
+    useEffect(() => {
+        void loadReminders();
+    }, [loadReminders]);
+    useResourceEvents(['reminders'], () => void loadReminders());
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -47,167 +58,142 @@ export default function RemindersList() {
 
         setLoading(true);
         try {
-            const res = await fetch('/api/reminders', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newReminder)
-            });
-            if (res.ok) {
-                const added = await res.json();
-                setReminders([...reminders, added].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()));
-                setNewReminder({ content: '', dueDate: '' });
-                setShowAdd(false);
-            }
+            const added = await remindersApi.create(newReminder);
+            setReminders(prev =>
+                [...prev, added].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+            );
+            setNewReminder({ content: '', dueDate: '' });
+            setShowAdd(false);
+            toast('提醒已创建 🔔');
+        } catch (err) {
+            toast(err instanceof Error ? err.message : '创建失败', 'error');
         } finally {
             setLoading(false);
         }
     };
 
     const toggleComplete = async (id: string, current: boolean) => {
-        // Optimistic update
-        setReminders(reminders.map(r => r.id === id ? { ...r, completed: !current } : r));
-
+        setReminders(reminders.map(r => (r.id === id ? { ...r, completed: !current } : r)));
         try {
-            await fetch('/api/reminders', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, completed: !current })
-            });
+            await remindersApi.update(id, !current);
         } catch {
-            fetchReminders(); // Revert on error
+            const fresh = await remindersApi.list().catch(() => null);
+            if (fresh) setReminders(fresh);
+            toast('操作失败，请重试', 'error');
         }
     };
 
     const deleteReminder = async (id: string) => {
-        if (!confirm('确认删除此提醒？')) return;
+        const previous = [...reminders];
         setReminders(reminders.filter(r => r.id !== id));
         try {
-            await fetch(`/api/reminders?id=${id}`, { method: 'DELETE' });
+            await remindersApi.remove(id);
+            toast('已删除');
         } catch {
-            fetchReminders();
+            setReminders(previous);
+            toast('删除失败，请重试', 'error');
         }
-    };
-
-    const getTimeLeft = (dateStr: string) => {
-        const now = new Date();
-        const due = new Date(dateStr);
-        const diff = due.getTime() - now.getTime();
-
-        if (diff < 0) return { text: '已过期', color: '#ff5252' };
-
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-
-        if (days > 0) return { text: `${days}天 ${hours}小时 ${minutes}分`, color: '#4CAF50' };
-        if (hours > 0) return { text: `${hours}小时 ${minutes}分`, color: '#FF9800' };
-        return { text: `${minutes}分`, color: '#FF5722' };
     };
 
     const activeReminders = reminders.filter(r => !r.completed);
 
-
     return (
-        <div className={styles.container}>
-            <div className={styles.header}>
-                <h3><Bell size={18} /> 提醒事项</h3>
-                <button onClick={() => setShowAdd(true)} className={styles.addBtn} title="添加提醒">
+        <section aria-label="提醒事项" className="h-full">
+            <div className="flex items-end justify-between mb-5 px-1">
+                <h2 className="flex items-baseline gap-3 m-0">
+                    <span aria-hidden className="font-display text-5xl font-semibold leading-none text-stroke-accent select-none">
+                        02
+                    </span>
+                    <span className="font-display text-2xl font-semibold tracking-wide text-ink">提醒事项</span>
+                </h2>
+                <Button size="sm" variant="secondary" onClick={() => setShowAdd(true)} aria-label="添加提醒">
                     <Plus size={16} />
-                </button>
+                    添加
+                </Button>
             </div>
 
-            <div className={styles.list}>
-                <AnimatePresence>
-                    {activeReminders.length === 0 ? (
-                        <p className={styles.empty}>暂无待办，享受生活吧~</p>
-                    ) : (
-                        activeReminders.map(r => {
+            {activeReminders.length === 0 ? (
+                <EmptyState icon="🌿" title="暂无待办" hint="享受生活吧~" />
+            ) : (
+                /* 编辑式行列表：细分隔线 + 大字内容 + 时间胶囊 */
+                <div className="flex flex-col">
+                    <AnimatePresence>
+                        {activeReminders.map(r => {
                             const timeLeft = getTimeLeft(r.dueDate);
+                            const expired = timeLeft.text === '已过期';
                             return (
                                 <motion.div
                                     key={r.id}
+                                    layout
                                     initial={{ opacity: 0, x: -20 }}
                                     animate={{ opacity: 1, x: 0 }}
-                                    exit={{ opacity: 0, scale: 0.8 }}
-                                    className={styles.item}
+                                    exit={{ opacity: 0, scale: 0.9 }}
+                                    className="group flex items-center justify-between gap-3 border-b border-sunken py-4 first:border-t"
                                 >
-                                    <div className={styles.content}>
-                                        <div
-                                            className={styles.text}
-                                            style={timeLeft.text === '已过期' ? { textDecoration: 'line-through', color: '#888' } : undefined}
-                                        >
+                                    <div className="min-w-0">
+                                        <div className={cn('font-display text-lg font-semibold text-ink truncate', expired && 'line-through text-ink-muted')}>
                                             {r.content}
                                         </div>
-                                        <div className={styles.time} style={{ color: timeLeft.color }}>
-                                            <Clock size={12} /> {timeLeft.text}
+                                        <div className={cn('mt-1 inline-flex items-center gap-1.5 rounded-full bg-sunken/70 px-2.5 py-0.5 text-xs', toneStyles[timeLeft.tone])}>
+                                            <Clock size={12} />
+                                            {timeLeft.text}
                                         </div>
                                     </div>
-                                    <div className={styles.actions}>
-                                        <button onClick={() => toggleComplete(r.id, r.completed)} className={styles.checkBtn}>
-                                            <Check size={14} />
+                                    <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                            onClick={() => toggleComplete(r.id, r.completed)}
+                                            aria-label={`完成提醒 ${r.content}`}
+                                            className="flex h-8 w-8 items-center justify-center rounded-full text-success hover:bg-success/10 transition-colors cursor-pointer"
+                                        >
+                                            <Check size={16} />
                                         </button>
-                                        {timeLeft.text === '已过期' && (
-                                            <button onClick={() => deleteReminder(r.id)} className={styles.deleteBtn}>
-                                                <Trash2 size={14} />
+                                        {expired && (
+                                            <button
+                                                onClick={() => deleteReminder(r.id)}
+                                                aria-label={`删除提醒 ${r.content}`}
+                                                className="flex h-8 w-8 items-center justify-center rounded-full text-danger hover:bg-danger/10 transition-colors cursor-pointer"
+                                            >
+                                                <Trash2 size={16} />
                                             </button>
                                         )}
                                     </div>
                                 </motion.div>
                             );
-                        })
-                    )}
-                </AnimatePresence>
-            </div>
+                        })}
+                    </AnimatePresence>
+                </div>
+            )}
 
-            {/* Scale-in Modal for Adding */}
-            <AnimatePresence>
-                {showAdd && (
-                    <motion.div
-                        className={styles.addModalOverlay}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={() => setShowAdd(false)}
-                    >
-                        <motion.div
-                            className={styles.addModal}
-                            initial={{ scale: 0.8, y: 20 }}
-                            animate={{ scale: 1, y: 0 }}
-                            exit={{ scale: 0.8, y: 20 }}
-                            onClick={e => e.stopPropagation()}
-                        >
-                            <h4>新建提醒</h4>
-                            <form onSubmit={handleAdd}>
-                                <input
-                                    autoFocus
-                                    type="text"
-                                    placeholder="要做什么？"
-                                    value={newReminder.content}
-                                    onChange={e => setNewReminder({ ...newReminder, content: e.target.value })}
-                                    className={styles.input}
-                                    required
-                                />
-                                <div className={styles.dateInputWrapper}>
-                                    <Calendar size={16} color="#666" />
-                                    <input
-                                        type="datetime-local"
-                                        value={newReminder.dueDate}
-                                        onChange={e => setNewReminder({ ...newReminder, dueDate: e.target.value })}
-                                        className={styles.dateInput}
-                                        required
-                                        onClick={(e) => e.stopPropagation()}
-                                        onTouchEnd={(e) => e.stopPropagation()}
-                                    />
-                                </div>
-                                <div className={styles.modalActions}>
-                                    <button type="button" onClick={() => setShowAdd(false)} className={styles.cancelBtn}>取消</button>
-                                    <button type="submit" disabled={loading} className={styles.saveBtn}>保存</button>
-                                </div>
-                            </form>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
+            <Modal open={showAdd} onOpenChange={setShowAdd} title="新建提醒">
+                <form onSubmit={handleAdd} className="flex flex-col gap-4">
+                    <Input
+                        autoFocus
+                        type="text"
+                        placeholder="要做什么？"
+                        aria-label="提醒内容"
+                        value={newReminder.content}
+                        onChange={e => setNewReminder({ ...newReminder, content: e.target.value })}
+                        required
+                    />
+                    <Input
+                        type="datetime-local"
+                        aria-label="提醒时间"
+                        value={newReminder.dueDate}
+                        onChange={e => setNewReminder({ ...newReminder, dueDate: e.target.value })}
+                        required
+                        onClick={e => e.stopPropagation()}
+                        onTouchEnd={e => e.stopPropagation()}
+                    />
+                    <div className="flex gap-2">
+                        <Button variant="ghost" className="flex-1" onClick={() => setShowAdd(false)}>
+                            取消
+                        </Button>
+                        <Button type="submit" disabled={loading} className="flex-1">
+                            {loading ? '保存中...' : '保存'}
+                        </Button>
+                    </div>
+                </form>
+            </Modal>
+        </section>
     );
 }

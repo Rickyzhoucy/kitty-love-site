@@ -1,45 +1,209 @@
-version: '3.8'
+name: kitty-love
 
 services:
   postgres:
-    image: postgres:15.8
-    container_name: kitty_love
+    image: pgvector/pgvector@sha256:18d16372b8406bb38a9f94cbff15d125c463d71fde2770aa8b5c64bfcc1578ee
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-kitty_love_db}
-      POSTGRES_USER: ${POSTGRES_USER:-ricky}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lyh1226}
+      POSTGRES_USER: ${POSTGRES_USER:-kitty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       TZ: Asia/Shanghai
     ports:
-      - "25432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-35432}:5432"
     volumes:
-      - /home/app/pgvolume:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d
-    restart: always
-    networks:
-      - backend
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kitty} -d ${POSTGRES_DB:-kitty_love_db}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
 
-  webapp:
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    ports:
+      - "${MINIO_BIND_HOST:-127.0.0.1}:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - default
+      - skill-internal
+
+  minio-init:
+    image: minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing local/pet-assets
+        mc mb --ignore-existing local/user-uploads
+        mc mb --ignore-existing local/skill-packages
+        mc mb --ignore-existing local/derived-assets
+        mc mirror --overwrite /seed/pet-assets local/pet-assets
+        mc anonymous set download local/pet-assets
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+    volumes:
+      - ./public/pet-assets:/seed/pet-assets:ro
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        python -m app.migration_bootstrap
+        alembic upgrade head
+        python -m app.queue_schema
+    environment: &backend-environment
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-kitty}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-kitty_love_db}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_SECURE: "false"
+      MINIO_USER_BUCKET: user-uploads
+      CHAT_MODEL: ${CHAT_MODEL:-qwen3.6-flash}
+      CHAT_BASE_URL: ${CHAT_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      CHAT_API_KEY: ${CHAT_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-v4}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_DIMENSIONS: "1024"
+      SKILL_BUCKET: skill-packages
+      SKILL_WORKER_URL: http://skill-worker:8010
+      SKILL_WORKER_TOKEN: ${SKILL_WORKER_TOKEN:?Set SKILL_WORKER_TOKEN in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment: *backend-environment
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - default
+      - skill-internal
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: procrastinate --app=app.worker.procrastinate_app worker --queues=companion
+    environment: *backend-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2.0
+    restart: unless-stopped
+
+  skill-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: uvicorn app.skill_worker:app --host 0.0.0.0 --port 8010
+    user: "65534:65534"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      MINIO_SECURE: "false"
+      SKILL_BUCKET: skill-packages
+      SKILL_WORKER_CACHE_DIR: /tmp/kitty-skill-worker-cache
+      SKILL_WORKER_TOKEN: ${SKILL_WORKER_TOKEN:?Set SKILL_WORKER_TOKEN in .env}
+      SKILL_MAX_ARCHIVE_BYTES: "10485760"
+      SKILL_MAX_EXPANDED_BYTES: "52428800"
+      SKILL_MAX_FILE_BYTES: "5242880"
+      SKILL_MAX_FILES: "500"
+      SKILL_MAX_OUTPUT_BYTES: "1048576"
+      SKILL_SCRIPT_TIMEOUT: ${SKILL_SCRIPT_TIMEOUT:-30}
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - skill-internal
+
+  web:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: kitty_love_webapp
+      args:
+        API_INTERNAL_URL: http://api:8000
+        PET_ASSET_INTERNAL_URL: http://minio:9000
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+        NEXT_PUBLIC_EVENT_BASE_URL: ${NEXT_PUBLIC_EVENT_BASE_URL:-}
     environment:
-      # Database connection string used by Prisma
-      # Note: We use the service name 'postgres' as the host
-      DATABASE_URL: postgresql://${POSTGRES_USER:-ricky}:${POSTGRES_PASSWORD:-lyh1226}@postgres:5432/${POSTGRES_DB:-kitty_love_db}?schema=public
-      # Admin Session Secret/Config (if any)
       NODE_ENV: production
-      TZ: Asia/Shanghai
+      API_INTERNAL_URL: http://api:8000
     ports:
       - "3000:3000"
-    restart: always
     depends_on:
-      - postgres
-    networks:
-      - backend
-    volumes:
-      - ./public/uploads:/app/public/uploads
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:
 
 networks:
-  backend:
-    driver: bridge
+  skill-internal:
+    internal: true

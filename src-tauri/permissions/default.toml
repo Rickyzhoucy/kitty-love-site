@@ -1,0 +1,14 @@
+[[permission]]
+identifier = "allow-save-device-token"
+description = "Stores the device session token in the operating-system credential vault."
+commands.allow = ["save_device_token"]
+
+[[permission]]
+identifier = "allow-load-device-token"
+description = "Loads the device session token from the operating-system credential vault."
+commands.allow = ["load_device_token"]
+
+[[permission]]
+identifier = "allow-delete-device-token"
+description = "Removes the device session token from the operating-system credential vault."
+commands.allow = ["delete_device_token"]

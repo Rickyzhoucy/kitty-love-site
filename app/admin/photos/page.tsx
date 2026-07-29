@@ -4,20 +4,16 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, Image as ImageIcon, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import styles from '../questions/page.module.css';
-
-interface Photo {
-    id: string;
-    url: string;
-    caption: string;
-    date: string;
-    createdAt: string;
-}
+import { photosApi, type Photo } from '@/lib/api/resources';
+import { useToast } from '@/app/components/ui/Toast';
 
 export default function PhotosManagement() {
     const [photos, setPhotos] = useState<Photo[]>([]);
     const [loading, setLoading] = useState(true);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const { toast } = useToast();
 
     useEffect(() => {
         fetchPhotos();
@@ -25,10 +21,7 @@ export default function PhotosManagement() {
 
     const fetchPhotos = async () => {
         try {
-            const res = await fetch('/api/photos');
-            if (res.ok) {
-                setPhotos(await res.json());
-            }
+            setPhotos(await photosApi.list());
         } catch (err) {
             console.error('Failed to fetch photos', err);
         } finally {
@@ -38,15 +31,11 @@ export default function PhotosManagement() {
 
     const confirmDelete = async (id: string) => {
         try {
-            const res = await fetch(`/api/photos?id=${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                setPhotos(photos.filter(p => p.id !== id));
-                setDeletingId(null);
-            } else {
-                alert('删除失败');
-            }
+            await photosApi.remove(id);
+            setPhotos(photos.filter(p => p.id !== id));
+            setDeletingId(null);
         } catch {
-            alert('删除出错');
+            toast('删除失败', 'error');
         }
     };
 
@@ -88,7 +77,7 @@ export default function PhotosManagement() {
                                 >
                                     <div style={{ aspectRatio: '1', position: 'relative', overflow: 'hidden' }}>
                                         {p.url ? (
-                                            <img src={p.url} alt={p.caption} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            <Image src={p.url} alt={p.caption} fill sizes="200px" unoptimized style={{ objectFit: 'cover' }} />
                                         ) : (
                                             <div style={{ width: '100%', height: '100%', background: '#FFF3E0', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFB74D' }}>
                                                 <ImageIcon size={40} />

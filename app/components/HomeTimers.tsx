@@ -1,222 +1,150 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, X } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { AnimatePresence } from 'framer-motion';
+import { Plus } from 'lucide-react';
 import Countdown from './Countdown';
+import Modal from './ui/Modal';
+import Button from './ui/Button';
+import { Input } from './ui/Input';
+import EmptyState from './ui/EmptyState';
+import { useToast } from './ui/Toast';
+import { timersApi, type EventTimer } from '@/lib/api/resources';
+import { useResourceEvents } from '@/lib/api/useResourceEvents';
+import { cn } from '@/lib/utils';
 
-// Style internal to this component or reuse page.module.css if we pass className? 
-// For simplicity, we'll inline some styles or duplicate relevant CSS. 
-// Ideally we should import from page.module.css but Next.js CSS modules are scoped.
-// I will create a simple internal style object or use inline styles for the modal.
-
-interface EventTimer {
-    id: string;
-    title: string;
-    date: string;
-    type: 'countup' | 'countdown';
-}
-
+/** 首页计时器区块：文档流内，横向排列计时器卡片 */
 export default function HomeTimers() {
     const [timers, setTimers] = useState<EventTimer[]>([]);
     const [showAddTimer, setShowAddTimer] = useState(false);
     const [addingTimer, setAddingTimer] = useState(false);
     const [newTimer, setNewTimer] = useState({ title: '', date: '', type: 'countup' as 'countup' | 'countdown' });
+    const { toast } = useToast();
+
+    const loadTimers = useCallback(async () => {
+        try {
+            const data = await timersApi.list();
+            if (Array.isArray(data)) setTimers(data);
+        } catch (error) {
+            console.error('Failed to fetch timers', error);
+        }
+    }, []);
 
     useEffect(() => {
-        fetch('/api/timers')
-            .then(res => {
-                if (res.status === 401) {
-                    // Don't redirect if already on verify page
-                    if (!window.location.pathname.startsWith('/verify')) {
-                        window.location.href = '/verify?redirect=/';
-                    }
-                    return null;
-                }
-                return res.json();
-            })
-            .then(data => {
-                if (data && Array.isArray(data)) setTimers(data);
-            })
-            .catch(err => console.error("Failed to fetch timers", err));
-    }, []);
+        void loadTimers();
+    }, [loadTimers]);
+    useResourceEvents(['timers'], () => void loadTimers());
 
     const handleAddTimer = async (e: React.FormEvent) => {
         e.preventDefault();
         setAddingTimer(true);
         try {
-            const res = await fetch('/api/timers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newTimer)
-            });
-            if (res.ok) {
-                const added = await res.json();
-                setTimers([...timers, added]);
-                setNewTimer({ title: '', date: '', type: 'countup' });
-                setShowAddTimer(false);
-            } else {
-                alert('添加失败');
-            }
+            const added = await timersApi.create(newTimer);
+            setTimers([...timers, added]);
+            setNewTimer({ title: '', date: '', type: 'countup' });
+            setShowAddTimer(false);
+            toast('纪念日添加成功 🎉');
         } catch (err) {
-            console.error(err);
+            toast(err instanceof Error ? err.message : '添加失败', 'error');
         } finally {
             setAddingTimer(false);
         }
     };
 
     const handleDeleteTimer = async (id: string) => {
-        if (!confirm('确认删除此计时器？')) return;
-
-        // Optimistic update
         const previousTimers = [...timers];
         setTimers(timers.filter(t => t.id !== id));
-
         try {
-            const res = await fetch(`/api/timers?id=${id}`, { method: 'DELETE' });
-            if (!res.ok) throw new Error('Delete failed');
+            await timersApi.remove(id);
+            toast('已删除');
         } catch (err) {
-            console.error(err);
-            alert('删除失败，请重试');
-            setTimers(previousTimers); // Revert
+            setTimers(previousTimers);
+            toast(err instanceof Error ? err.message : '删除失败，请重试', 'error');
         }
     };
 
     return (
-        <>
-            {/* Timers List - Top Left */}
-            <div style={{ position: 'fixed', top: '20px', left: '20px', zIndex: 10 }}>
-                <AnimatePresence>
-                    {timers.map((t, idx) => (
-                        <motion.div
-                            key={t.id}
-                            initial={{ opacity: 0, x: -50 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: 0.3 + idx * 0.15 }}
-                            style={{ marginBottom: '10px' }}
-                        >
-                            <Countdown
-                                startDate={t.date}
-                                title={t.title}
-                                type={t.type}
-                                onDelete={() => handleDeleteTimer(t.id)}
-                            />
-                        </motion.div>
-                    ))}
-                </AnimatePresence>
-
-                {/* Add Timer Button */}
-                <motion.button
-                    initial={{ opacity: 0, scale: 0 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ delay: 0.5 }}
-                    onClick={() => setShowAddTimer(true)}
-                    style={{
-                        background: 'rgba(255, 255, 255, 0.8)',
-                        border: 'none', borderRadius: '50%', width: '32px', height: '32px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                        backdropFilter: 'blur(4px)'
-                    }}
-                    title="添加新计时器"
-                >
-                    <Plus size={18} color="#FF69B4" />
-                </motion.button>
+        <section aria-label="纪念日计时">
+            <div className="flex items-end justify-between mb-5 px-1">
+                <h2 className="flex items-baseline gap-3 m-0">
+                    <span aria-hidden className="font-display text-5xl font-semibold leading-none text-stroke-accent select-none">
+                        01
+                    </span>
+                    <span className="font-display text-2xl font-semibold tracking-wide text-ink">纪念日</span>
+                </h2>
+                <Button size="sm" variant="secondary" onClick={() => setShowAddTimer(true)} aria-label="添加新计时器">
+                    <Plus size={16} />
+                    添加
+                </Button>
             </div>
 
-            {/* Add Timer Modal */}
-            <AnimatePresence>
-                {showAddTimer && (
-                    <motion.div
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                        onClick={() => setShowAddTimer(false)}
-                        style={{
-                            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                            background: 'rgba(0,0,0,0.5)', zIndex: 2000,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center'
-                        }}
-                    >
-                        <motion.div
-                            style={{
-                                background: 'white', padding: '25px', borderRadius: '20px',
-                                width: '90%', maxWidth: '350px', position: 'relative',
-                                boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
-                            }}
-                            initial={{ scale: 0.8, y: 50 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.8 }}
-                            onClick={e => e.stopPropagation()}
-                        >
-                            <h3 style={{ margin: '0 0 20px', textAlign: 'center', color: '#333' }}>✨ 添加新纪念日</h3>
-                            <form onSubmit={handleAddTimer}>
-                                <div style={{ marginBottom: '15px' }}>
-                                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: '#666' }}>标题</label>
-                                    <input
-                                        required
-                                        type="text"
-                                        value={newTimer.title}
-                                        onChange={e => setNewTimer({ ...newTimer, title: e.target.value })}
-                                        placeholder="例如：第一次看电影"
-                                        style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', outline: 'none' }}
-                                    />
-                                </div>
-                                <div style={{ marginBottom: '15px' }}>
-                                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: '#666' }}>日期</label>
-                                    <input
-                                        required
-                                        type="datetime-local"
-                                        value={newTimer.date}
-                                        onChange={e => setNewTimer({ ...newTimer, date: e.target.value })}
-                                        style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', outline: 'none' }}
-                                    />
-                                </div>
-                                <div style={{ marginBottom: '20px' }}>
-                                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: '#666' }}>类型</label>
-                                    <div style={{ display: 'flex', gap: '10px' }}>
-                                        <button
-                                            type="button"
-                                            onClick={() => setNewTimer({ ...newTimer, type: 'countup' })}
-                                            style={{
-                                                flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #ddd',
-                                                background: newTimer.type === 'countup' ? '#E0F2F1' : 'white',
-                                                color: newTimer.type === 'countup' ? '#00695C' : '#666'
-                                            }}
-                                        >
-                                            正计时
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setNewTimer({ ...newTimer, type: 'countdown' })}
-                                            style={{
-                                                flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #ddd',
-                                                background: newTimer.type === 'countdown' ? '#FFEBEE' : 'white',
-                                                color: newTimer.type === 'countdown' ? '#C62828' : '#666'
-                                            }}
-                                        >
-                                            倒计时
-                                        </button>
-                                    </div>
-                                </div>
+            {timers.length === 0 ? (
+                <EmptyState icon="⏳" title="还没有纪念日" hint="添加一个值得纪念的日子吧" />
+            ) : (
+                /* 横向滑动卡带：snap 对齐，突破网格宽度 */
+                <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-3 snap-x snap-mandatory">
+                    <AnimatePresence>
+                        {timers.map(t => (
+                            <Countdown
+                                key={t.id}
+                                startDate={t.date}
+                                title={t.title}
+                                type={t.type as 'countup' | 'countdown'}
+                                onDelete={() => handleDeleteTimer(t.id)}
+                            />
+                        ))}
+                    </AnimatePresence>
+                </div>
+            )}
+
+            <Modal open={showAddTimer} onOpenChange={setShowAddTimer} title="添加新纪念日">
+                <form onSubmit={handleAddTimer} className="flex flex-col gap-4">
+                    <div>
+                        <label htmlFor="timer-title" className="block mb-1.5 text-sm text-ink-muted">标题</label>
+                        <Input
+                            id="timer-title"
+                            required
+                            type="text"
+                            value={newTimer.title}
+                            onChange={e => setNewTimer({ ...newTimer, title: e.target.value })}
+                            placeholder="例如：第一次看电影"
+                        />
+                    </div>
+                    <div>
+                        <label htmlFor="timer-date" className="block mb-1.5 text-sm text-ink-muted">日期</label>
+                        <Input
+                            id="timer-date"
+                            required
+                            type="datetime-local"
+                            value={newTimer.date}
+                            onChange={e => setNewTimer({ ...newTimer, date: e.target.value })}
+                        />
+                    </div>
+                    <div>
+                        <span className="block mb-1.5 text-sm text-ink-muted">类型</span>
+                        <div className="flex gap-2">
+                            {(['countup', 'countdown'] as const).map(type => (
                                 <button
-                                    type="submit"
-                                    disabled={addingTimer}
-                                    style={{
-                                        width: '100%', padding: '12px', borderRadius: '12px', border: 'none',
-                                        background: 'linear-gradient(135deg, #FF69B4, #fb7185)', color: 'white', fontWeight: 'bold',
-                                        cursor: 'pointer', opacity: addingTimer ? 0.7 : 1
-                                    }}
+                                    key={type}
+                                    type="button"
+                                    onClick={() => setNewTimer({ ...newTimer, type })}
+                                    className={cn(
+                                        'flex-1 h-10 rounded-full border transition-all cursor-pointer',
+                                        newTimer.type === type
+                                            ? 'border-accent bg-accent text-on-accent font-medium shadow-soft'
+                                            : 'border-sunken bg-surface text-ink-muted hover:border-accent/40'
+                                    )}
                                 >
-                                    {addingTimer ? '添加中...' : '确认添加'}
+                                    {type === 'countup' ? '正计时' : '倒计时'}
                                 </button>
-                            </form>
-                            <button
-                                onClick={() => setShowAddTimer(false)}
-                                style={{ position: 'absolute', top: '15px', right: '15px', background: 'transparent', border: 'none', cursor: 'pointer', color: '#999' }}
-                            >
-                                <X size={20} />
-                            </button>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </>
+                            ))}
+                        </div>
+                    </div>
+                    <Button type="submit" disabled={addingTimer} className="w-full">
+                        {addingTimer ? '添加中...' : '确认添加'}
+                    </Button>
+                </form>
+            </Modal>
+        </section>
     );
 }

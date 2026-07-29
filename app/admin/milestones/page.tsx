@@ -5,19 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, Star, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import styles from '../questions/page.module.css';
-
-interface Milestone {
-    id: string;
-    title: string;
-    date: string;
-    description: string;
-    createdAt: string;
-}
+import { milestonesApi, type Milestone } from '@/lib/api/resources';
+import { useToast } from '@/app/components/ui/Toast';
 
 export default function MilestonesManagement() {
     const [milestones, setMilestones] = useState<Milestone[]>([]);
     const [loading, setLoading] = useState(true);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const { toast } = useToast();
 
     useEffect(() => {
         fetchMilestones();
@@ -25,10 +20,7 @@ export default function MilestonesManagement() {
 
     const fetchMilestones = async () => {
         try {
-            const res = await fetch('/api/milestones');
-            if (res.ok) {
-                setMilestones(await res.json());
-            }
+            setMilestones(await milestonesApi.list());
         } catch (err) {
             console.error('Failed to fetch milestones', err);
         } finally {
@@ -38,15 +30,11 @@ export default function MilestonesManagement() {
 
     const confirmDelete = async (id: string) => {
         try {
-            const res = await fetch(`/api/milestones?id=${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                setMilestones(milestones.filter(m => m.id !== id));
-                setDeletingId(null);
-            } else {
-                alert('删除失败');
-            }
+            await milestonesApi.remove(id);
+            setMilestones(milestones.filter(m => m.id !== id));
+            setDeletingId(null);
         } catch {
-            alert('删除出错');
+            toast('删除失败', 'error');
         }
     };
 

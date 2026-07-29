@@ -1,623 +1,224 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { Settings, Save, Upload, ArrowLeft, RefreshCw, Calendar, FileText, Box, Server } from 'lucide-react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { ArrowLeft, Calendar, FileText, History, Save, Settings } from 'lucide-react';
 import Link from 'next/link';
+import { getPet, updatePet } from '@/lib/api/pet';
+import {
+    configApi,
+    type SiteConfigHistory,
+} from '@/lib/api/resources';
+import { PET_ASSETS, type PetAssetId } from '@/app/components/FloatingPet/petConfig';
 import styles from '../questions/page.module.css';
 
 interface ConfigState {
     letter_title: string;
     letter_content: string;
     main_timer_date: string;
-    home_model_url: string;
-    mcp_config: string;
-    openai_api_key: string;
-    openai_base_url: string;
-    openai_model: string;
 }
 
-// 1. Move Card component outside to prevent re-rendering and focus loss
-const Card = ({ title, icon: Icon, children, onSave, onReset, saving }: any) => (
-    <div style={{
-        background: 'white', padding: '20px', borderRadius: '15px',
-        marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
-        border: '1px solid #F0F0F0'
-    }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ background: '#FFF3E0', padding: '8px', borderRadius: '8px' }}>
-                    <Icon size={20} color="#FFB74D" />
-                </div>
-                <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#333' }}>{title}</h3>
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                    onClick={onReset}
-                    style={{
-                        background: 'transparent', border: '1px solid #ffccbc', color: '#ff7043',
-                        padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem',
-                        display: 'flex', alignItems: 'center', gap: '4px'
-                    }}
-                >
-                    <RefreshCw size={14} /> 恢复默认
-                </button>
-                <button
-                    onClick={onSave}
-                    disabled={!!saving}
-                    style={{
-                        background: '#4DD0E1', border: 'none', color: 'white',
-                        padding: '6px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem',
-                        display: 'flex', alignItems: 'center', gap: '4px'
-                    }}
-                >
-                    {saving ? '...' : <><Save size={14} /> 保存</>}
-                </button>
-            </div>
-        </div>
-        {children}
-    </div>
-);
-
-// 0. Define Defaults
-const DEFAULT_CONFIG = {
+const DEFAULT_CONFIG: ConfigState = {
     letter_title: '致我最爱的人',
-    letter_content: '<p>亲爱的...</p>',
+    letter_content: '亲爱的…',
     main_timer_date: '2025-11-30',
-    home_model_url: '',
-    mcp_config: '{\n  "servers": []\n}',
-    openai_api_key: '',
-    openai_base_url: 'https://api.openai.com/v1',
-    openai_model: 'gpt-3.5-turbo'
 };
 
-// 宠物设置卡片
-const PetConfigCard = () => {
-    const [petMode, setPetMode] = useState<'live2d' | 'classic'>('live2d');
-    const [customSprite, setCustomSprite] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true);
+function ConfigCard({
+    title,
+    children,
+    saving,
+    onSave,
+    onReset,
+}: {
+    title: string;
+    children: ReactNode;
+    saving: boolean;
+    onSave: () => void;
+    onReset: () => void;
+}) {
+    return (
+        <section className="ui-card" style={{ padding: 20, marginBottom: 20 }}>
+            <header style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+                <h3 style={{ margin: 0, color: 'var(--color-ink)' }}>{title}</h3>
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="ui-button ui-button--ghost" onClick={onReset}>恢复默认</button>
+                    <button className="ui-button" disabled={saving} onClick={onSave}>
+                        <Save size={15} /> {saving ? '保存中…' : '保存'}
+                    </button>
+                </div>
+            </header>
+            {children}
+        </section>
+    );
+}
+
+function PetConfigCard() {
+    const [assetId, setAssetId] = useState<PetAssetId>('kitty');
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-        fetch('/api/pet').then(res => res.json()).then(data => {
-            if (data && !data.error) {
-                setPetMode(data.mode || 'live2d');
-                setCustomSprite(data.customSprite);
-            }
-            setLoading(false);
-        });
+        getPet().then(pet => setAssetId(pet.assetId ?? 'kitty')).catch(() => undefined);
     }, []);
 
-    const handleSave = async () => {
+    const save = async () => {
         setSaving(true);
         try {
-            await fetch('/api/pet', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'updateMode', mode: petMode, customSprite })
-            });
-            alert('宠物设置已保存');
-        } catch {
-            alert('保存失败');
+            await updatePet({ assetId });
         } finally {
             setSaving(false);
         }
     };
 
-    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const formData = new FormData();
-        formData.append('file', file);
-        try {
-            const res = await fetch('/api/upload', { method: 'POST', body: formData });
-            if (res.ok) {
-                const data = await res.json();
-                setCustomSprite(data.url);
-            }
-        } catch {
-            alert('上传失败');
-        }
-    };
-
-    if (loading) return <div>Loading...</div>;
-
     return (
-        <div style={{
-            background: 'white', padding: '20px', borderRadius: '15px',
-            marginBottom: '20px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
-            border: '1px solid #F0F0F0'
-        }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ background: '#FFF3E0', padding: '8px', borderRadius: '8px' }}>
-                        <Box size={20} color="#FFB74D" />
-                    </div>
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#333' }}>悬浮宠物设置</h3>
-                </div>
-                <button
-                    onClick={handleSave}
-                    disabled={saving}
-                    style={{
-                        background: '#4DD0E1', border: 'none', color: 'white',
-                        padding: '6px 16px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.85rem'
-                    }}
-                >
-                    {saving ? '...' : '保存'}
+        <section className="ui-card" style={{ padding: 20, marginBottom: 20 }}>
+            <header style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                <h3 style={{ margin: 0 }}>桌面伙伴外观</h3>
+                <button className="ui-button" disabled={saving} onClick={save}>
+                    <Save size={15} /> {saving ? '保存中…' : '保存'}
                 </button>
-            </div>
-
-            <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '15px' }}>
-                <label>
-                    <input
-                        type="radio"
-                        name="petMode"
-                        checked={petMode === 'live2d'}
-                        onChange={() => setPetMode('live2d')}
-                    /> Live2D 模式 (动态)
-                </label>
-                <label>
-                    <input
-                        type="radio"
-                        name="petMode"
-                        checked={petMode === 'classic'}
-                        onChange={() => setPetMode('classic')}
-                    /> 传统模式 (自定义图片)
-                </label>
-            </div>
-
-            {petMode === 'classic' && (
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                    {customSprite ? (
-                        <img src={customSprite} alt="Custom" style={{ width: 50, height: 50, borderRadius: '50%', objectFit: 'cover' }} />
-                    ) : (
-                        <span style={{ fontSize: '2rem' }}>😺</span>
-                    )}
-                    <label style={{
-                        background: '#4DD0E1', color: 'white', padding: '6px 12px',
-                        borderRadius: '6px', cursor: 'pointer', fontSize: '0.9rem'
-                    }}>
-                        上传图片
-                        <input type="file" hidden accept="image/*" onChange={handleUpload} />
+            </header>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 10 }}>
+                {PET_ASSETS.map(asset => (
+                    <label key={asset.id} className="ui-field" style={{ cursor: 'pointer', padding: 12 }}>
+                        <span>
+                            <input
+                                type="radio"
+                                name="petAsset"
+                                checked={assetId === asset.id}
+                                onChange={() => setAssetId(asset.id)}
+                            />{' '}
+                            {asset.emoji} {asset.name}
+                        </span>
                     </label>
-                    {customSprite && (
-                        <button onClick={() => setCustomSprite(null)} style={{ border: '1px solid red', background: 'transparent', color: 'red', borderRadius: '6px', padding: '6px 12px', cursor: 'pointer' }}>
-                            清除图片
-                        </button>
-                    )}
-                </div>
-            )}
-        </div>
+                ))}
+            </div>
+        </section>
     );
-};
+}
 
 export default function SiteConfigPage() {
     const [config, setConfig] = useState<ConfigState>(DEFAULT_CONFIG);
-    const [history, setHistory] = useState<any[]>([]);
-    const [activeTab, setActiveTab] = useState<'settings' | 'history'>('settings');
-    const [loading, setLoading] = useState(true);
+    const [history, setHistory] = useState<SiteConfigHistory[]>([]);
+    const [tab, setTab] = useState<'settings' | 'history'>('settings');
     const [saving, setSaving] = useState<string | null>(null);
-    const [modal, setModal] = useState<{
-        open: boolean;
-        title: string;
-        message: string;
-        type: 'alert' | 'confirm';
-        onConfirm?: () => void;
-    }>({ open: false, title: '', message: '', type: 'alert' });
+    const [message, setMessage] = useState('');
 
-    useEffect(() => {
-        fetchConfig();
-        fetchHistory();
+    const refresh = useCallback(async () => {
+        const [values, entries] = await Promise.all([configApi.get(), configApi.history()]);
+        setConfig({
+            letter_title: values.letter_title || DEFAULT_CONFIG.letter_title,
+            letter_content: values.letter_content || DEFAULT_CONFIG.letter_content,
+            main_timer_date: values.main_timer_date || DEFAULT_CONFIG.main_timer_date,
+        });
+        setHistory(entries);
     }, []);
 
-    const showModal = (title: string, message: string, type: 'alert' | 'confirm' = 'alert', onConfirm?: () => void) => {
-        setModal({ open: true, title, message, type, onConfirm });
-    };
+    useEffect(() => {
+        refresh().catch(error => setMessage(error instanceof Error ? error.message : '加载失败'));
+    }, [refresh]);
 
-    const closeModal = () => {
-        setModal(prev => ({ ...prev, open: false }));
-    };
-
-    const fetchConfig = async () => {
+    const save = async (key: keyof ConfigState | 'letter') => {
+        setSaving(key);
+        setMessage('');
         try {
-            const res = await fetch('/api/admin/config');
-            if (res.ok) {
-                const data = await res.json();
-                setConfig({
-                    letter_title: data.letter_title || DEFAULT_CONFIG.letter_title,
-                    letter_content: data.letter_content || '',
-                    main_timer_date: data.main_timer_date || '2025-11-30',
-                    home_model_url: data.home_model_url || '',
-                    mcp_config: data.mcp_config || DEFAULT_CONFIG.mcp_config,
-                    openai_api_key: data.openai_api_key || '',
-                    openai_base_url: data.openai_base_url || DEFAULT_CONFIG.openai_base_url,
-                    openai_model: data.openai_model || DEFAULT_CONFIG.openai_model
-                });
-            }
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const fetchHistory = async () => {
-        try {
-            const res = await fetch('/api/admin/config/history');
-            if (res.ok) setHistory(await res.json());
-        } catch (err) {
-            console.error(err);
-        }
-    };
-
-    const handleSave = async (section: 'anniversary' | 'letter' | 'model' | 'mcp' | 'ai') => {
-        setSaving(section);
-        const dataToSave: Partial<ConfigState> = {};
-
-        if (section === 'anniversary') {
-            dataToSave.main_timer_date = config.main_timer_date;
-        } else if (section === 'letter') {
-            dataToSave.letter_title = config.letter_title;
-            dataToSave.letter_content = config.letter_content;
-        } else if (section === 'model') {
-            dataToSave.home_model_url = config.home_model_url;
-        } else if (section === 'mcp') {
-            dataToSave.mcp_config = config.mcp_config;
-        } else if (section === 'ai') {
-            dataToSave.openai_api_key = config.openai_api_key;
-            dataToSave.openai_base_url = config.openai_base_url;
-            dataToSave.openai_model = config.openai_model;
-        }
-
-        try {
-            const res = await fetch('/api/admin/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(dataToSave)
-            });
-            if (res.ok) {
-                showModal('成功', '保存成功', 'alert', () => fetchHistory());
-            } else {
-                showModal('错误', '保存失败');
-            }
-        } catch {
-            showModal('错误', '网络错误');
+            const values = key === 'letter'
+                ? { letter_title: config.letter_title, letter_content: config.letter_content }
+                : { [key]: config[key] };
+            await configApi.update(values);
+            await refresh();
+            setMessage('保存成功');
+        } catch (error) {
+            setMessage(error instanceof Error ? error.message : '保存失败');
         } finally {
             setSaving(null);
         }
     };
 
-    const handleReset = async (keys: string[]) => {
-        showModal('确认恢复默认', '确定要恢复默认设置吗？当前的自定义配置将被删除。', 'confirm', async () => {
-            try {
-                const res = await fetch(`/api/admin/config?keys=${keys.join(',')}`, {
-                    method: 'DELETE'
-                });
-                if (res.ok) {
-                    showModal('成功', '已恢复默认');
-                    fetchConfig();
-                    fetchHistory();
-                } else {
-                    showModal('错误', '重置失败');
-                }
-            } catch {
-                showModal('错误', '重置出错');
-            }
-        });
+    const reset = async (keys: (keyof ConfigState)[]) => {
+        await configApi.reset(keys);
+        await refresh();
+        setMessage('已恢复默认');
     };
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-
-        const formData = new FormData();
-        formData.append('file', file);
-
-        try {
-            const res = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData
-            });
-            if (res.ok) {
-                const data = await res.json();
-                setConfig(prev => ({ ...prev, home_model_url: data.url }));
-                e.target.value = '';
-                showModal('上传成功', '模型上传成功，请点击右上角保存按钮应用更改！');
-            } else {
-                showModal('错误', '上传失败');
-            }
-        } catch {
-            showModal('错误', '上传出错');
-        }
+    const rollback = async (id: string) => {
+        await configApi.rollback(id);
+        await refresh();
+        setMessage('已回滚');
     };
-
-    const handleRollback = async (id: string) => {
-        showModal('确认回滚', '确定要回滚到这个版本吗？', 'confirm', async () => {
-            try {
-                const res = await fetch('/api/admin/config/history', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id })
-                });
-                if (res.ok) {
-                    showModal('成功', '回滚成功');
-                    fetchConfig();
-                    fetchHistory();
-                } else {
-                    showModal('错误', '回滚失败');
-                }
-            } catch {
-                showModal('错误', '回滚出错');
-            }
-        });
-    };
-
-    if (loading) return <div className={styles.loading}>加载中...</div>;
 
     return (
-        <div className={styles.container}>
-            {/* Modal */}
-            {modal.open && (
-                <div style={{
-                    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                    backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000,
-                    display: 'flex', justifyContent: 'center', alignItems: 'center'
-                }}>
-                    <div style={{
-                        background: 'white', padding: '25px', borderRadius: '15px',
-                        width: '90%', maxWidth: '400px',
-                        boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-                        animation: 'fadeIn 0.2s ease-out'
-                    }}>
-                        <h3 style={{ margin: '0 0 10px', fontSize: '1.2rem', color: '#333' }}>{modal.title}</h3>
-                        <p style={{ margin: '0 0 20px', color: '#666', lineHeight: '1.5' }}>{modal.message}</p>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                            {modal.type === 'confirm' && (
-                                <button
-                                    onClick={closeModal}
-                                    style={{
-                                        padding: '8px 16px', borderRadius: '8px', border: '1px solid #ddd',
-                                        background: 'transparent', cursor: 'pointer', color: '#666'
-                                    }}
-                                >
-                                    取消
-                                </button>
-                            )}
-                            <button
-                                onClick={() => {
-                                    if (modal.onConfirm) modal.onConfirm();
-                                    closeModal();
-                                }}
-                                style={{
-                                    padding: '8px 16px', borderRadius: '8px', border: 'none',
-                                    background: '#F48FB1', cursor: 'pointer', color: 'white', fontWeight: 'bold'
-                                }}
-                            >
-                                确定
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <header className={styles.header}>
-                <Link href="/admin/dashboard" className={styles.backBtn}>
-                    <ArrowLeft size={20} /> 返回
-                </Link>
-                <div className={styles.headerContent}>
-                    <Settings size={28} color="#FFB74D" />
-                    <div>
-                        <h1>网站全局配置</h1>
-                        <p>自定义与模块化管理</p>
-                    </div>
-                </div>
-            </header>
-
-            <div style={{ maxWidth: '800px', margin: '0 auto 1.5rem', display: 'flex', gap: '10px' }}>
-                <button
-                    onClick={() => setActiveTab('settings')}
-                    style={{
-                        padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                        background: activeTab === 'settings' ? '#F48FB1' : '#E0E0E0',
-                        color: activeTab === 'settings' ? 'white' : '#757575', fontWeight: 'bold'
-                    }}
-                >
-                    配置模块
-                </button>
-                <button
-                    onClick={() => setActiveTab('history')}
-                    style={{
-                        padding: '10px 20px', borderRadius: '8px', border: 'none', cursor: 'pointer',
-                        background: activeTab === 'history' ? '#F48FB1' : '#E0E0E0',
-                        color: activeTab === 'history' ? 'white' : '#757575', fontWeight: 'bold'
-                    }}
-                >
-                    修改历史
-                </button>
+        <main className={styles.container}>
+            <div className={styles.header}>
+                <Link href="/admin/dashboard" className={styles.backBtn}><ArrowLeft size={20} /></Link>
+                <h1><Settings size={24} /> 站点设置</h1>
             </div>
 
-            {activeTab === 'settings' ? (
-                <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+            {message && <p role="status" className="ui-card" style={{ padding: 12 }}>{message}</p>}
 
-                    {/* Anniversary Module */}
-                    <Card
-                        title="纪念日设置"
-                        icon={Calendar}
-                        saving={saving === 'anniversary'}
-                        onSave={() => handleSave('anniversary')}
-                        onReset={() => handleReset(['main_timer_date'])}
+            <nav style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                <button className="ui-button" onClick={() => setTab('settings')}>
+                    <Settings size={16} /> 设置
+                </button>
+                <button className="ui-button ui-button--ghost" onClick={() => setTab('history')}>
+                    <History size={16} /> 修改历史
+                </button>
+            </nav>
+
+            {tab === 'settings' ? (
+                <>
+                    <ConfigCard
+                        title="纪念日"
+                        saving={saving === 'main_timer_date'}
+                        onSave={() => save('main_timer_date')}
+                        onReset={() => reset(['main_timer_date'])}
                     >
-                        <div className={styles.inputGroup}>
-                            <label>我们在一起的时间（主计时器）</label>
+                        <label className="ui-field">
+                            <span><Calendar size={15} /> 日期</span>
                             <input
                                 type="date"
-                                value={config.main_timer_date || ''}
-                                onChange={(e) => setConfig({ ...config, main_timer_date: e.target.value })}
+                                value={config.main_timer_date}
+                                onChange={event => setConfig({ ...config, main_timer_date: event.target.value })}
                             />
-                            <small style={{ color: '#999' }}>默认值：2025-11-30</small>
-                        </div>
-                    </Card>
+                        </label>
+                    </ConfigCard>
 
-                    {/* Letter Module */}
-                    <Card
-                        title="情书设置"
-                        icon={FileText}
+                    <ConfigCard
+                        title="首页情书"
                         saving={saving === 'letter'}
-                        onSave={() => handleSave('letter')}
-                        onReset={() => handleReset(['letter_title', 'letter_content'])}
+                        onSave={() => save('letter')}
+                        onReset={() => reset(['letter_title', 'letter_content'])}
                     >
-                        <div className={styles.inputGroup}>
-                            <label>情书标题</label>
+                        <label className="ui-field">
+                            <span><FileText size={15} /> 标题</span>
                             <input
-                                type="text"
-                                value={config.letter_title || ''}
-                                onChange={(e) => setConfig({ ...config, letter_title: e.target.value })}
-                                placeholder="致我最爱的人"
+                                value={config.letter_title}
+                                onChange={event => setConfig({ ...config, letter_title: event.target.value })}
                             />
-                        </div>
-                        <div className={styles.inputGroup}>
-                            <label>情书内容 (支持HTML)</label>
+                        </label>
+                        <label className="ui-field" style={{ marginTop: 12 }}>
+                            <span>内容</span>
                             <textarea
-                                style={{
-                                    width: '100%', minHeight: '150px', padding: '10px',
-                                    border: '2px solid #E0E0E0', borderRadius: '10px', fontSize: '1rem', outline: 'none'
-                                }}
-                                value={config.letter_content || ''}
-                                onChange={(e) => setConfig({ ...config, letter_content: e.target.value })}
-                                placeholder="写下你想对TA说的话..."
+                                rows={8}
+                                value={config.letter_content}
+                                onChange={event => setConfig({ ...config, letter_content: event.target.value })}
                             />
-                        </div>
-                    </Card>
+                        </label>
+                    </ConfigCard>
 
-                    {/* Model Module */}
-                    <Card
-                        title="3D 模型设置"
-                        icon={Box}
-                        saving={saving === 'model'}
-                        onSave={() => handleSave('model')}
-                        onReset={() => handleReset(['home_model_url'])}
-                    >
-                        <div className={styles.inputGroup}>
-                            <label>首页 3D 模型 (.glb)</label>
-                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                                <input
-                                    type="text"
-                                    value={config.home_model_url || ''}
-                                    readOnly
-                                    placeholder="默认 Hello Kitty 模型"
-                                    style={{ flex: 1 }}
-                                />
-                                <label className={styles.uploadBtn} style={{
-                                    background: '#4DD0E1', color: 'white', padding: '8px 15px',
-                                    borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px'
-                                }}>
-                                    <Upload size={18} />
-                                    上传
-                                    <input type="file" accept=".glb,.gltf" hidden onChange={handleFileUpload} />
-                                </label>
-                            </div>
-                        </div>
-                    </Card>
-
-                    {/* MCP Configuration Module */}
-                    <Card
-                        title="MCP 协议配置 (Model Context Protocol)"
-                        icon={Server}
-                        saving={saving === 'mcp'}
-                        onSave={() => handleSave('mcp')}
-                        onReset={() => handleReset(['mcp_config'])}
-                    >
-                        <div className={styles.inputGroup}>
-                            <label>MCP Server Config (JSON)</label>
-                            <textarea
-                                style={{
-                                    width: '100%', minHeight: '150px', padding: '10px',
-                                    border: '2px solid #E0E0E0', borderRadius: '10px',
-                                    fontSize: '0.9rem', outline: 'none', fontFamily: 'monospace',
-                                    backgroundColor: '#f8f9fa'
-                                }}
-                                value={config.mcp_config || ''}
-                                onChange={(e) => setConfig({ ...config, mcp_config: e.target.value })}
-                                placeholder='{ "servers": [] }'
-                            />
-                            <div style={{ marginTop: '8px', fontSize: '0.8rem', color: '#666' }}>
-                                配置用于连接外部 MCP 服务器的 JSON 参数。修改后需重启服务生效。
-                            </div>
-                        </div>
-                    </Card>
-
-                    {/* AI Chat Configuration Module */}
-                    <Card
-                        title="AI 聊天配置"
-                        icon={Server}
-                        saving={saving === 'ai'}
-                        onSave={() => handleSave('ai')}
-                        onReset={() => handleReset(['openai_api_key', 'openai_base_url', 'openai_model'])}
-                    >
-                        <div className={styles.inputGroup}>
-                            <label>OpenAI API Key</label>
-                            <input
-                                type="password"
-                                value={config.openai_api_key || ''}
-                                onChange={(e) => setConfig({ ...config, openai_api_key: e.target.value })}
-                                placeholder="sk-..."
-                            />
-                        </div>
-                        <div className={styles.inputGroup}>
-                            <label>OpenAI Base URL</label>
-                            <input
-                                type="text"
-                                value={config.openai_base_url || ''}
-                                onChange={(e) => setConfig({ ...config, openai_base_url: e.target.value })}
-                                placeholder="https://api.openai.com/v1"
-                            />
-                        </div>
-                        <div className={styles.inputGroup}>
-                            <label>Model Name</label>
-                            <input
-                                type="text"
-                                value={config.openai_model || ''}
-                                onChange={(e) => setConfig({ ...config, openai_model: e.target.value })}
-                                placeholder="gpt-3.5-turbo"
-                            />
-                        </div>
-                    </Card>
-
-                    {/* Floating Pet Settings */}
                     <PetConfigCard />
-
-                </div>
+                </>
             ) : (
-                <section className={styles.listSection} style={{ maxWidth: '800px', margin: '0 auto' }}>
-                    {/* Reuse existing history list UI */}
-                    {history.length === 0 ? <p className={styles.empty}>暂无修改记录</p> : (
-                        <div className={styles.list}>
-                            {history.map((h) => (
-                                <div key={h.id} className={styles.questionItem} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '8px' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                                        <span style={{ background: '#EEEEEE', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem', color: '#666' }}>
-                                            {h.key}
-                                        </span>
-                                        <small style={{ color: '#999' }}>{new Date(h.createdAt).toLocaleString()}</small>
-                                    </div>
-                                    <div style={{ fontSize: '0.9rem', color: '#333', background: '#FAFAFA', width: '100%', padding: '8px', borderRadius: '6px', wordBreak: 'break-all' }}>
-                                        {h.value === '[RESET TO DEFAULT]' ? <span style={{ color: '#ff7043' }}>已重置为默认值</span> : (h.value.length > 100 ? h.value.substring(0, 100) + '...' : h.value)}
-                                    </div>
-                                    <button
-                                        onClick={() => handleRollback(h.id)}
-                                        style={{
-                                            background: 'transparent', border: '1px solid #FFAB91', color: '#FF5722',
-                                            padding: '4px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem',
-                                            alignSelf: 'flex-end'
-                                        }}
-                                    >
-                                        回滚到此版本
-                                    </button>
-                                </div>
-                            ))}
+                <section className="ui-card" style={{ padding: 20 }}>
+                    {history.length === 0 ? <p>暂无修改记录</p> : history.map(entry => (
+                        <div key={entry.id} style={{ borderBottom: '1px solid var(--color-sunken)', padding: '12px 0' }}>
+                            <strong>{entry.key}</strong>
+                            <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{entry.value}</p>
+                            <small>{new Date(entry.createdAt).toLocaleString()}</small>{' '}
+                            <button className="ui-button ui-button--ghost" onClick={() => rollback(entry.id)}>回滚</button>
                         </div>
-                    )}
+                    ))}
                 </section>
             )}
-        </div>
+        </main>
     );
 }

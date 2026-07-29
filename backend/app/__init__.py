@@ -1,0 +1,2 @@
+"""Kitty Love companion backend."""
+

@@ -1,68 +1,44 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, Plus, Clock, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import styles from '../questions/page.module.css';
-
-interface Timer {
-    id: string;
-    title: string;
-    date: string;
-    type: 'countdown' | 'countup';
-    description?: string;
-}
+import { timersApi, type EventTimer } from '@/lib/api/resources';
+import { useToast } from '@/app/components/ui/Toast';
 
 export default function TimersManagement() {
-    const [timers, setTimers] = useState<Timer[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [timers, setTimers] = useState<EventTimer[]>([]);
     const [newTimer, setNewTimer] = useState({ title: '', date: '', type: 'countup', description: '' });
     const [adding, setAdding] = useState(false);
+    const [deletingId, setDeletingId] = useState<string | null>(null);
+    const { toast } = useToast();
 
     useEffect(() => {
-        fetchTimers();
-    }, []);
-
-    const fetchTimers = async () => {
-        try {
-            const res = await fetch('/api/timers');
-            if (res.ok) setTimers(await res.json());
-        } finally {
-            setLoading(false);
-        }
-    };
+        timersApi.list().then(setTimers).catch(() => {
+            toast('加载计时器失败', 'error');
+        });
+    }, [toast]);
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
         setAdding(true);
         try {
-            const res = await fetch('/api/timers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newTimer)
-            });
-            if (res.ok) {
-                const added = await res.json();
-                setTimers([...timers, added]);
-                setNewTimer({ title: '', date: '', type: 'countup', description: '' });
-            } else {
-                alert('添加失败');
-            }
+            const added = await timersApi.create(newTimer);
+            setTimers([...timers, added]);
+            setNewTimer({ title: '', date: '', type: 'countup', description: '' });
         } finally {
             setAdding(false);
         }
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('确定删除?')) return;
         try {
-            const res = await fetch(`/api/timers?id=${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                setTimers(timers.filter(t => t.id !== id));
-            }
+            await timersApi.remove(id);
+            setTimers(timers.filter(t => t.id !== id));
+            setDeletingId(null);
         } catch {
-            alert('删除出错');
+            toast('删除失败', 'error');
         }
     };
 
@@ -96,7 +72,10 @@ export default function TimersManagement() {
                         <label>类型</label>
                         <select
                             value={newTimer.type}
-                            onChange={e => setNewTimer({ ...newTimer, type: e.target.value as any })}
+                            onChange={e => setNewTimer({
+                                ...newTimer,
+                                type: e.target.value as 'countup' | 'countdown',
+                            })}
                             style={{ padding: '0.8rem', borderRadius: '10px', border: '2px solid #E0E0E0' }}
                         >
                             <option value="countup">正计时 (已过去多久)</option>
@@ -127,9 +106,16 @@ export default function TimersManagement() {
                                 </div>
                                 <p style={{ color: '#666', margin: '5px 0' }}>{t.date}</p>
                             </div>
-                            <button onClick={() => handleDelete(t.id)} className={styles.deleteBtn}>
-                                <Trash2 size={18} />
-                            </button>
+                            {deletingId === t.id ? (
+                                <div className={styles.confirmDelete}>
+                                    <button onClick={() => handleDelete(t.id)} className={styles.confirmBtn}>确定</button>
+                                    <button onClick={() => setDeletingId(null)} className={styles.cancelBtn}>取消</button>
+                                </div>
+                            ) : (
+                                <button onClick={() => setDeletingId(t.id)} className={styles.deleteBtn}>
+                                    <Trash2 size={18} />
+                                </button>
+                            )}
                         </div>
                     ))}
                 </div>

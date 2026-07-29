@@ -1,6 +1,6 @@
 .container {
     min-height: 100vh;
-    background: #F5F5F5;
+    background: var(--color-sunken);
     padding: 1rem;
 }
 
@@ -13,7 +13,7 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    color: #90A4AE;
+    color: var(--color-ink-muted);
     text-decoration: none;
     font-size: 0.9rem;
     margin-bottom: 1rem;
@@ -21,14 +21,14 @@
 }
 
 .backBtn:hover {
-    color: #F48FB1;
+    color: var(--color-accent);
 }
 
 .headerContent {
     display: flex;
     align-items: center;
     gap: 1rem;
-    background: white;
+    background: var(--color-surface);
     padding: 1.5rem;
     border-radius: 16px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
@@ -36,13 +36,13 @@
 
 .headerContent h1 {
     margin: 0;
-    color: #546E7A;
+    color: var(--color-ink);
     font-size: 1.3rem;
 }
 
 .headerContent p {
     margin: 0.3rem 0 0;
-    color: #90A4AE;
+    color: var(--color-ink-muted);
     font-size: 0.9rem;
 }
 
@@ -50,7 +50,7 @@
 .listSection {
     max-width: 800px;
     margin: 0 auto 2rem;
-    background: white;
+    background: var(--color-surface);
     padding: 1.5rem;
     border-radius: 16px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
@@ -61,11 +61,11 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: #546E7A;
+    color: var(--color-ink);
     font-size: 1.1rem;
     margin: 0 0 1.2rem;
     padding-bottom: 0.8rem;
-    border-bottom: 2px solid #F8BBD0;
+    border-bottom: 2px solid var(--color-accent-soft);
 }
 
 .form {
@@ -82,13 +82,13 @@
 
 .inputGroup label {
     font-size: 0.9rem;
-    color: #546E7A;
+    color: var(--color-ink);
     font-weight: 500;
 }
 
 .inputGroup input {
     padding: 0.8rem 1rem;
-    border: 2px solid #E0E0E0;
+    border: 2px solid var(--color-sunken);
     border-radius: 10px;
     font-size: 1rem;
     outline: none;
@@ -96,24 +96,24 @@
 }
 
 .inputGroup input:focus {
-    border-color: #F48FB1;
+    border-color: var(--color-accent);
 }
 
 .inputGroup small {
-    color: #90A4AE;
+    color: var(--color-ink-muted);
     font-size: 0.8rem;
 }
 
 .error {
-    color: #E53935;
+    color: var(--color-danger);
     font-size: 0.9rem;
     margin: 0;
 }
 
 .addBtn {
     padding: 0.9rem;
-    background: linear-gradient(135deg, #F48FB1, #E91E63);
-    color: white;
+    background: linear-gradient(135deg, var(--color-accent), var(--color-accent-strong));
+    color: var(--color-on-accent);
     border: none;
     border-radius: 10px;
     font-size: 1rem;
@@ -135,7 +135,7 @@
 .loading,
 .empty {
     text-align: center;
-    color: #90A4AE;
+    color: var(--color-ink-muted);
     padding: 2rem;
 }
 
@@ -150,26 +150,26 @@
     align-items: center;
     justify-content: space-between;
     padding: 1rem;
-    background: #FAFAFA;
+    background: var(--color-sunken);
     border-radius: 10px;
-    border: 1px solid #E0E0E0;
+    border: 1px solid var(--color-sunken);
 }
 
 .questionContent p {
     margin: 0;
-    color: #546E7A;
+    color: var(--color-ink);
     font-size: 1rem;
 }
 
 .questionContent small {
-    color: #B0BEC5;
+    color: var(--color-ink-muted);
     font-size: 0.8rem;
 }
 
 .deleteBtn {
     padding: 0.5rem;
-    background: #FFEBEE;
-    color: #E53935;
+    background: color-mix(in oklch, var(--color-danger), white 90%);
+    color: var(--color-danger);
     border: none;
     border-radius: 8px;
     cursor: pointer;
@@ -177,8 +177,8 @@
 }
 
 .deleteBtn:hover {
-    background: #E53935;
-    color: white;
+    background: var(--color-danger);
+    color: var(--color-on-accent);
 }
 
 .actions {
@@ -190,7 +190,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    background: #FFEBEE;
+    background: color-mix(in oklch, var(--color-danger), white 90%);
     padding: 5px 10px;
     border-radius: 8px;
 }
@@ -201,8 +201,8 @@
 }
 
 .confirmBtn {
-    background: #E53935;
-    color: white;
+    background: var(--color-danger);
+    color: var(--color-on-accent);
     border: none;
     padding: 4px 10px;
     border-radius: 6px;

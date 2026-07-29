@@ -1,43 +1,40 @@
 {
   "name": "kitty-love-site",
   "version": "0.1.0",
+  "packageManager": "pnpm@10.15.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "node scripts/e2e-smoke.mjs"
   },
   "dependencies": {
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.4.2",
-    "bcryptjs": "^3.0.3",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@radix-ui/react-select": "^2.3.7",
+    "@radix-ui/react-toast": "^1.2.23",
+    "@tauri-apps/api": "^2.8.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
-    "cos-nodejs-sdk-v5": "^2.15.4",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.23.26",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",
-    "openai": "^6.15.0",
-    "pixi-live2d-display": "^0.4.0",
-    "pixi.js": "7.1.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "tailwind-merge": "^3.4.0",
-    "three": "^0.182.0"
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
-    "@prisma/client": "^5.22.0",
-    "@types/bcryptjs": "^3.0.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/three": "^0.182.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
-    "prisma": "^5.22.0",
+    "playwright": "^1.62.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5"
   }
 }

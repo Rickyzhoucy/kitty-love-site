@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "id": "kitty",
+      "name": "Kitty",
+      "style": "illustrated",
+      "manifest": "/pet-assets/kitty/v1/manifest.json"
+    },
+    {
+      "id": "momo",
+      "name": "Momo",
+      "style": "illustrated",
+      "manifest": "/pet-assets/momo/v1/manifest.json"
+    },
+    {
+      "id": "hello-kitty",
+      "name": "Hello Kitty",
+      "style": "realistic-character",
+      "manifest": "/pet-assets/hello-kitty/v1/manifest.json"
+    },
+    {
+      "id": "snoopy",
+      "name": "Snoopy",
+      "style": "realistic-character",
+      "manifest": "/pet-assets/snoopy/v1/manifest.json"
+    },
+    {
+      "id": "shiba",
+      "name": "柴犬",
+      "style": "photorealistic",
+      "manifest": "/pet-assets/shiba/v1/manifest.json"
+    },
+    {
+      "id": "bichon",
+      "name": "比熊",
+      "style": "photorealistic",
+      "manifest": "/pet-assets/bichon/v1/manifest.json"
+    }
+  ]
+}

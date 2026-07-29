@@ -5,18 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, MessageCircle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import styles from '../questions/page.module.css'; // Reuse existing styles
-
-interface Message {
-    id: string;
-    nickname: string;
-    content: string;
-    createdAt: string;
-}
+import { messagesApi, type Message } from '@/lib/api/resources';
+import { useToast } from '@/app/components/ui/Toast';
 
 export default function MessagesManagement() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(true);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const { toast } = useToast();
 
     useEffect(() => {
         fetchMessages();
@@ -24,10 +20,7 @@ export default function MessagesManagement() {
 
     const fetchMessages = async () => {
         try {
-            const res = await fetch('/api/messages');
-            if (res.ok) {
-                setMessages(await res.json());
-            }
+            setMessages(await messagesApi.list());
         } catch (err) {
             console.error('Failed to fetch messages', err);
         } finally {
@@ -37,15 +30,11 @@ export default function MessagesManagement() {
 
     const confirmDelete = async (id: string) => {
         try {
-            const res = await fetch(`/api/messages?id=${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                setMessages(messages.filter(m => m.id !== id));
-                setDeletingId(null);
-            } else {
-                alert('删除失败');
-            }
+            await messagesApi.remove(id);
+            setMessages(messages.filter(m => m.id !== id));
+            setDeletingId(null);
         } catch {
-            alert('删除出错');
+            toast('删除失败', 'error');
         }
     };
 

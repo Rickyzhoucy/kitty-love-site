@@ -1,51 +1,208 @@
-:root {
-  /* Mizuiro / Light Blue Theme with Pink Accents */
-  --pk-blue-100: #E0F7FA;
-  --pk-blue-200: #B2EBF2;
-  --pk-blue-300: #80DEEA;
-  --pk-blue-400: #4DD0E1;
+@import "tailwindcss";
 
-  --pk-pink-100: #FCE4EC;
-  --pk-pink-200: #F8BBD0;
-  --pk-pink-300: #F48FB1;
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-  --pk-text: #546E7A;
-  --pk-text-light: #90A4AE;
+@theme {
+  /* ── 唯一手写颜色：OKLCH 深玫瑰木主色 + 暖金辅色，变体用 color-mix 派生 ── */
+  --color-accent: oklch(55% 0.13 12);
+  /* 深玫瑰木 */
+  --color-accent-strong: color-mix(in oklch, var(--color-accent), black 18%);
+  --color-accent-soft: color-mix(in oklch, var(--color-accent), white 88%);
+  /* accent 实心底上的前景色：亮色白 / 暗色深棕（保证 WCAG AA 对比度） */
+  --color-on-accent: #ffffff;
+  --color-secondary: oklch(70% 0.1 80);
+  /* 暖金 */
+  --color-secondary-soft: color-mix(in oklch, var(--color-secondary), white 82%);
+  /* 暖金实心底上的前景色：恒定深棕（两主题均保证对比度） */
+  --color-on-secondary: oklch(28% 0.06 70);
 
-  --font-fredoka: 'Fredoka', sans-serif;
+  /* ── 基础色板：暖奶油系 ── */
+  --color-base: #f6f1ea;
+  /* 暖奶油 */
+  --color-surface: #fffdf9;
+  --color-sunken: #ece4d8;
+
+  /* ── 文字：暖咖啡色 ── */
+  --color-ink: #3b332c;
+  --color-ink-muted: #75685d;
+
+  /* ── 语义色（暖调） ── */
+  --color-success: #6f9f6a;
+  --color-warning: #d99a2b;
+  --color-danger: #d45d4e;
+
+  /* ── 圆角 / 阴影 / 动效 ── */
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 26px;
+  /* 暖调双层柔和阴影 */
+  --shadow-soft: 0 1px 2px rgb(59 51 44 / 0.04), 0 6px 20px rgb(59 51 44 / 0.05);
+  --shadow-lift: 0 2px 4px rgb(59 51 44 / 0.05), 0 16px 40px rgb(59 51 44 / 0.1);
+  --shadow-modal: 0 24px 64px rgb(59 51 44 / 0.2);
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --font-rounded: var(--font-nunito), "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-display: var(--font-noto-serif), "Songti SC", "SimSun", serif;
+
+  /* ── 动画 token ── */
+  --animate-fade-up: fade-up 0.7s var(--ease-spring) both;
+  --animate-drift: drift 16s ease-in-out infinite alternate;
+  --animate-marquee: marquee 24s linear infinite;
+  --animate-pulse-ring: pulse-ring 1.6s ease-out infinite;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes drift {
+    from {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    to {
+      transform: translate3d(4%, -3%, 0) scale(1.08);
+    }
+  }
+
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  @keyframes pulse-ring {
+    from {
+      transform: scale(0.6);
+      opacity: 0.8;
+    }
+    to {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
 }
 
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
+[data-desktop-companion="true"] body {
+  background: transparent !important;
+  overflow: hidden;
+}
+
+[data-desktop-companion="true"] main,
+[data-desktop-companion="true"] nav {
+  display: none !important;
+}
+
+.desktop-drag-handle {
+  display: none;
+  position: fixed;
+  inset: 8px 12px auto;
+  z-index: 9999;
+  height: 28px;
+  border-radius: 999px;
+  color: var(--color-ink-muted);
+  background: color-mix(in oklch, var(--color-surface), transparent 35%);
+  font-size: 12px;
+  line-height: 28px;
+  text-align: center;
+  cursor: move;
+}
+
+[data-desktop-companion="true"] .desktop-drag-handle {
+  display: block;
+}
+
+/* 描边空心字：巨型排版装饰用 */
+@utility text-stroke-accent {
+  -webkit-text-stroke: 1.5px var(--color-accent);
+  color: transparent;
+}
+
+@utility text-stroke-ink {
+  -webkit-text-stroke: 1.5px var(--color-ink);
+  color: transparent;
+}
+
+/* 暗色模式：覆盖基础色 + soft 派生色（修复暗色下白字压浅底的对比度问题） */
+[data-theme="dark"] {
+  --color-accent: oklch(68% 0.12 12);
+  --color-accent-strong: color-mix(in oklch, var(--color-accent), white 15%);
+  --color-accent-soft: color-mix(in oklch, var(--color-accent), black 76%);
+  --color-on-accent: oklch(25% 0.04 12);
+  --color-secondary-soft: color-mix(in oklch, var(--color-secondary), black 72%);
+  --color-base: #171311;
+  --color-surface: #221c18;
+  --color-sunken: #2f2721;
+  --color-ink: #f2e9e0;
+  --color-ink-muted: #a89888;
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 20px rgb(0 0 0 / 0.25);
+  --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.3), 0 16px 40px rgb(0 0 0 / 0.35);
+  --shadow-modal: 0 24px 64px rgb(0 0 0 / 0.5);
+}
+
+/* z-index 标尺（全站唯一；toast 必须高于 verify/admin 全屏遮罩） */
+:root {
+  --z-decoration: 0;
+  --z-content: 1;
+  --z-sticky: 10;
+  --z-nav: 100;
+  --z-fab: 200;
+  --z-modal: 1000;
+  --z-grain: 1500;
+  --z-verify: 9999;
+  --z-toast: 10000;
 }
 
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  font-family: var(--font-fredoka);
-  color: var(--pk-text);
-  background-color: var(--pk-blue-100);
-  /* Cute Polka Dot Background */
-  background-image: radial-gradient(var(--pk-blue-200) 15%, transparent 16%),
-    radial-gradient(var(--pk-pink-100) 15%, transparent 16%);
-  background-size: 60px 60px;
-  background-position: 0 0, 30px 30px;
-  /* Responsive font size */
-  font-size: 16px;
 }
 
-/* Mobile font adjustment */
-@media (max-width: 480px) {
+body {
+  font-family: var(--font-rounded);
+  color: var(--color-ink);
+  background-color: var(--color-base);
+  /* 三层极光光晕：左上玫瑰、右上暖金、底部玫瑰回光 */
+  background-image:
+    radial-gradient(
+      ellipse 60% 45% at 15% 0%,
+      color-mix(in oklch, var(--color-accent), transparent 88%),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 50% 40% at 90% 10%,
+      color-mix(in oklch, var(--color-secondary), transparent 85%),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 70% 50% at 50% 110%,
+      color-mix(in oklch, var(--color-accent), transparent 92%),
+      transparent 70%
+    );
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
 
-  html,
-  body {
-    font-size: 14px;
-    background-size: 40px 40px;
-    background-position: 0 0, 20px 20px;
-  }
+/* 胶片颗粒覆层：极低透明度，统一全站质感；不拦截任何交互 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-grain);
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 /* Custom Scrollbar */
@@ -54,20 +211,18 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--pk-blue-100);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--pk-blue-300);
+  background: color-mix(in oklch, var(--color-accent), transparent 70%);
   border-radius: 5px;
-  border: 2px solid var(--pk-blue-100);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--pk-pink-300);
+  background: var(--color-accent);
 }
 
-/* Hide scrollbar on mobile */
 @media (max-width: 768px) {
   ::-webkit-scrollbar {
     width: 6px;
@@ -79,15 +234,95 @@ a {
   text-decoration: none;
 }
 
-/* Touch-friendly tap targets */
-button,
-a {
-  min-height: 44px;
-  min-width: 44px;
-}
-
-/* Prevent text selection on interactive elements */
 button {
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+}
+
+::selection {
+  background: color-mix(in oklch, var(--color-accent), transparent 75%);
+}
+
+/* 页面切换过渡（View Transitions，渐进增强） */
+::view-transition-old(root) {
+  animation: vt-fade-out 0.18s ease-in forwards;
+}
+
+::view-transition-new(root) {
+  animation: vt-fade-in 0.22s ease-out;
+}
+
+@keyframes vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes vt-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* 时间线条目滚动进入动画：CSS scroll-driven，零 JS；
+   不支持的浏览器自动降级为直接显示（渐进增强） */
+@keyframes timeline-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .timeline-reveal {
+      animation: timeline-in both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 40%;
+    }
+  }
+}
+
+/* Toast 进出场 */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* 可访问性：尊重系统的减弱动效设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

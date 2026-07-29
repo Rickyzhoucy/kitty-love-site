@@ -5,19 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Trash2, StickyNote, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import styles from '../questions/page.module.css';
-
-interface Memo {
-    id: string;
-    category: string;
-    text: string;
-    completed: boolean;
-    createdAt: string;
-}
+import { memosApi, type Memo } from '@/lib/api/resources';
+import { useToast } from '@/app/components/ui/Toast';
 
 export default function MemosManagement() {
     const [memos, setMemos] = useState<Memo[]>([]);
     const [loading, setLoading] = useState(true);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const { toast } = useToast();
 
     useEffect(() => {
         fetchMemos();
@@ -25,10 +20,7 @@ export default function MemosManagement() {
 
     const fetchMemos = async () => {
         try {
-            const res = await fetch('/api/memos');
-            if (res.ok) {
-                setMemos(await res.json());
-            }
+            setMemos(await memosApi.list());
         } catch (err) {
             console.error('Failed to fetch memos', err);
         } finally {
@@ -38,15 +30,11 @@ export default function MemosManagement() {
 
     const confirmDelete = async (id: string) => {
         try {
-            const res = await fetch(`/api/memos?id=${id}`, { method: 'DELETE' });
-            if (res.ok) {
-                setMemos(memos.filter(m => m.id !== id));
-                setDeletingId(null);
-            } else {
-                alert('删除失败');
-            }
+            await memosApi.remove(id);
+            setMemos(memos.filter(m => m.id !== id));
+            setDeletingId(null);
         } catch {
-            alert('删除出错');
+            toast('删除失败', 'error');
         }
     };
 

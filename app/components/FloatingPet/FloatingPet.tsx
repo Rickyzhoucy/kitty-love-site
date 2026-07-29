@@ -1,874 +1,370 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import dynamic from 'next/dynamic';
+import { streamChat } from '@/lib/api/chat';
+import { uploadAttachment, type Attachment } from '@/lib/api/attachments';
+import { ApiError } from '@/lib/api/client';
+import { subscribeServerEvent, type PetActionEvent } from '@/lib/api/events';
 import styles from './FloatingPet.module.css';
+import { PET_ASSETS, type PetAssetId } from './petConfig';
 import { usePet } from './usePet';
-import { PET_CONFIG } from './petConfig';
-import { petEvents } from '@/lib/petEvents';
-import type { Live2DPetHandle, Live2DMotion } from './Live2DPet';
+import ManifestFrameRenderer, {
+    type PetFrameAction,
+} from './renderers/ManifestFrameRenderer';
 
-// 动态导入 Live2D 组件避免 SSR 问题，但优化加载体验
-const Live2DPet = dynamic(() => import('./Live2DPet'), {
-    ssr: false,
-    loading: () => (
-        <div className={styles.petLoading} style={{ width: 180, height: 180 }}>
-            {/* 这里的 Loading 可以做得更好看一点 */}
-            🐾
-        </div>
-    )
-});
+type MenuType = 'none' | 'main' | 'appearance' | 'actions' | 'rename';
 
-type MenuType = 'none' | 'main' | 'status' | 'color' | 'accessory' | 'rename' | 'actions';
+interface DragState {
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    startRight: number;
+    startBottom: number;
+    moved: boolean;
+}
 
-// 简单映射配饰位置
-const getAccessoryPosition = (id: string) => {
-    switch (id) {
-        case 'glasses': return 'eyes';
-        case 'scarf': return 'neck';
-        case 'wings': return 'back';
-        case 'bow':
-        case 'crown':
-        case 'halo':
-        default: return 'top';
-    }
-};
+const DEFAULT_POSITION = { right: 20, bottom: 112 };
 
 export default function FloatingPet() {
     const pathname = usePathname();
-
-    // Hide on admin and verify pages
     const shouldSkip = pathname?.startsWith('/admin') || pathname?.startsWith('/verify');
-
-    const { pet, loading, feed, play, rename, changeColor, equipItem, refetch } = usePet(shouldSkip);
+    const { pet, loading, rename, setAssetId, refetch } = usePet(shouldSkip);
     const [menuType, setMenuType] = useState<MenuType>('none');
     const [speech, setSpeech] = useState<string | null>(null);
-    const [isAnimating, setIsAnimating] = useState(false);
-    const [animationType, setAnimationType] = useState<'levelUp' | 'evolving' | null>(null);
-    // 聊天状态
-    const [isChatting, setIsChatting] = useState(false);
+    const [chatOpen, setChatOpen] = useState(false);
     const [chatInput, setChatInput] = useState('');
-    const [chatHistory, setChatHistory] = useState<{ role: string, content: string }[]>([]);
-    const [isSending, setIsSending] = useState(false);
+    const [sending, setSending] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+    const [conversationId, setConversationId] = useState<string | null>(null);
     const [newName, setNewName] = useState('');
-    const [position, setPosition] = useState({ x: 0, y: 0 });
-    const [isDragging, setIsDragging] = useState(false);
-    const [live2dLoaded, setLive2dLoaded] = useState(false);
-    const dragOffset = useRef({ x: 0, y: 0, w: 0, h: 0 }); // Added w, h
-    const containerRef = useRef<HTMLDivElement>(null);
-    const live2dRef = useRef<Live2DPetHandle>(null);
+    const [frameAction, setFrameAction] = useState<PetFrameAction>('idle');
+    const [position, setPosition] = useState(DEFAULT_POSITION);
+    const dragRef = useRef<DragState | null>(null);
+    const actionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const speechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const handleLive2DLoad = useCallback(() => setLive2dLoaded(true), []);
-    // Live2D 错误处理
-    const handleLive2DError = useCallback((e: Error) => console.error('Live2D error:', e), []);
-
-    // 统处理点击和触摸交互，防止移动端幽灵点击 (Ghost Click)
-    const handleInteraction = (e: React.MouseEvent | React.TouchEvent, action: () => void) => {
-        // 如果是触摸事件，阻止默认行为（防止触发后续的模拟点击）
-        // 如果是点击事件，正常执行
-        e.stopPropagation();
-
-        // 简单的防抖机制或事件类型检查
-        // 移动端会触发 touchstart -> touchend -> mousemove -> mousedown -> mouseup -> click
-        // 我们在 onTouchEnd 或 onClick 中调用此函数
-
-        // 如果是 TouchEvent，必须阻止默认行为以防止 click 触发
-        if ('touches' in e) {
-            // e.preventDefault(); // 注意：React 的 SyntheticEvent 中 preventDefault 可能无效，或者导致滚动失效
-            // 更好的方式是只绑定 onClick 并使用 CSS touch-action: manipulation
-            // 或者只处理 onClick，但在 TouchEnd 中阻止 Click
-        } else {
-            // Mouse Event
-            action();
-        }
-    };
-
-    // 更好的策略：
-    // 只使用 onClick，但在移动端确保 touch-action: manipulation
-    // 并且在关键交互元素上添加 onTouchEnd={(e) => { e.preventDefault(); action(); }} 
-    // e.preventDefault() on Touchend prevents the mouse events from firing!
-
-    const onTouchClick = (action: () => void) => {
-        return {
-            onClick: (e: React.MouseEvent) => {
-                e.stopPropagation();
-                // 仅当非触摸设备或点击事件未被触摸阻止时触发（其实有了 preventDefault 就不需要这个判断了）
-                action();
-            },
-            onTouchEnd: (e: React.TouchEvent) => {
-                e.preventDefault(); // 阻止模拟的鼠标事件
-                e.stopPropagation();
-                action();
-            }
-        };
-    };
-
-    // 显示对话气泡 (duration = 0 为永久)
-    const showSpeech = useCallback((text: string, duration = 3000) => {
+    const showSpeech = useCallback((text: string, duration = 3_000) => {
+        if (speechTimerRef.current) clearTimeout(speechTimerRef.current);
         setSpeech(text);
-        setMenuType('none'); // Show speech -> Close menu
         if (duration > 0) {
-            setTimeout(() => setSpeech(prev => prev === text ? null : prev), duration);
+            speechTimerRef.current = setTimeout(() => setSpeech(null), duration);
         }
     }, []);
 
-    // 监听宠物事件
-    useEffect(() => {
-        if (shouldSkip) return;
-        const unsubscribe = petEvents.subscribe((type, data) => {
-            if (type === 'experience_gained' && data.message) {
-                showSpeech(data.message);
-                refetch(); // 刷新状态
-            } else if (type === 'refetch') {
-                refetch();
-            }
-        });
-        return unsubscribe;
-    }, [showSpeech, refetch, shouldSkip]);
+    const playAction = useCallback((action: string, duration = 1_800) => {
+        const next: PetFrameAction = action === 'walk'
+            ? 'walk'
+            : action === 'crawl'
+                ? 'crawl'
+                : 'idle';
+        if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+        setFrameAction(next);
+        if (next !== 'idle') {
+            actionTimerRef.current = setTimeout(() => setFrameAction('idle'), duration);
+        }
+    }, []);
 
-    // 加载保存的位置
     useEffect(() => {
         if (shouldSkip) return;
-        const saved = localStorage.getItem('petPosition');
+        setConversationId(localStorage.getItem('companionConversationId'));
+        const saved = localStorage.getItem('companionPetPosition');
         if (saved) {
             try {
-                setPosition(JSON.parse(saved));
-            } catch { }
+                const parsed = JSON.parse(saved) as typeof DEFAULT_POSITION;
+                if (Number.isFinite(parsed.right) && Number.isFinite(parsed.bottom)) {
+                    setPosition(parsed);
+                }
+            } catch {
+                localStorage.removeItem('companionPetPosition');
+            }
         }
+        return () => {
+            if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+            if (speechTimerRef.current) clearTimeout(speechTimerRef.current);
+        };
     }, [shouldSkip]);
 
-    // 保存位置
     useEffect(() => {
         if (shouldSkip) return;
-        if (position.x !== 0 || position.y !== 0) {
-            localStorage.setItem('petPosition', JSON.stringify(position));
-        }
-    }, [position, shouldSkip]);
+        return subscribeServerEvent<PetActionEvent>('pet.action', event => {
+            if (event.message) showSpeech(event.message, event.duration ?? 3_000);
+            playAction(event.animation ?? event.action, event.duration);
+            void refetch();
+        });
+    }, [playAction, refetch, shouldSkip, showSpeech]);
 
-    // 动态加载 Live2D 脚本 - 只在使用 Live2D 模式时加载
-    const [scriptsLoaded, setScriptsLoaded] = useState(false);
-    useEffect(() => {
-        if (shouldSkip || !pet || pet.mode !== 'live2d') return;
-        if (scriptsLoaded) return;
-
-        const loadScript = (src: string): Promise<void> => {
-            return new Promise((resolve, reject) => {
-                // Check if already loaded
-                if (document.querySelector(`script[src="${src}"]`)) {
-                    resolve();
-                    return;
-                }
-                const script = document.createElement('script');
-                script.src = src;
-                script.async = true;
-                script.onload = () => resolve();
-                script.onerror = () => reject(new Error(`Failed to load ${src}`));
-                document.head.appendChild(script);
-            });
-        };
-
-        const loadAllScripts = async () => {
-            try {
-                await loadScript('/live2dcubismcore.min.js');
-                await loadScript('/pixi.min.js');
-                await loadScript('/pixi-live2d-display.min.js');
-                setScriptsLoaded(true);
-            } catch (err) {
-                console.error('Failed to load Live2D scripts:', err);
+    const sendMessage = async (input = chatInput.trim()) => {
+        const message = input || (pendingAttachments.length ? '请查看我发的附件' : '');
+        if (!message || sending || uploading) return;
+        setChatInput('');
+        setSending(true);
+        let reply = '';
+        const handleEvent = (event: Parameters<typeof streamChat>[1] extends
+            (value: infer Event) => void ? Event : never) => {
+            if (event.type === 'text.delta') {
+                reply += event.delta;
+                showSpeech(reply, 0);
+            } else if (event.type === 'tool.started' && !reply) {
+                showSpeech(`正在处理：${event.name}…`, 0);
+            } else if (event.type === 'pet.action') {
+                if (event.message) showSpeech(event.message, event.duration ?? 3_000);
+                playAction(event.animation ?? event.action, event.duration);
+            } else if (event.type === 'message.completed') {
+                setConversationId(event.conversationId);
+                localStorage.setItem('companionConversationId', event.conversationId);
             }
         };
-
-        loadAllScripts();
-    }, [shouldSkip, pet?.mode, scriptsLoaded]);
-
-    // NOTE: Do NOT return null here - it would break hooks order
-    // The conditional rendering is handled at the final return statement
-
-    // 播放动画
-    const playAnimation = (type: 'levelUp' | 'evolving') => {
-        setAnimationType(type);
-        setIsAnimating(true);
-        setTimeout(() => {
-            setIsAnimating(false);
-            setAnimationType(null);
-        }, type === 'evolving' ? 1000 : 500);
-    };
-
-    // 处理喂食
-    const handleFeed = async () => {
-        const result = await feed();
-        if (result.success) {
-            showSpeech('好吃！谢谢主人~ 🍎');
-            live2dRef.current?.playMotion('Shake'); // 播放开心动画
-            if (result.expGained) {
-                showSpeech(`获得 ${result.expGained} 经验！`, 2000);
-            }
-        } else {
-            showSpeech(result.message || '今天吃太多了...', 2000);
-        }
-        setMenuType('none');
-    };
-
-    // 处理玩耍
-    const handlePlay = async () => {
-        const result = await play();
-        if (result.success) {
-            showSpeech('好开心！🎮✨');
-            live2dRef.current?.playMotion('Flick'); // 播放互动动画
-            if (result.expGained) {
-                setTimeout(() => showSpeech(`获得 ${result.expGained} 经验！`, 2000), 1500);
-            }
-        } else {
-            showSpeech(result.message || '有点累了...', 2000);
-        }
-        setMenuType('none');
-    };
-
-    // 处理改名
-    const handleRename = async () => {
-        if (newName.trim()) {
-            await rename(newName.trim());
-            showSpeech(`好的，以后叫我 ${newName.trim()} 吧！`);
-            setNewName('');
-        }
-        setMenuType('none');
-    };
-
-    // 处理聊天
-    const handleChat = () => {
-        setIsChatting(true);
-        setMenuType('none');
-        showSpeech('想跟我聊什么呢？喵~');
-    };
-
-    // 发送聊天消息
-    const sendChatMessage = async (overrideMessage?: string, triggerContext?: string) => {
-        const message = overrideMessage || chatInput.trim();
-        // 如果没有消息且没有触发上下文，或者正在发送，或者宠物未加载，则返回
-        if ((!message && !triggerContext) || isSending || !pet) return;
-
-        if (!overrideMessage && !triggerContext) setChatInput('');
-        setIsSending(true);
-
+        const run = (id: string | null) => streamChat({
+            conversationId: id,
+            message,
+            attachmentIds: pendingAttachments.map(item => item.id),
+        }, handleEvent);
         try {
-            const res = await fetch('/api/pet/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: triggerContext ? `[System: ${triggerContext}]` : message,
-                    history: chatHistory,
-                    petName: pet.name // Dynamic Name Injection
-                })
-            });
-
-            if (res.ok) {
-                const data = await res.json();
-                if (data.reply) {
-                    // Chat replies are now sticky until closed or replaced
-                    showSpeech(data.reply, 0);
-                    // 仅保存用户对话历史，跳过系统触发的上下文（保持历史清晰）
-                    if (!triggerContext) {
-                        setChatHistory(prev => [
-                            ...prev,
-                            { role: 'user', content: message },
-                            { role: 'assistant', content: data.reply }
-                        ].slice(-10));
-                    }
-
-                    if (pet.mode === 'live2d') {
-                        live2dRef.current?.playMotion('Tap');
-                    }
+            try {
+                await run(conversationId);
+            } catch (error) {
+                if (!(error instanceof ApiError) || error.status !== 404 || !conversationId) {
+                    throw error;
                 }
-            } else {
-                if (!triggerContext) showSpeech('我好像听不懂... (API Error)');
+                localStorage.removeItem('companionConversationId');
+                setConversationId(null);
+                reply = '';
+                await run(null);
             }
-        } catch {
-            if (!triggerContext) showSpeech('网络好像有点问题喵...');
+            setPendingAttachments([]);
+        } catch (error) {
+            showSpeech(error instanceof Error ? error.message : '网络好像有点问题');
         } finally {
-            setIsSending(false);
+            setSending(false);
         }
     };
 
-    // 主动触发逻辑
-    useEffect(() => {
-        if (shouldSkip) return;
-        // 页面加载时的问候
-        if (pet && !isSending) {
-            // 延迟一点触发，避免和加载冲突
-            const timer = setTimeout(() => {
-                // 50% 概率触发
-                if (Math.random() > 0.5) sendChatMessage(undefined, "主人刚进入页面，热情的打个招呼");
-            }, 2000);
-            return () => clearTimeout(timer);
+    const attachFiles = async (files: FileList | null) => {
+        if (!files?.length || uploading) return;
+        setUploading(true);
+        try {
+            const remaining = Math.max(0, 8 - pendingAttachments.length);
+            const uploaded = await Promise.all(
+                Array.from(files).slice(0, remaining).map(uploadAttachment),
+            );
+            setPendingAttachments(current => [...current, ...uploaded].slice(0, 8));
+        } catch (error) {
+            showSpeech(error instanceof Error ? error.message : '附件上传失败');
+        } finally {
+            setUploading(false);
         }
-    }, [pet?.id, shouldSkip]); // 依赖 pet.id 避免重复
+    };
 
-    // 监听事件触发对话
-    useEffect(() => {
-        if (shouldSkip) return;
-        const unsubscribe = petEvents.subscribe((type, data) => {
-            if (type === 'experience_gained') {
-                // 原有的消息显示
-                if (data.message) showSpeech(data.message);
-
-                // 30% 概率触发 AI 追评，或者特定事件必触发
-                if (data.source === 'photo' || Math.random() > 0.7) {
-                    setTimeout(() => {
-                        let context = `主人刚刚获得了经验。`;
-                        if (data.source === 'photo') context = "主人刚上传了一张新照片到相册。";
-                        if (data.source === 'memo_add') context = "主人刚添加了一个新备忘录。";
-                        if (data.source === 'memo_complete') context = "主人刚完成了一个备忘录任务。";
-                        sendChatMessage(undefined, context);
-                    }, 3000); // 3秒后追评
-                }
-                refetch();
-            } else if (type === 'refetch') {
-                refetch();
-            }
-        });
-        return unsubscribe;
-    }, [showSpeech, refetch, shouldSkip]);
-
-    // 处理颜色更换
-    const handleColorChange = async (colorId: string) => {
-        if (colorId === 'none') {
-            // 清除颜色 (使用 API 直接调用或通过 helper 传递 None)
-            // 假设 changeColor 支持任意字符串，我们在 API 处理
-            await changeColor('none');
-            showSpeech('颜色已清除~');
+    const submitRename = async () => {
+        const name = newName.trim();
+        if (!name) return;
+        if (await rename(name)) {
+            showSpeech(`以后就叫我 ${name} 吧`);
+            setNewName('');
+            setMenuType('none');
         } else {
-            await changeColor(colorId);
-            showSpeech('换了新颜色！好漂亮~');
+            showSpeech('改名失败，请重试');
         }
-        setMenuType('none');
     };
 
-    // 处理配饰装备
-    const handleEquip = async (accessoryId: string) => {
-        if (accessoryId === 'none') {
-            // 清除配饰 - 实际上需要更新 equippedItems 为空或移除 head
-            // 我们手动调用 API
-            await fetch('/api/pet', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'equip', equippedItems: {} }) // 清空
-            });
-            refetch();
-            showSpeech('配饰已摘下~');
+    const chooseAppearance = async (assetId: PetAssetId) => {
+        if (await setAssetId(assetId)) {
+            setMenuType('none');
+            setFrameAction('idle');
+            showSpeech('新造型登场啦');
         } else {
-            await equipItem('head', accessoryId);
-            showSpeech('新装备！看起来怎么样？');
-        }
-        setMenuType('none');
-    };
-
-    // 拖拽处理 - Mouse Events
-    const handleMouseDown = (e: React.MouseEvent) => {
-        if ((e.target as HTMLElement).closest(`.${styles.menu}`) ||
-            (e.target as HTMLElement).closest(`.${styles.statusPanel}`)) {
-            return;
-        }
-        setIsDragging(true);
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (rect) {
-            dragOffset.current = {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top,
-                w: rect.width,
-                h: rect.height
-            };
+            showSpeech('更换造型失败，请重试');
         }
     };
 
-    // 拖拽处理 - Touch Events
-    const handleTouchStart = (e: React.TouchEvent) => {
-        if ((e.target as HTMLElement).closest(`.${styles.menu}`) ||
-            (e.target as HTMLElement).closest(`.${styles.statusPanel}`)) {
-            return;
-        }
-        const touch = e.touches[0];
-        setIsDragging(true);
-        const rect = containerRef.current?.getBoundingClientRect();
-        if (rect) {
-            dragOffset.current = {
-                x: touch.clientX - rect.left,
-                y: touch.clientY - rect.top,
-                w: rect.width,
-                h: rect.height
-            };
-        }
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-        if (!isDragging) return;
-        // 使用实际捕获的宽高进行计算，避免跳动
-        const { w, h, x: offsetX, y: offsetY } = dragOffset.current;
-        const newX = window.innerWidth - e.clientX - (w - offsetX);
-        const newY = window.innerHeight - e.clientY - (h - offsetY);
-
-        setPosition({
-            x: Math.max(0, Math.min(window.innerWidth - w, newX)),
-            y: Math.max(0, Math.min(window.innerHeight - h, newY))
-        });
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-        if (!isDragging) return;
-        const touch = e.touches[0];
-        const { w, h, x: offsetX, y: offsetY } = dragOffset.current;
-        const newX = window.innerWidth - touch.clientX - (w - offsetX);
-        const newY = window.innerHeight - touch.clientY - (h - offsetY);
-
-        setPosition({
-            x: Math.max(0, Math.min(window.innerWidth - w, newX)),
-            y: Math.max(0, Math.min(window.innerHeight - h, newY))
-        });
-    };
-
-    const handleMouseUp = () => {
-        setIsDragging(false);
-    };
-
-    const handleTouchEnd = () => {
-        setIsDragging(false);
-    };
-
-    useEffect(() => {
-        if (shouldSkip) return;
-        if (isDragging) {
-            // Mouse events
-            window.addEventListener('mousemove', handleMouseMove);
-            window.addEventListener('mouseup', handleMouseUp);
-            // Touch events
-            window.addEventListener('touchmove', handleTouchMove, { passive: false });
-            window.addEventListener('touchend', handleTouchEnd);
-            window.addEventListener('touchcancel', handleTouchEnd);
-            return () => {
-                window.removeEventListener('mousemove', handleMouseMove);
-                window.removeEventListener('mouseup', handleMouseUp);
-                window.removeEventListener('touchmove', handleTouchMove);
-                window.removeEventListener('touchend', handleTouchEnd);
-                window.removeEventListener('touchcancel', handleTouchEnd);
-            };
-        }
-    }, [isDragging, shouldSkip]);
-
-    // 点击宠物切换菜单
-    const handlePetClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!isDragging) {
-            setMenuType(prev => {
-                if (prev === 'none') {
-                    setSpeech(null); // Open menu -> Close speech
-                    return 'main';
-                }
-                return 'none';
-            });
-        }
-    };
-
-    // 关闭菜单 - 使用 mousedown 避免与菜单项 click 冲突
-    useEffect(() => {
-        if (shouldSkip) return;
-        const handleClickOutside = (e: MouseEvent) => {
-            // 延迟检查，让菜单项的点击先执行
-            setTimeout(() => {
-                if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-                    setMenuType('none');
-                    setIsChatting(false); // 关闭聊天输入框
-                }
-            }, 10);
+    const onPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        dragRef.current = {
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startRight: position.right,
+            startBottom: position.bottom,
+            moved: false,
         };
+    };
 
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [shouldSkip]);
+    const onPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        const deltaX = event.clientX - drag.startClientX;
+        const deltaY = event.clientY - drag.startClientY;
+        if (Math.abs(deltaX) + Math.abs(deltaY) > 6) drag.moved = true;
+        const size = event.currentTarget.getBoundingClientRect();
+        setPosition({
+            right: Math.max(8, Math.min(window.innerWidth - size.width - 8, drag.startRight - deltaX)),
+            bottom: Math.max(88, Math.min(window.innerHeight - size.height - 8, drag.startBottom - deltaY)),
+        });
+    };
 
-    // Return null if should skip - this is AFTER all hooks, so it's safe
+    const onPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        dragRef.current = null;
+        localStorage.setItem('companionPetPosition', JSON.stringify(position));
+        if (!drag.moved) {
+            setSpeech(null);
+            setMenuType(current => current === 'none' ? 'main' : 'none');
+        }
+    };
+
     if (shouldSkip) return null;
 
-    // 初始加载状态
-    if (loading || !pet) {
-        return (
-            <div className={styles.floatingPetContainer} style={{ right: 20, bottom: 120 }}>
-                <div
-                    className={styles.petLoading}
-                    style={{
-                        width: 150,
-                        height: 150,
-                        background: 'linear-gradient(135deg, rgba(255,182,193,0.8), rgba(255,105,180,0.6))',
-                        borderRadius: '50%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '48px',
-                        boxShadow: '0 4px 15px rgba(255,105,180,0.3)'
-                    }}
-                >
-                    🐾
-                </div>
-            </div>
-        );
-    }
-
-    const mood = PET_CONFIG.getMood(pet.hunger, pet.happiness);
-    const moodEmoji = PET_CONFIG.moods[mood as keyof typeof PET_CONFIG.moods];
-    const evolutionName = PET_CONFIG.evolutionNames[pet.evolution];
-    const requiredExp = PET_CONFIG.getRequiredExp(pet.level);
-    const expProgress = (pet.experience / requiredExp) * 100;
-
-    // 获取已装备的配饰
-    const equippedAccessory = pet.equippedItems?.head
-        ? PET_CONFIG.accessories.find(a => a.id === pet.equippedItems.head)
-        : null;
-
-
-
     return (
-        <div
-            ref={containerRef}
-            className={styles.floatingPetContainer}
-            style={{
-                right: position.x || 20,
-                bottom: position.y || 120
-            }}
+        <aside
+            className={styles.container}
+            style={{ right: position.right, bottom: position.bottom }}
+            aria-label="伴侣宠物"
         >
-            {/* 聊天输入框 - 新设计 */}
-            {isChatting && (
-                <div
-                    className={styles.chatPanel}
-                    onClick={(e) => e.stopPropagation()}
-                    onTouchEnd={(e) => e.stopPropagation()}
-                >
-                    <div className={styles.chatHeader}>
-                        <span>与 {pet.name} 对话</span>
-                        <div className={styles.closeBtn} {...onTouchClick(() => setIsChatting(false))}>✕</div>
+            {chatOpen && (
+                <section className={styles.panel} aria-label={`与 ${pet?.name ?? '伴侣'} 对话`}>
+                    <header className={styles.panelHeader}>
+                        <strong>与 {pet?.name ?? '伴侣'} 对话</strong>
+                        <button type="button" onClick={() => setChatOpen(false)} aria-label="关闭对话">×</button>
+                    </header>
+                    <div className={styles.chips}>
+                        {['帮我查一下备忘', '今天有什么提醒', '帮我写一段话'].map(prompt => (
+                            <button key={prompt} type="button" onClick={() => void sendMessage(prompt)}>
+                                {prompt}
+                            </button>
+                        ))}
                     </div>
-
-                    <div className={styles.presetChips}>
-                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("帮我查一下待办事项"))}>📝 查待办</div>
-                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("查看你的状态"))}>📊 查状态</div>
-                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("讲个笑话吧"))}>😄 讲笑话</div>
-                        <div className={styles.chip} {...onTouchClick(() => sendChatMessage("夸夸我"))}>🥰 夸夸我</div>
-                    </div>
-
-                    <div className={styles.inputGroup}>
+                    <div className={styles.chatInput}>
                         <input
-                            className={styles.input}
-                            type="text"
                             value={chatInput}
-                            onChange={e => setChatInput(e.target.value)}
-                            onKeyPress={e => e.key === 'Enter' && sendChatMessage()}
-                            placeholder="说点什么..."
+                            onChange={event => setChatInput(event.target.value)}
+                            onKeyDown={event => {
+                                if (event.key === 'Enter') void sendMessage();
+                            }}
+                            placeholder="说点什么…"
+                            aria-label="对话内容"
                             autoFocus
                         />
-                        <button
-                            className={styles.sendBtn}
-                            {...onTouchClick(() => sendChatMessage())}
-                            disabled={isSending}
-                        >
-                            {isSending ? '...' : '➤'}
+                        <button type="button" onClick={() => void sendMessage()} disabled={sending}>
+                            {sending ? '…' : '发送'}
                         </button>
                     </div>
-                </div>
+                    <div className={styles.attachments}>
+                        <label>
+                            <input
+                                type="file"
+                                multiple
+                                onChange={event => {
+                                    void attachFiles(event.target.files);
+                                    event.target.value = '';
+                                }}
+                                disabled={uploading || pendingAttachments.length >= 8}
+                            />
+                            {uploading ? '上传中…' : '＋ 图片/文件'}
+                        </label>
+                        {pendingAttachments.map(item => (
+                            <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => setPendingAttachments(current =>
+                                    current.filter(candidate => candidate.id !== item.id))}
+                                title="移除附件"
+                            >
+                                {item.filename} ×
+                            </button>
+                        ))}
+                    </div>
+                </section>
             )}
 
-            {/* 对话气泡 */}
             {speech && (
-                <div className={styles.speechBubble}>
-                    {speech}
-                    <div
-                        className={styles.closeSpeech}
-                        {...onTouchClick(() => setSpeech(null))}
-                        title="关闭"
-                    >
-                        ✕
-                    </div>
+                <div className={styles.speech} role="status">
+                    <span>{speech}</span>
+                    <button type="button" onClick={() => setSpeech(null)} aria-label="关闭消息">×</button>
                 </div>
             )}
 
-            {/* 宠物主体 */}
-            <div
-                className={styles.petWrapper}
-                onMouseDown={handleMouseDown}
-                onTouchStart={handleTouchStart}
-                onClick={handlePetClick}
-                onTouchEnd={(e) => {
-                    // Prevent ghost click on mobile
-                    if (!isDragging) {
-                        e.preventDefault();
-                        handlePetClick(e as unknown as React.MouseEvent);
-                    }
-                }}
+            {menuType !== 'none' && (
+                <section className={styles.menu} aria-label="伴侣菜单">
+                    {menuType !== 'main' && (
+                        <button type="button" onClick={() => setMenuType('main')}>← 返回</button>
+                    )}
+                    {menuType === 'main' && (
+                        <>
+                            <button type="button" onClick={() => { setChatOpen(true); setMenuType('none'); }}>💬 对话</button>
+                            <button type="button" onClick={() => setMenuType('actions')}>🐾 动作</button>
+                            <button type="button" onClick={() => setMenuType('appearance')}>🎨 外观</button>
+                            <button type="button" onClick={() => setMenuType('rename')}>✏️ 改名</button>
+                        </>
+                    )}
+                    {menuType === 'actions' && (
+                        <>
+                            {(['idle', 'walk', 'crawl'] as const).map(action => (
+                                <button
+                                    key={action}
+                                    type="button"
+                                    onClick={() => { playAction(action); setMenuType('none'); }}
+                                >
+                                    {action === 'idle' ? '坐下' : action === 'walk' ? '走动' : '爬动'}
+                                </button>
+                            ))}
+                        </>
+                    )}
+                    {menuType === 'appearance' && PET_ASSETS.map(asset => (
+                        <button key={asset.id} type="button" onClick={() => void chooseAppearance(asset.id)}>
+                            {asset.emoji} {asset.name}{pet?.assetId === asset.id ? ' ✓' : ''}
+                        </button>
+                    ))}
+                    {menuType === 'rename' && (
+                        <div className={styles.rename}>
+                            <input
+                                value={newName}
+                                onChange={event => setNewName(event.target.value)}
+                                onKeyDown={event => {
+                                    if (event.key === 'Enter') void submitRename();
+                                }}
+                                placeholder={pet?.name ?? '新名字'}
+                                aria-label="宠物新名字"
+                            />
+                            <button type="button" onClick={() => void submitRename()}>确定</button>
+                        </div>
+                    )}
+                </section>
+            )}
+
+            <button
+                type="button"
+                className={styles.petButton}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onPointerCancel={() => { dragRef.current = null; }}
+                aria-label={loading ? '正在加载伴侣宠物' : `打开 ${pet?.name ?? '伴侣'} 菜单`}
             >
-                <div
-                    className={`${styles.petBody} ${styles.live2dBody} ${isAnimating && animationType ? styles[animationType] : ''}`}
-                >
-                    {/* 颜色覆盖层 */}
-                    {/* 颜色覆盖层 */}
-                    {pet.color && (() => {
-                        const colorConfig = PET_CONFIG.colors.find(c => c.id === pet.color);
-                        if (colorConfig) {
-                            // Live2D 模式下跳过渐变色（技术限制），传统模式支持所有颜色
-                            if (pet.mode === 'live2d' && colorConfig.color.includes('gradient')) {
-                                return null;
-                            }
-                            return (
-                                <div
-                                    className={styles.colorOverlay}
-                                    style={{
-                                        background: colorConfig.color,
-                                        // 传统模式下调整大小以覆盖图片
-                                        width: pet.mode === 'classic' ? '150px' : '130px',
-                                        height: pet.mode === 'classic' ? '150px' : '130px',
-                                        opacity: colorConfig.color.includes('gradient') ? 0.4 : 0.6
-                                    }}
-                                />
-                            );
-                        }
-                        return null;
-                    })()}
+                {loading || !pet ? (
+                    <span className={styles.loading}>🐾</span>
+                ) : (
+                    <ManifestFrameRenderer
+                        assetId={pet.assetId ?? 'kitty'}
+                        action={frameAction}
+                        className={styles.frames}
+                        onError={error => console.error('Pet frame asset failed', error)}
+                    />
+                )}
+            </button>
 
-
-                    {/* 宠物渲染: Live2D 或 传统模式 */}
-                    {pet.mode === 'classic' ? (
-                        <div className={styles.classicModeWrapper}>
-                            {pet.customSprite ? (
-                                <img
-                                    src={pet.customSprite}
-                                    alt="Pet"
-                                    style={{
-                                        width: 150,
-                                        height: 150,
-                                        objectFit: 'contain',
-                                        filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.1))'
-                                    }}
-                                />
-                            ) : (
-                                <span style={{ fontSize: '80px', lineHeight: 1 }}>
-                                    {PET_CONFIG.moods[mood as keyof typeof PET_CONFIG.moods] || '🐱'}
-                                </span>
-                            )}
-                        </div>
-                    ) : (
-                        <Live2DPet
-                            ref={live2dRef}
-                            modelPath="/wanko/runtime/wanko_touch.model3.json"
-                            width={180}
-                            height={180}
-                            onLoad={handleLive2DLoad}
-                            onError={handleLive2DError}
-                        />
-                    )}
-
-                    {/* 配饰渲染 - 恢复显示 */}
-                    {equippedAccessory && (
-                        <div className={`${styles.accessory} ${styles[getAccessoryPosition(equippedAccessory.id)] || styles.top}`}>
-                            {equippedAccessory.emoji}
-                        </div>
-                    )}
-
-                    {/* 等级标签 */}
-                    <span className={styles.levelBadge}>Lv.{pet.level}</span>
-                </div>
-
-                {/* 简易状态条 */}
-                <div className={styles.statusBars}>
-                    <div className={styles.statusRow} title={`经验: ${pet.experience}/${requiredExp}`}>
-                        <span className={styles.statusIcon}>⭐</span>
-                        <div className={styles.statusBar}>
-                            <div className={`${styles.statusFill} ${styles.exp}`} style={{ width: `${expProgress}%` }} />
-                        </div>
-                    </div>
-                    <div className={styles.statusRow} title={`饱腹: ${pet.hunger}%`}>
-                        <span className={styles.statusIcon}>🍗</span>
-                        <div className={styles.statusBar}>
-                            <div className={`${styles.statusFill} ${styles.hunger}`} style={{ width: `${pet.hunger}%` }} />
-                        </div>
-                    </div>
-                    <div className={styles.statusRow} title={`开心: ${pet.happiness}%`}>
-                        <span className={styles.statusIcon}>❤️</span>
-                        <div className={styles.statusBar}>
-                            <div className={`${styles.statusFill} ${styles.happiness}`} style={{ width: `${pet.happiness}%` }} />
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* 独立聊天按钮 */}
-            {!isChatting && (
-                <div
-                    {...onTouchClick(handleChat)}
-                    style={{
-                        position: 'absolute',
-                        left: -40,
-                        bottom: 40,
-                        width: 40,
-                        height: 40,
-                        background: 'white',
-                        borderRadius: '50%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                        cursor: 'pointer',
-                        fontSize: '20px',
-                        zIndex: 10
-                    }}
-                    title="对话"
+            {!chatOpen && (
+                <button
+                    type="button"
+                    className={styles.chatButton}
+                    onClick={() => { setChatOpen(true); setMenuType('none'); }}
+                    aria-label="与伴侣对话"
                 >
                     💬
-                </div>
+                </button>
             )}
-
-            {/* 主菜单 */}
-            {menuType === 'main' && (
-                <div className={styles.menu} {...onTouchClick(() => { })}>
-                    <div className={styles.menuItem} {...onTouchClick(handleFeed)}>🍎 喂食</div>
-                    <div className={styles.menuItem} {...onTouchClick(handlePlay)}>🎮 玩耍</div>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('actions'))}>⚡ 动作</div>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('status'))}>📊 状态</div>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('color'))}>🎨 换色</div>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('accessory'))}>👑 配饰</div>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('rename'))}>✏️ 改名</div>
-                </div>
-            )}
-
-            {/* 动作菜单 */}
-            {menuType === 'actions' && (
-                <div className={styles.menu}>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('main'))}>
-                        <span>🔙</span> 返回
-                    </div>
-                    <div className={styles.menuItem} {...onTouchClick(() => { live2dRef.current?.playMotion('Tap'); setMenuType('none'); })}>
-                        <span>👆</span> 点击
-                    </div>
-                    <div className={styles.menuItem} {...onTouchClick(() => { live2dRef.current?.playMotion('Shake'); setMenuType('none'); })}>
-                        <span>👋</span> 摇晃
-                    </div>
-                    <div className={styles.menuItem} {...onTouchClick(() => { live2dRef.current?.playMotion('Flick'); setMenuType('none'); })}>
-                        <span>✨</span> 抚摸
-                    </div>
-                </div>
-            )}
-
-            {/* 状态面板 */}
-            {menuType === 'status' && (
-                <div className={styles.statusPanel} {...onTouchClick(() => { })}>
-                    <h3>{pet.name} <span {...onTouchClick(() => setMenuType('main'))}>✕</span></h3>
-                    <div className={styles.statRow}>
-                        <span className={styles.statLabel}>阶段</span>
-                        <span className={styles.statValue}>{evolutionName}</span>
-                    </div>
-                    <div className={styles.statRow}>
-                        <span className={styles.statLabel}>等级</span>
-                        <span className={styles.statValue}>Lv.{pet.level}</span>
-                    </div>
-                    <div className={styles.statRow}>
-                        <span className={styles.statLabel}>经验</span>
-                        <span className={styles.statValue}>{pet.experience}/{requiredExp}</span>
-                    </div>
-                    <div className={styles.progressBar}>
-                        <div className={styles.progressFill} style={{ width: `${expProgress}%`, background: '#4CAF50' }} />
-                    </div>
-                    <div className={styles.statRow} style={{ marginTop: 8 }}>
-                        <span className={styles.statLabel}>饱腹度</span>
-                        <span className={styles.statValue}>{pet.hunger}%</span>
-                    </div>
-                    <div className={styles.statRow}>
-                        <span className={styles.statLabel}>开心值</span>
-                        <span className={styles.statValue}>{pet.happiness}%</span>
-                    </div>
-                </div>
-            )}
-
-            {/* 颜色选择 */}
-            {menuType === 'color' && (
-                <div className={styles.menu} {...onTouchClick(() => { })}>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('main'))}>← 返回</div>
-                    {/* 清除按钮 */}
-                    <div className={styles.menuItem} {...onTouchClick(() => handleColorChange('none'))}>
-                        🚫 清除/默认
-                    </div>
-                    {PET_CONFIG.colors.map(c => (
-                        <div
-                            key={c.id}
-                            className={`${styles.menuItem} ${pet.level < c.unlockLevel ? styles.disabled : ''}`}
-                            {...onTouchClick(() => pet.level >= c.unlockLevel && handleColorChange(c.id))}
-                        >
-                            <span style={{
-                                width: 16, height: 16, borderRadius: '50%',
-                                background: c.color, display: 'inline-block'
-                            }} />
-                            {c.name} {pet.level < c.unlockLevel && `(Lv.${c.unlockLevel})`}
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* 配饰选择 */}
-            {menuType === 'accessory' && (
-                <div className={styles.menu} {...onTouchClick(() => { })}>
-                    <div className={styles.menuItem} {...onTouchClick(() => setMenuType('main'))}>← 返回</div>
-                    {/* 清除按钮 */}
-                    <div className={styles.menuItem} {...onTouchClick(() => handleEquip('none'))}>
-                        🚫 摘下所有
-                    </div>
-                    {PET_CONFIG.accessories.map(a => {
-                        // 只要达到进化等级就视为解锁，容错手动修改数据库的情况
-                        const unlocked = (pet.accessories?.includes(a.id)) || (pet.evolution >= a.evolution);
-                        return (
-                            <div
-                                key={a.id}
-                                className={`${styles.menuItem} ${!unlocked ? styles.disabled : ''}`}
-                                {...onTouchClick(() => unlocked && handleEquip(a.id))}
-                            >
-                                {a.emoji} {a.name} {!unlocked && `(${PET_CONFIG.evolutionNames[a.evolution]}解锁)`}
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            {/* 改名输入 */}
-            {menuType === 'rename' && (
-                <div
-                    className={styles.statusPanel}
-                    onClick={(e) => e.stopPropagation()}
-                    onTouchEnd={(e) => e.stopPropagation()}
-                >
-                    <h3>给宠物起个名字 <span {...onTouchClick(() => setMenuType('main'))}>✕</span></h3>
-                    <input
-                        type="text"
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        placeholder={pet.name}
-                        style={{
-                            width: '100%',
-                            padding: '8px',
-                            border: '1px solid #ddd',
-                            borderRadius: '6px',
-                            marginBottom: '8px'
-                        }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleRename()}
-                    />
-                    <button
-                        {...onTouchClick(handleRename)}
-                        style={{
-                            width: '100%',
-                            padding: '8px',
-                            background: '#FF69B4',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        确定
-                    </button>
-                </div>
-            )}
-        </div>
+        </aside>
     );
 }

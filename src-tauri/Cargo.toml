@@ -1,0 +1,16 @@
+[package]
+name = "kitty-love-desktop"
+version = "0.1.0"
+description = "Kitty Love desktop companion shell"
+edition = "2024"
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+keyring = "3.6"
+tauri = { version = "2.9", features = [] }
+url = "2.5"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

@@ -12,12 +12,12 @@
 }
 
 .topBar h1 {
-    color: #546E7A;
+    color: var(--color-ink);
     margin: 0 0 0.3rem;
 }
 
 .topBar p {
-    color: #90A4AE;
+    color: var(--color-ink-muted);
     margin: 0;
 }
 
@@ -26,8 +26,8 @@
     align-items: center;
     gap: 0.4rem;
     padding: 0.6rem 1rem;
-    background: #FFEBEE;
-    color: #E53935;
+    background: color-mix(in oklch, var(--color-danger), white 90%);
+    color: var(--color-danger);
     border: none;
     border-radius: 8px;
     font-size: 0.9rem;
@@ -36,8 +36,8 @@
 }
 
 .logoutBtn:hover {
-    background: #E53935;
-    color: white;
+    background: var(--color-danger);
+    color: var(--color-on-accent);
 }
 
 .grid {
@@ -48,7 +48,7 @@
 }
 
 .card {
-    background: white;
+    background: var(--color-surface);
     padding: 1.5rem;
     border-radius: 15px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
@@ -62,7 +62,7 @@
 }
 
 .header h3 {
-    color: #78909C;
+    color: var(--color-ink-muted);
     font-size: 1rem;
     font-weight: 500;
 }
@@ -70,7 +70,7 @@
 .count {
     font-size: 3rem;
     font-weight: 700;
-    color: #37474F;
+    color: var(--color-ink);
 }
 
 .quickActions {
@@ -78,7 +78,7 @@
 }
 
 .quickActions h2 {
-    color: #546E7A;
+    color: var(--color-ink);
     font-size: 1.2rem;
     margin-bottom: 1rem;
 }
@@ -94,7 +94,7 @@
     align-items: center;
     gap: 1rem;
     padding: 1.2rem;
-    background: white;
+    background: var(--color-surface);
     border-radius: 12px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
     text-decoration: none;
@@ -103,19 +103,19 @@
 }
 
 .actionCard:hover {
-    border-color: #F8BBD0;
+    border-color: var(--color-accent-soft);
     transform: translateY(-2px);
     box-shadow: 0 6px 15px rgba(244, 143, 177, 0.2);
 }
 
 .actionCard h3 {
     margin: 0;
-    color: #546E7A;
+    color: var(--color-ink);
     font-size: 1rem;
 }
 
 .actionCard p {
     margin: 0.2rem 0 0;
-    color: #90A4AE;
+    color: var(--color-ink-muted);
     font-size: 0.85rem;
 }

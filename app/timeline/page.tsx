@@ -1,19 +1,16 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Star, Heart, Plus, Calendar } from 'lucide-react';
-import styles from './page.module.css';
-import KittyStickers from '../components/KittyStickers';
-import ParticleBackground from '../components/ParticleBackground';
-import { notifyPetExperience } from '@/lib/petEvents';
-
-interface Milestone {
-    id: string;
-    date: string;
-    title: string;
-    description: string;
-}
+import { Heart, Plus, Calendar } from 'lucide-react';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import { Input, Textarea } from '../components/ui/Input';
+import EmptyState from '../components/ui/EmptyState';
+import { useToast } from '../components/ui/Toast';
+import { milestonesApi, type Milestone } from '@/lib/api/resources';
+import { useResourceEvents } from '@/lib/api/useResourceEvents';
+import { cn } from '@/lib/utils';
 
 export default function Timeline() {
     const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -21,155 +18,171 @@ export default function Timeline() {
     const [showForm, setShowForm] = useState(false);
     const [newMilestone, setNewMilestone] = useState({ title: '', date: '', description: '' });
     const [submitting, setSubmitting] = useState(false);
+    const { toast } = useToast();
 
-    useEffect(() => {
-        fetchMilestones();
-    }, []);
-
-    const fetchMilestones = async () => {
+    const loadMilestones = useCallback(async () => {
         try {
-            const res = await fetch('/api/milestones');
-            if (res.ok) {
-                setMilestones(await res.json());
-            }
+            const data = await milestonesApi.list();
+            setMilestones([...data].sort((a, b) => a.date.localeCompare(b.date)));
         } catch (error) {
             console.error('Failed to fetch milestones', error);
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        void loadMilestones();
+    }, [loadMilestones]);
+    useResourceEvents(['milestones'], () => void loadMilestones());
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newMilestone.title || !newMilestone.date) {
-            alert('请填写标题和日期');
+            toast('请填写标题和日期', 'error');
             return;
         }
 
         setSubmitting(true);
         try {
-            const res = await fetch('/api/milestones', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(newMilestone),
-            });
-
-            if (res.ok) {
-                const added = await res.json();
-                // Insert in sorted order
-                const updated = [...milestones, added].sort((a, b) => a.date.localeCompare(b.date));
-                setMilestones(updated);
-                setNewMilestone({ title: '', date: '', description: '' });
-                setShowForm(false);
-                // 通知宠物获得经验
-                notifyPetExperience(30, 'milestone');
-            }
+            const added = await milestonesApi.create(newMilestone);
+            setMilestones(prev => [...prev, added].sort((a, b) => a.date.localeCompare(b.date)));
+            setNewMilestone({ title: '', date: '', description: '' });
+            setShowForm(false);
+            toast('故事已记录 ⭐');
         } catch (error) {
-            console.error('Failed to add milestone', error);
-            alert('添加失败，请重试');
+            toast(error instanceof Error ? error.message : '添加失败，请重试', 'error');
         } finally {
             setSubmitting(false);
         }
     };
 
     return (
-        <div className={styles.container}>
-            {/* 动态贴纸和粒子效果 */}
-            <KittyStickers count={6} />
-            <ParticleBackground particleCount={10} types={['star', 'heart', 'sparkle']} />
-
-            <header className={styles.header}>
-                <img
-                    src="https://upload.wikimedia.org/wikipedia/en/0/05/Hello_kitty_character_portrait.png"
-                    alt="Hello Kitty"
-                    className={styles.kittyIcon}
-                />
-                <div>
-                    <h1><Star className={styles.icon} /> 我们的故事</h1>
-                    <p>一路走来，风景是你。</p>
-                </div>
+        <div className="mx-auto max-w-4xl px-4 py-6">
+            {/* 巨型排版页头 */}
+            <header className="mb-10 pt-2 animate-fade-up">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.4em] text-accent m-0">Our Story</p>
+                <h1 className="mt-3 font-display text-5xl md:text-7xl font-semibold leading-[1.05] tracking-wide m-0">
+                    <span className="text-ink">我们的</span>
+                    <span className="text-stroke-accent">故事</span>
+                </h1>
+                <p className="mt-4 text-sm md:text-base text-ink-muted mb-0">一路走来，风景是你</p>
             </header>
 
-            {/* Add Button */}
-            <div className={styles.addSection}>
-                <button
-                    onClick={() => setShowForm(!showForm)}
-                    className={styles.addBtn}
-                >
-                    <Plus size={18} /> {showForm ? '取消' : '记录新的故事'}
-                </button>
+            <div className="mb-5 text-center">
+                <Button onClick={() => setShowForm(!showForm)}>
+                    <Plus size={16} />
+                    {showForm ? '取消' : '记录新的故事'}
+                </Button>
             </div>
 
-            {/* Add Form */}
             {showForm && (
-                <motion.form
-                    onSubmit={handleSubmit}
-                    className={styles.addForm}
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="mb-8 overflow-hidden"
                 >
-                    <div className={styles.formGroup}>
-                        <label><Calendar size={14} /> 日期 *</label>
-                        <input
-                            type="date"
-                            value={newMilestone.date}
-                            onChange={(e) => setNewMilestone({ ...newMilestone, date: e.target.value })}
-                            required
-                        />
-                    </div>
-                    <div className={styles.formGroup}>
-                        <label>标题 *</label>
-                        <input
-                            type="text"
-                            value={newMilestone.title}
-                            onChange={(e) => setNewMilestone({ ...newMilestone, title: e.target.value })}
-                            placeholder="例如：我们在一起啦"
-                            required
-                        />
-                    </div>
-                    <div className={styles.formGroup} style={{ flexBasis: '100%' }}>
-                        <label>描述</label>
-                        <input
-                            type="text"
-                            value={newMilestone.description}
-                            onChange={(e) => setNewMilestone({ ...newMilestone, description: e.target.value })}
-                            placeholder="那天阳光很好..."
-                        />
-                    </div>
-                    <button type="submit" disabled={submitting} className={styles.submitBtn}>
-                        {submitting ? '保存中...' : <><Heart size={16} /> 添加到故事</>}
-                    </button>
-                </motion.form>
+                    <Card className="p-6 md:p-8">
+                        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+                            {/* 标题轴：大衬线标题输入 */}
+                            <input
+                                id="ms-title"
+                                type="text"
+                                value={newMilestone.title}
+                                onChange={(e) => setNewMilestone({ ...newMilestone, title: e.target.value })}
+                                placeholder="给这一天起个名字"
+                                aria-label="标题"
+                                required
+                                className="w-full border-0 border-b-2 border-sunken bg-transparent px-0 pb-3 font-display text-2xl md:text-3xl font-semibold tracking-wide text-ink placeholder:text-ink-muted/50 outline-none transition-colors focus:border-accent"
+                            />
+                            <div className="flex flex-wrap items-end gap-4">
+                                <div className="min-w-[170px]">
+                                    <label htmlFor="ms-date" className="mb-1.5 flex items-center gap-1 text-sm text-ink-muted">
+                                        <Calendar size={14} /> 日期 *
+                                    </label>
+                                    <Input
+                                        id="ms-date"
+                                        type="date"
+                                        value={newMilestone.date}
+                                        onChange={(e) => setNewMilestone({ ...newMilestone, date: e.target.value })}
+                                        required
+                                    />
+                                </div>
+                                <div className="flex-1 min-w-[220px]">
+                                    <label htmlFor="ms-desc" className="block mb-1.5 text-sm text-ink-muted">描述</label>
+                                    <Textarea
+                                        id="ms-desc"
+                                        value={newMilestone.description}
+                                        onChange={(e) => setNewMilestone({ ...newMilestone, description: e.target.value })}
+                                        placeholder="那天阳光很好..."
+                                        rows={2}
+                                    />
+                                </div>
+                                <Button type="submit" disabled={submitting}>
+                                    {submitting ? '保存中...' : (
+                                        <>
+                                            <Heart size={16} /> 添加到故事
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
+                        </form>
+                    </Card>
+                </motion.div>
             )}
 
             {loading ? (
-                <p className={styles.loading}>加载故事中...</p>
+                <p className="text-center text-ink-muted py-8">加载故事中...</p>
+            ) : milestones.length === 0 ? (
+                <EmptyState icon="⭐" title="还没有记录故事" hint="点击上方按钮添加吧" />
             ) : (
-                <div className={styles.timeline}>
-                    <div className={styles.line}></div>
-                    {milestones.length === 0 ? (
-                        <p className={styles.empty}>还没有记录故事，点击上方按钮添加吧...</p>
-                    ) : (
-                        milestones.map((item, index) => (
-                            <motion.div
-                                key={item.id}
-                                initial={{ opacity: 0, x: index % 2 === 0 ? -50 : 50 }}
-                                whileInView={{ opacity: 1, x: 0 }}
-                                viewport={{ once: true }}
-                                transition={{ duration: 0.5, delay: index * 0.2 }}
-                                className={`${styles.item} ${index % 2 === 0 ? styles.left : styles.right}`}
-                            >
-                                <div className={styles.content}>
-                                    <div className={styles.date}>{item.date}</div>
-                                    <h3>{item.title}</h3>
-                                    <p>{item.description}</p>
-                                    <div className={styles.marker}>
-                                        <Heart size={16} fill="white" color="white" />
+                /* 时间线：移动端左侧单线，md 以上中央线 + 左右交错 */
+                <div className="relative">
+                    {/* 中线：两端渐隐的柔光线 */}
+                    <div
+                        className="absolute top-0 bottom-0 w-0.5 left-4 md:left-1/2 md:-translate-x-1/2 rounded-full bg-gradient-to-b from-accent/10 via-accent/50 to-accent/10"
+                        aria-hidden
+                    />
+                    <div className="flex flex-col gap-8">
+                        {milestones.map((item, index) => {
+                            const isLeft = index % 2 === 0;
+                            return (
+                                <div
+                                    key={item.id}
+                                    className={cn(
+                                        'timeline-reveal relative pl-12 md:pl-0 md:w-1/2',
+                                        isLeft ? 'md:pr-12' : 'md:pl-12 md:ml-auto'
+                                    )}
+                                >
+                                    {/* 节点 marker：白底光环 + 心形 */}
+                                    <div
+                                        className={cn(
+                                            'absolute top-5 flex h-9 w-9 items-center justify-center rounded-full border-2 border-accent bg-surface shadow-soft',
+                                            'left-0 md:left-auto',
+                                            isLeft
+                                                ? 'md:right-0 md:translate-x-1/2'
+                                                : 'md:left-0 md:-translate-x-1/2'
+                                        )}
+                                        aria-hidden
+                                    >
+                                        <Heart size={14} className="text-accent" fill="currentColor" />
                                     </div>
+                                    <Card className={cn(
+                                        'p-5 transition-all duration-300 ease-spring hover:shadow-lift hover:rotate-0 hover:-translate-y-0.5',
+                                        isLeft ? 'md:rotate-[0.6deg]' : 'md:-rotate-[0.6deg]'
+                                    )}>
+                                        <div className="font-display text-2xl font-semibold tracking-wide text-accent">{item.date}</div>
+                                        <h3 className="mt-2 font-display text-xl font-semibold tracking-wide text-ink mb-0">{item.title}</h3>
+                                        {item.description && (
+                                            <p className="mt-2 text-sm leading-loose text-ink-muted mb-0">
+                                                {item.description}
+                                            </p>
+                                        )}
+                                    </Card>
                                 </div>
-                            </motion.div>
-                        ))
-                    )}
+                            );
+                        })}
+                    </div>
                 </div>
             )}
         </div>

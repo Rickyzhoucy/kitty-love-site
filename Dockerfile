@@ -1,10 +1,9 @@
 FROM node:20-alpine AS base
 
 # Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat openssl
+RUN apk add --no-cache libc6-compat
 
 # CN Mirror Configuration
-ENV PRISMA_ENGINES_MIRROR=https://npmmirror.com/mirrors/prisma
 RUN npm config set registry https://mirrors.cloud.tencent.com/npm/
 
 FROM base AS deps
@@ -26,16 +25,19 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
+ARG API_INTERNAL_URL=http://api:8000
+ARG PET_ASSET_INTERNAL_URL=http://minio:9000
+ARG NEXT_PUBLIC_API_BASE_URL=
+ARG NEXT_PUBLIC_EVENT_BASE_URL=
+ENV API_INTERNAL_URL=$API_INTERNAL_URL
+ENV PET_ASSET_INTERNAL_URL=$PET_ASSET_INTERNAL_URL
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_EVENT_BASE_URL=$NEXT_PUBLIC_EVENT_BASE_URL
+
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry
 # Uncomment the following line in case you want to disable telemetry during the build.
-ENV NEXT_TELEMETRY_DISABLED 1
-
-# Generate Prisma Client
-RUN \
-  if [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm prisma generate; \
-  else npx prisma generate; \
-  fi
+ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN \
   if [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
@@ -47,7 +49,7 @@ RUN \
 FROM base AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
 # Uncomment the following line in case you want to disable telemetry during runtime.
 # ENV NEXT_TELEMETRY_DISABLED 1
 
@@ -69,8 +71,8 @@ USER nextjs
 
 EXPOSE 3000
 
-ENV PORT 3000
+ENV PORT=3000
 # set hostname to localhost
-ENV HOSTNAME "0.0.0.0"
+ENV HOSTNAME=0.0.0.0
 
 CMD ["node", "server.js"]

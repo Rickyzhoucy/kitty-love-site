@@ -9,7 +9,14 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".next*/**",
+    ".playwright-mcp/**",
+    ".serena/**",
+    ".spec-workflow/**",
+    "artwork/**",
+    "output/**",
     "out/**",
+    "src-tauri/target/**",
     "build/**",
     "next-env.d.ts",
   ]),

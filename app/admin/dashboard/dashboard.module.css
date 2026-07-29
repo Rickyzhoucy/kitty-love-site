@@ -1,13 +1,13 @@
 .container {
     display: flex;
     min-height: 100vh;
-    background-color: #F5F7FA;
+    background-color: var(--color-base);
 }
 
 .sidebar {
     width: 250px;
-    background-color: white;
-    border-right: 1px solid #E0E0E0;
+    background-color: var(--color-surface);
+    border-right: 1px solid var(--color-sunken);
     display: flex;
     flex-direction: column;
     padding: 1.5rem;
@@ -15,7 +15,7 @@
 
 .logo {
     margin-bottom: 2rem;
-    color: #F48FB1;
+    color: var(--color-accent);
     text-align: center;
 }
 
@@ -32,19 +32,19 @@
     gap: 1rem;
     padding: 0.8rem 1rem;
     border-radius: 10px;
-    color: #546E7A;
+    color: var(--color-ink);
     text-decoration: none;
     transition: all 0.2s;
 }
 
 .navItem:hover {
-    background-color: #E0F7FA;
-    color: #00BCD4;
+    background-color: var(--color-secondary-soft);
+    color: var(--color-secondary);
 }
 
 .active {
-    background-color: #E0F7FA;
-    color: #00BCD4;
+    background-color: var(--color-secondary-soft);
+    color: var(--color-secondary);
     font-weight: 500;
 }
 
@@ -55,15 +55,15 @@
     padding: 0.8rem 1rem;
     border: none;
     background: none;
-    color: #90A4AE;
+    color: var(--color-ink-muted);
     cursor: pointer;
     margin-top: auto;
     border-radius: 10px;
 }
 
 .logoutBtn:hover {
-    background-color: #FFEBEE;
-    color: #FE5252;
+    background-color: color-mix(in oklch, var(--color-danger), white 90%);
+    color: var(--color-danger);
 }
 
 .main {
@@ -80,7 +80,7 @@
 }
 
 .card {
-    background: white;
+    background: var(--color-surface);
     padding: 1.5rem;
     border-radius: 15px;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
@@ -94,12 +94,12 @@
 }
 
 .header h3 {
-    color: #78909C;
+    color: var(--color-ink-muted);
     font-size: 1rem;
 }
 
 .count {
     font-size: 2.5rem;
     font-weight: 700;
-    color: #37474F;
+    color: var(--color-ink);
 }

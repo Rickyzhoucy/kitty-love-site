@@ -4,15 +4,8 @@ export default function VerifyLayout({
     children: React.ReactNode;
 }) {
     return (
-        <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            zIndex: 9999,
-            background: 'linear-gradient(135deg, #FCE4EC 0%, #F8BBD0 50%, #E1BEE7 100%)'
-        }}>
+        // 盖住全局导航与宠物的全屏层（语义保留，样式融入全站奶油底）
+        <div className="fixed inset-0 z-[var(--z-verify)] bg-base">
             {children}
         </div>
     );

@@ -3,181 +3,110 @@
 import { useState, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Heart, Lock, Send, AlertCircle } from 'lucide-react';
-import styles from './page.module.css';
+import { Heart, Lock, LogIn, User, KeyRound, AlertCircle } from 'lucide-react';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
+import { authApi } from '@/lib/api/auth';
 
-interface Question {
-    id: string;
-    question: string;
-    hint?: string;
+function safeRedirect(value: string | null): string {
+    return value?.startsWith('/') && !value.startsWith('//') ? value : '/';
 }
 
 function VerifyContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const redirectPath = searchParams.get('redirect') || '/';
-
-    const [question, setQuestion] = useState<Question | null>(null);
-    const [answer, setAnswer] = useState('');
+    const redirectPath = safeRedirect(searchParams.get('redirect'));
+    const [username, setUsername] = useState('');
+    const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [fetching, setFetching] = useState(false);
 
-    // 获取随机问题
-    const fetchQuestion = async () => {
-        setFetching(true);
-        setError('');
-        try {
-            const res = await fetch('/api/auth/question');
-            const data = await res.json();
-
-            if (!res.ok) {
-                setError(data.error || '获取问题失败');
-                return;
-            }
-
-            setQuestion(data);
-        } catch {
-            setError('网络错误，请重试');
-        } finally {
-            setFetching(false);
-        }
-    };
-
-    // 提交答案
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!question || !answer.trim()) return;
+    const handleSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!username.trim() || !password) return;
 
         setLoading(true);
         setError('');
-
         try {
-            const res = await fetch('/api/auth/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    questionId: question.id,
-                    answer: answer.trim()
-                })
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                setError(data.error || '验证失败');
-                // 如果是429（被锁定），不清空答案
-                if (res.status !== 429) {
-                    setAnswer('');
-                }
-                return;
-            }
-
-            // 验证成功，跳转
-            router.push(redirectPath);
+            await authApi.login(username.trim(), password);
+            router.replace(redirectPath);
             router.refresh();
-
-        } catch {
-            setError('网络错误，请重试');
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : '登录失败，请重试');
         } finally {
             setLoading(false);
         }
     };
 
-    // 初始加载问题
-    if (!question && !fetching && !error) {
-        fetchQuestion();
-    }
-
     return (
-        <div className={styles.container}>
+        <div className="flex min-h-dvh items-center justify-center p-4">
             <motion.div
-                className={styles.card}
                 initial={{ opacity: 0, y: 20, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ duration: 0.4 }}
+                className="w-full max-w-sm"
             >
-                <div className={styles.header}>
-                    <div className={styles.iconWrapper}>
-                        <Lock size={28} color="white" />
-                    </div>
-                    <h1>身份验证</h1>
-                    <p>请回答以下问题以进入网站</p>
-                </div>
-
-                {error && (
-                    <motion.div
-                        className={styles.error}
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                    >
-                        <AlertCircle size={18} />
-                        {error}
-                    </motion.div>
-                )}
-
-                {fetching ? (
-                    <div className={styles.loading}>
-                        <Heart className={styles.loadingHeart} size={32} />
-                        <p>正在获取问题...</p>
-                    </div>
-                ) : question ? (
-                    <form onSubmit={handleSubmit} className={styles.form}>
-                        <div className={styles.questionBox}>
-                            <span className={styles.questionLabel}>问题</span>
-                            <p className={styles.questionText}>{question.question}</p>
-                            {question.hint && (
-                                <p className={styles.hintText}>💡 提示: {question.hint}</p>
-                            )}
+                <Card className="p-8">
+                    <div className="mb-7 text-center">
+                        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-strong shadow-lift">
+                            <Lock size={26} className="text-on-accent" />
                         </div>
+                        <h1 className="font-display text-2xl font-semibold tracking-wide text-ink m-0">欢迎回来</h1>
+                        <p className="mt-2 text-sm text-ink-muted mb-0">登录我们的私人空间</p>
+                    </div>
 
-                        <div className={styles.inputGroup}>
-                            <input
-                                type="text"
-                                placeholder="请输入你的答案..."
-                                value={answer}
-                                onChange={(e) => setAnswer(e.target.value)}
-                                className={styles.input}
+                    {error && (
+                        <motion.p
+                            initial={{ opacity: 0, y: -8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mb-4 flex items-center gap-2 rounded-md bg-danger/10 px-3.5 py-2.5 text-sm text-danger"
+                            role="alert"
+                        >
+                            <AlertCircle size={16} className="shrink-0" />
+                            {error}
+                        </motion.p>
+                    )}
+
+                    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                        <div className="relative">
+                            <User size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+                            <Input
+                                value={username}
+                                onChange={event => setUsername(event.target.value)}
+                                placeholder="用户名"
+                                aria-label="用户名"
+                                autoComplete="username"
+                                className="pl-9"
                                 disabled={loading}
                                 autoFocus
                             />
                         </div>
-
-                        <button
-                            type="submit"
-                            disabled={loading || !answer.trim()}
-                            className={styles.submitBtn}
-                        >
-                            {loading ? '验证中...' : (
-                                <>
-                                    验证 <Send size={18} />
-                                </>
-                            )}
-                        </button>
-
-                        <button
-                            type="button"
-                            onClick={fetchQuestion}
-                            className={styles.refreshBtn}
-                            disabled={fetching}
-                        >
-                            换一个问题 🔄
-                        </button>
+                        <div className="relative">
+                            <KeyRound size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+                            <Input
+                                type="password"
+                                value={password}
+                                onChange={event => setPassword(event.target.value)}
+                                placeholder="密码"
+                                aria-label="密码"
+                                autoComplete="current-password"
+                                className="pl-9"
+                                disabled={loading}
+                            />
+                        </div>
+                        <Button type="submit" disabled={loading || !username.trim() || !password} className="w-full">
+                            <LogIn size={16} />
+                            {loading ? '登录中…' : '登录'}
+                        </Button>
                     </form>
-                ) : (
-                    <div className={styles.noQuestion}>
-                        <p>暂无安全问题</p>
-                        <button onClick={fetchQuestion} className={styles.retryBtn}>
-                            重试
-                        </button>
-                    </div>
-                )}
 
-                <div className={styles.footer}>
-                    <Heart size={14} fill="#F48FB1" color="#F48FB1" />
-                    <span>只有我们才知道的秘密</span>
-                    <Heart size={14} fill="#F48FB1" color="#F48FB1" />
-                </div>
+                    <div className="mt-6 flex items-center justify-center gap-2 text-xs text-ink-muted">
+                        <Heart size={12} className="text-accent" fill="currentColor" />
+                        <span>只属于我们的生活空间</span>
+                        <Heart size={12} className="text-accent" fill="currentColor" />
+                    </div>
+                </Card>
             </motion.div>
         </div>
     );
@@ -185,7 +114,7 @@ function VerifyContent() {
 
 export default function VerifyPage() {
     return (
-        <Suspense fallback={<div>Loading...</div>}>
+        <Suspense fallback={<div className="flex min-h-dvh items-center justify-center text-ink-muted">加载中...</div>}>
             <VerifyContent />
         </Suspense>
     );

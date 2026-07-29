@@ -15,7 +15,13 @@
 
 # next.js
 /.next/
+/.next-stale*/
+/output/
+/.playwright-mcp/
+/.serena/
+/.spec-workflow/
 /out/
+/src-tauri/target/
 
 # production
 /build
@@ -33,8 +39,9 @@ yarn-error.log*
 *.log
 
 # env files (can opt-in for committing if needed)
-.env
-.env*.local
+.env*
+!.env.example
+/docs/testenv.txt
 
 # vercel
 .vercel
@@ -52,3 +59,6 @@ next-env.d.ts
 # OS
 Thumbs.db
 Desktop.ini
+
+# Upload
+/public/uploads
