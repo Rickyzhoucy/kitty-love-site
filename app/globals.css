@@ -131,6 +131,88 @@
   color: transparent;
 }
 
+/* ── 后台管理页通用元素（ui-* 前缀仅供 app/admin 使用） ── */
+.ui-card {
+  background: var(--color-surface);
+  border: 1px solid color-mix(in oklch, var(--color-ink) 5%, transparent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-soft);
+}
+
+.ui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--color-ink);
+}
+
+.ui-field > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-ink-muted);
+}
+
+.ui-field > input:not([type='radio']):not([type='checkbox']),
+.ui-field > textarea,
+.ui-field > select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-sunken) 40%, transparent);
+  color: var(--color-ink);
+  font: inherit;
+  outline: none;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+
+.ui-field > input:not([type='radio']):not([type='checkbox']):focus-visible,
+.ui-field > textarea:focus-visible,
+.ui-field > select:focus-visible {
+  border-color: var(--color-accent);
+  background: var(--color-surface);
+}
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    box-shadow 0.2s,
+    opacity 0.2s;
+}
+
+.ui-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
+}
+
+.ui-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ui-button--ghost {
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
+}
+
 /* 暗色模式：覆盖基础色 + soft 派生色（修复暗色下白字压浅底的对比度问题） */
 [data-theme="dark"] {
   --color-accent: oklch(68% 0.12 12);
