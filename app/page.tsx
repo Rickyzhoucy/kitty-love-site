@@ -11,7 +11,10 @@ import RemindersList from './components/RemindersList';
 import { configApi, photosApi } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
-import ManifestFrameRenderer from './components/FloatingPet/renderers/ManifestFrameRenderer';
+import dynamic from 'next/dynamic';
+
+// 3D Hello Kitty 体积较大（three.js），客户端按需加载
+const KittyScene = dynamic(() => import('./components/KittyScene'), { ssr: false });
 
 const QUICK_LINKS = [
   { href: '/guestbook', num: '01', label: '留言板', en: 'Guestbook', icon: BookHeart },
@@ -167,18 +170,9 @@ export default function Home() {
               <div className="animate-drift absolute -bottom-24 right-1/5 h-[280px] w-[280px] rounded-full bg-secondary/20 blur-3xl [animation-delay:-6s]" />
             </div>
 
-            <button
-              type="button"
-              onClick={handleKittyClick}
-              className="absolute inset-0 flex h-full w-full cursor-pointer items-center justify-center border-0 bg-transparent"
-              aria-label="点击伙伴打开情书"
-            >
-              <ManifestFrameRenderer
-                assetId="kitty"
-                action="idle"
-                className="h-[82%] w-[82%] object-contain [filter:drop-shadow(0_12px_18px_rgba(0,0,0,0.14))]"
-              />
-            </button>
+            <div className="absolute inset-0 cursor-pointer">
+              <KittyScene onKittyClick={handleKittyClick} modelUrl={config.home_model_url || undefined} />
+            </div>
 
             {/* 舞台角标 */}
             <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-full border border-ink/5 bg-surface/75 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.25em] text-accent shadow-soft backdrop-blur-md">

@@ -15,8 +15,6 @@ output
 .serena
 .spec-workflow
 src-tauri
-public/models
 public/wanko
 public/uploads
-public/sunset.hdr
 *.log
