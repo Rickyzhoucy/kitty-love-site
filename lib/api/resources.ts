@@ -1,29 +1,45 @@
 /** Python 领域服务的资源契约。 */
 import { api } from './client';
 
+/** 纪念日 / 倒数。没有 recurrence 的话，加了提醒也只灵一次。 */
+export type Recurrence = 'none' | 'yearly' | 'monthly';
+
 export interface EventTimer {
     id: string;
     title: string;
     date: string;
     type: 'countdown' | 'countup' | string;
     description?: string | null;
+    recurrence: Recurrence;
+    /** 提前几天提醒，例如 [7, 1, 0]。空数组表示不提醒。 */
+    remindDaysBefore: number[];
     createdAt: string;
 }
 
-export interface Reminder {
+/** 要做的事。`dueAt` 为空就是没期限的那种，只在计划页出现，不上首页。 */
+export interface Plan {
     id: string;
-    content: string;
-    dueDate: string;
-    completed: boolean;
+    title: string;
+    note: string | null;
+    dueAt: string | null;
+    /** 用时间而不是布尔——心愿页要显示「什么时候做到的」，Plan 保持同一形状 */
+    completedAt: string | null;
     createdAt: string;
+    createdBy: string | null;
 }
 
-export interface Memo {
+export type WishCategory = 'to-eat' | 'to-go' | 'to-buy';
+
+/** 想一起做的事。没有期限，重点在「谁提的」和「什么时候做到的」。 */
+export interface Wish {
     id: string;
-    category: string;
-    text: string;
-    completed: boolean;
+    title: string;
+    note: string | null;
+    category: WishCategory;
+    completedAt: string | null;
+    completionPhotoId: string | null;
     createdAt: string;
+    createdBy: string | null;
 }
 
 export interface Message {
@@ -61,27 +77,41 @@ export interface SiteConfigHistory {
 
 export const timersApi = {
     list: () => api.get<EventTimer[]>('/timers'),
-    create: (data: { title: string; date: string; type: string; description?: string }) =>
-        api.post<EventTimer>('/timers', data),
-    update: (id: string, data: Partial<Pick<EventTimer, 'title' | 'date' | 'type' | 'description'>>) =>
+    create: (data: {
+        title: string;
+        date: string;
+        type: string;
+        description?: string;
+        recurrence?: Recurrence;
+        remindDaysBefore?: number[];
+    }) => api.post<EventTimer>('/timers', data),
+    update: (
+        id: string,
+        data: Partial<Pick<EventTimer,
+            'title' | 'date' | 'type' | 'description' | 'recurrence' | 'remindDaysBefore'>>,
+    ) =>
         api.patch<EventTimer>(`/timers/${encodeURIComponent(id)}`, data),
     remove: (id: string) => api.delete<void>(`/timers/${encodeURIComponent(id)}`),
 };
 
-export const remindersApi = {
-    list: () => api.get<Reminder[]>('/reminders'),
-    create: (data: { content: string; dueDate: string }) => api.post<Reminder>('/reminders', data),
-    update: (id: string, completed: boolean) =>
-        api.patch<Reminder>(`/reminders/${encodeURIComponent(id)}`, { completed }),
-    remove: (id: string) => api.delete<void>(`/reminders/${encodeURIComponent(id)}`),
+export const plansApi = {
+    list: () => api.get<Plan[]>('/plans'),
+    create: (data: { title: string; dueAt?: string | null; note?: string | null }) =>
+        api.post<Plan>('/plans', data),
+    update: (id: string, data: Partial<Pick<Plan, 'title' | 'note' | 'dueAt' | 'completedAt'>>) =>
+        api.patch<Plan>(`/plans/${encodeURIComponent(id)}`, data),
+    remove: (id: string) => api.delete<void>(`/plans/${encodeURIComponent(id)}`),
 };
 
-export const memosApi = {
-    list: () => api.get<Memo[]>('/memos'),
-    create: (data: { category: string; text: string }) => api.post<Memo>('/memos', data),
-    update: (id: string, completed: boolean) =>
-        api.patch<Memo>(`/memos/${encodeURIComponent(id)}`, { completed }),
-    remove: (id: string) => api.delete<void>(`/memos/${encodeURIComponent(id)}`),
+export const wishesApi = {
+    list: () => api.get<Wish[]>('/wishes'),
+    create: (data: { title: string; category: WishCategory; note?: string | null }) =>
+        api.post<Wish>('/wishes', data),
+    update: (
+        id: string,
+        data: Partial<Pick<Wish, 'title' | 'note' | 'category' | 'completedAt' | 'completionPhotoId'>>,
+    ) => api.patch<Wish>(`/wishes/${encodeURIComponent(id)}`, data),
+    remove: (id: string) => api.delete<void>(`/wishes/${encodeURIComponent(id)}`),
 };
 
 export const messagesApi = {

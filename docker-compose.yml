@@ -73,6 +73,11 @@ services:
         python -m app.migration_bootstrap
         alembic upgrade head
         python -m app.queue_schema
+        # 两个账号是双人功能（聊天、每日一问）的前置条件。只在开发环境自动补，
+        # 生产用 `python -m app.cli create-user` 手工建，别让默认密码流到线上。
+        if [ "$${APP_ENV:-development}" = "development" ]; then
+          python -m app.cli seed-users
+        fi
     environment: &backend-environment
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-kitty}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-kitty_love_db}
@@ -94,6 +99,10 @@ services:
       SKILL_BUCKET: skill-packages
       SKILL_WORKER_URL: http://skill-worker:8010
       SKILL_WORKER_TOKEN: ${SKILL_WORKER_TOKEN:?Set SKILL_WORKER_TOKEN in .env}
+      # 联网搜索。不填 key 时 web_search 工具不会注册，其余功能不受影响。
+      # 可选提供方：bocha（国内直连）/ tavily / brave
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-bocha}
+      WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

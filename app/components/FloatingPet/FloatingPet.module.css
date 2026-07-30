@@ -1,15 +1,26 @@
 .container {
+  /* 基准尺寸随屏幕走，用户的缩放倍率再乘上去——见 usePetSize 的说明。 */
+  --pet-base-size: 138px;
+  --pet-scale: 1;
+  --pet-size: calc(var(--pet-base-size) * var(--pet-scale));
+
   position: fixed;
   z-index: var(--z-fab);
-  width: 138px;
+  width: var(--pet-size);
   user-select: none;
   touch-action: none;
 }
 
+.moving {
+  transition:
+    right var(--pet-travel-ms) cubic-bezier(0.35, 0, 0.65, 1),
+    bottom var(--pet-travel-ms) cubic-bezier(0.35, 0, 0.65, 1);
+}
+
 .petButton {
   display: block;
-  width: 138px;
-  height: 138px;
+  width: var(--pet-size);
+  height: var(--pet-size);
   padding: 0;
   border: 0;
   background: transparent;
@@ -22,11 +33,63 @@
   cursor: grabbing;
 }
 
+.dragging .petButton {
+  cursor: grabbing;
+}
+
 .frames {
   display: block;
   width: 100%;
   height: 100%;
   pointer-events: none;
+}
+
+.petVisual {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 88%;
+  transition: transform 180ms ease-out;
+}
+
+.petVisual[data-facing="right"] {
+  transform: scaleX(-1);
+}
+
+.bodyCanvas,
+.riveStage,
+.riveCanvas {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.riveCanvas canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.riveLoading {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  font-size: 36px;
+  animation: softPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes softPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
 }
 
 .loading {
@@ -98,29 +161,182 @@
   cursor: pointer;
 }
 
+/* 菜单从 178px 的窄单列改成 248px 的分区面板：原来的形态在「外观」有
+   六项、「动作」有六项时要一直往下滚，而且每一级都靠一个「← 返回」按钮
+   混在选项里，很容易误点。 */
 .menu {
   display: grid;
-  width: 178px;
-  max-height: min(440px, 60vh);
-  gap: 4px;
+  width: 248px;
+  max-height: min(460px, 66vh);
   padding: 8px;
+  gap: 8px;
   overflow: auto;
 }
 
-.menu > button {
-  min-height: 40px;
-  padding: 8px 12px;
+.menuHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid color-mix(in oklch, var(--color-ink), transparent 92%);
+}
+
+.menuTitle {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuBack,
+.menuClose {
   border: 0;
+  color: var(--color-ink-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.menuBack {
+  padding: 4px 6px 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.menuBack:hover {
+  color: var(--color-accent-strong);
+}
+
+.menuClose {
+  flex: none;
+  padding: 0 4px;
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* 两列磁贴：一屏放得下全部入口，不用滚。 */
+.tileGrid,
+.assetGrid {
+  display: grid;
+  gap: 6px;
+}
+
+.tileGrid {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.assetGrid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.tile,
+.assetTile {
+  display: grid;
+  min-height: 62px;
+  align-content: center;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--color-ink);
+  background: color-mix(in oklch, var(--color-sunken), transparent 55%);
+  font-size: 12px;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tile span,
+.assetTile span {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.assetTile {
+  min-height: 56px;
+}
+
+.tile:hover,
+.assetTile:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+}
+
+.tile:active {
+  transform: scale(0.96);
+}
+
+/* 当前选中的造型：用边框和底色标出来，而不是在文字后面缀一个 ✓——
+   ✓ 在两列以上的网格里很难一眼扫到。 */
+.assetTile[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+  font-weight: 600;
+}
+
+.segmented {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-sunken), transparent 45%);
+}
+
+.segmented button {
+  padding: 9px 4px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 3px);
+  color: var(--color-ink-muted);
   background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.segmented button[aria-pressed='true'] {
+  color: var(--color-accent-strong);
+  background: var(--color-surface);
+  font-weight: 600;
+  box-shadow: var(--shadow-soft);
+}
+
+.optionList {
+  display: grid;
+  gap: 6px;
+}
+
+/* 主动性三档带一句说明——「安静模式」和「关闭主动活动」光看名字分不出区别。 */
+.optionRow {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  background: color-mix(in oklch, var(--color-sunken), transparent 55%);
   text-align: left;
   cursor: pointer;
 }
 
-.menu > button:hover {
-  color: var(--color-accent-strong);
+.optionRow small {
+  color: var(--color-ink-muted);
+  font-size: 11px;
+}
+
+.optionRow:hover {
+  border-color: var(--color-accent);
+}
+
+.optionRow[aria-pressed='true'] {
+  border-color: var(--color-accent);
   background: var(--color-accent-soft);
+}
+
+.optionRow[aria-pressed='true'] strong {
+  color: var(--color-accent-strong);
 }
 
 .panel {
@@ -221,12 +437,7 @@
 
 @media (max-width: 640px) {
   .container {
-    width: 106px;
-  }
-
-  .petButton {
-    width: 106px;
-    height: 106px;
+    --pet-base-size: 106px;
   }
 
   .chatButton {
@@ -234,5 +445,13 @@
     bottom: 22px;
     width: 38px;
     height: 38px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moving,
+  .petVisual,
+  .riveLoading {
+    animation: none;
   }
 }

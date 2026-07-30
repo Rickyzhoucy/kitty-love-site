@@ -8,7 +8,7 @@ import Button from './ui/Button';
 import { Input } from './ui/Input';
 import EmptyState from './ui/EmptyState';
 import { useToast } from './ui/Toast';
-import { remindersApi, type Reminder } from '@/lib/api/resources';
+import { plansApi, type Plan } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
 
@@ -31,9 +31,15 @@ const toneStyles = {
     danger: 'text-danger',
 };
 
-/** 首页提醒区块：文档流内卡片 */
+/**
+ * 首页提醒区块。
+ *
+ * 数据源就是「计划」——只挑**有期限且未完成**的那些。改造前这里读的是独立的
+ * `Reminder` 表，和计划页的「待办事项」是两份数据，改一处另一处不变
+ *（见 docs/couple-site-feature-plan.md §0.1）。
+ */
 export default function RemindersList() {
-    const [reminders, setReminders] = useState<Reminder[]>([]);
+    const [reminders, setReminders] = useState<Plan[]>([]);
     const [showAdd, setShowAdd] = useState(false);
     const [newReminder, setNewReminder] = useState({ content: '', dueDate: '' });
     const [loading, setLoading] = useState(false);
@@ -41,7 +47,7 @@ export default function RemindersList() {
 
     const loadReminders = useCallback(async () => {
         try {
-            setReminders(await remindersApi.list());
+            setReminders(await plansApi.list());
         } catch (error) {
             console.error('Fetch reminders failed', error);
         }
@@ -50,7 +56,7 @@ export default function RemindersList() {
     useEffect(() => {
         void loadReminders();
     }, [loadReminders]);
-    useResourceEvents(['reminders'], () => void loadReminders());
+    useResourceEvents(['plans'], () => void loadReminders());
 
     const handleAdd = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -58,9 +64,13 @@ export default function RemindersList() {
 
         setLoading(true);
         try {
-            const added = await remindersApi.create(newReminder);
+            const added = await plansApi.create({
+                title: newReminder.content,
+                dueAt: new Date(newReminder.dueDate).toISOString(),
+            });
             setReminders(prev =>
-                [...prev, added].sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+                [...prev, added].sort(
+                    (a, b) => new Date(a.dueAt ?? 0).getTime() - new Date(b.dueAt ?? 0).getTime())
             );
             setNewReminder({ content: '', dueDate: '' });
             setShowAdd(false);
@@ -72,12 +82,13 @@ export default function RemindersList() {
         }
     };
 
-    const toggleComplete = async (id: string, current: boolean) => {
-        setReminders(reminders.map(r => (r.id === id ? { ...r, completed: !current } : r)));
+    const toggleComplete = async (id: string, alreadyDone: boolean) => {
+        const completedAt = alreadyDone ? null : new Date().toISOString();
+        setReminders(reminders.map(r => (r.id === id ? { ...r, completedAt } : r)));
         try {
-            await remindersApi.update(id, !current);
+            await plansApi.update(id, { completedAt });
         } catch {
-            const fresh = await remindersApi.list().catch(() => null);
+            const fresh = await plansApi.list().catch(() => null);
             if (fresh) setReminders(fresh);
             toast('操作失败，请重试', 'error');
         }
@@ -87,7 +98,7 @@ export default function RemindersList() {
         const previous = [...reminders];
         setReminders(reminders.filter(r => r.id !== id));
         try {
-            await remindersApi.remove(id);
+            await plansApi.remove(id);
             toast('已删除');
         } catch {
             setReminders(previous);
@@ -95,7 +106,10 @@ export default function RemindersList() {
         }
     };
 
-    const activeReminders = reminders.filter(r => !r.completed);
+    // 只显示有期限且未完成的。没期限的计划待在计划页，不该跑到首页来催人。
+    const activeReminders = reminders
+        .filter(r => r.dueAt && !r.completedAt)
+        .sort((a, b) => new Date(a.dueAt!).getTime() - new Date(b.dueAt!).getTime());
 
     return (
         <section aria-label="提醒事项" className="h-full">
@@ -119,7 +133,7 @@ export default function RemindersList() {
                 <div className="flex flex-col">
                     <AnimatePresence>
                         {activeReminders.map(r => {
-                            const timeLeft = getTimeLeft(r.dueDate);
+                            const timeLeft = getTimeLeft(r.dueAt!);
                             const expired = timeLeft.text === '已过期';
                             return (
                                 <motion.div
@@ -132,7 +146,7 @@ export default function RemindersList() {
                                 >
                                     <div className="min-w-0">
                                         <div className={cn('font-display text-lg font-semibold text-ink truncate', expired && 'line-through text-ink-muted')}>
-                                            {r.content}
+                                            {r.title}
                                         </div>
                                         <div className={cn('mt-1 inline-flex items-center gap-1.5 rounded-full bg-sunken/70 px-2.5 py-0.5 text-xs', toneStyles[timeLeft.tone])}>
                                             <Clock size={12} />
@@ -141,8 +155,8 @@ export default function RemindersList() {
                                     </div>
                                     <div className="flex items-center gap-1 shrink-0">
                                         <button
-                                            onClick={() => toggleComplete(r.id, r.completed)}
-                                            aria-label={`完成提醒 ${r.content}`}
+                                            onClick={() => toggleComplete(r.id, false)}
+                                            aria-label={`完成提醒 ${r.title}`}
                                             className="flex h-8 w-8 items-center justify-center rounded-full text-success hover:bg-success/10 transition-colors cursor-pointer"
                                         >
                                             <Check size={16} />
@@ -150,7 +164,7 @@ export default function RemindersList() {
                                         {expired && (
                                             <button
                                                 onClick={() => deleteReminder(r.id)}
-                                                aria-label={`删除提醒 ${r.content}`}
+                                                aria-label={`删除提醒 ${r.title}`}
                                                 className="flex h-8 w-8 items-center justify-center rounded-full text-danger hover:bg-danger/10 transition-colors cursor-pointer"
                                             >
                                                 <Trash2 size={16} />

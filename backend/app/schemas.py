@@ -20,35 +20,49 @@ class Entity(ApiModel):
     created_by_companion: str | None = None
 
 
-class MemoCreate(ApiModel):
-    category: str = Field(min_length=1, max_length=80)
-    text: str = Field(min_length=1, max_length=10_000)
-    completed: bool = False
+# Memo / Reminder 已拆成 Plan / Wish，见 docs/couple-site-feature-plan.md §0.1。
 
 
-class MemoUpdate(ApiModel):
-    category: str | None = Field(default=None, min_length=1, max_length=80)
-    text: str | None = Field(default=None, min_length=1, max_length=10_000)
-    completed: bool | None = None
+class PlanCreate(ApiModel):
+    """要做的事。`dueAt` 为空就是没期限的那种，只在计划页出现。"""
+
+    title: str = Field(min_length=1, max_length=10_000)
+    note: str | None = Field(default=None, max_length=10_000)
+    due_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
-class MemoRead(Entity, MemoCreate):
+class PlanUpdate(ApiModel):
+    title: str | None = Field(default=None, min_length=1, max_length=10_000)
+    note: str | None = Field(default=None, max_length=10_000)
+    due_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class PlanRead(Entity, PlanCreate):
     pass
 
 
-class ReminderCreate(ApiModel):
-    content: str = Field(min_length=1, max_length=10_000)
-    due_date: str = Field(min_length=1, max_length=80)
-    completed: bool = False
+WishCategory = Literal["to-eat", "to-go", "to-buy"]
 
 
-class ReminderUpdate(ApiModel):
-    content: str | None = Field(default=None, min_length=1, max_length=10_000)
-    due_date: str | None = Field(default=None, min_length=1, max_length=80)
-    completed: bool | None = None
+class WishCreate(ApiModel):
+    title: str = Field(min_length=1, max_length=10_000)
+    note: str | None = Field(default=None, max_length=10_000)
+    category: WishCategory
+    completed_at: datetime | None = None
+    completion_photo_id: str | None = Field(default=None, max_length=32)
 
 
-class ReminderRead(Entity, ReminderCreate):
+class WishUpdate(ApiModel):
+    title: str | None = Field(default=None, min_length=1, max_length=10_000)
+    note: str | None = Field(default=None, max_length=10_000)
+    category: WishCategory | None = None
+    completed_at: datetime | None = None
+    completion_photo_id: str | None = Field(default=None, max_length=32)
+
+
+class WishRead(Entity, WishCreate):
     pass
 
 
@@ -97,11 +111,17 @@ class MessageRead(Entity, MessageCreate):
     pass
 
 
+Recurrence = Literal["none", "yearly", "monthly"]
+
+
 class TimerCreate(ApiModel):
     title: str = Field(min_length=1, max_length=255)
     date: str = Field(min_length=1, max_length=80)
     type: Literal["countdown", "countup"]
     description: str | None = Field(default=None, max_length=10_000)
+    recurrence: Recurrence = "none"
+    #: 提前几天提醒。空数组表示不提醒；同一天重复的值会被去重。
+    remind_days_before: list[int] = Field(default_factory=list, max_length=8)
 
 
 class TimerUpdate(ApiModel):
@@ -109,6 +129,8 @@ class TimerUpdate(ApiModel):
     date: str | None = Field(default=None, min_length=1, max_length=80)
     type: Literal["countdown", "countup"] | None = None
     description: str | None = Field(default=None, max_length=10_000)
+    recurrence: Recurrence | None = None
+    remind_days_before: list[int] | None = Field(default=None, max_length=8)
 
 
 class TimerRead(Entity, TimerCreate):
@@ -193,6 +215,10 @@ class ConversationRead(Entity):
     companion_id: str
     title: str | None
     updated_at: datetime
+    #: 首条用户发言的截断预览。没有它的话，对话列表就只是一串日期，
+    #: 用户没法在里面找到「上次聊蛋糕的那次」。
+    preview: str | None = None
+    message_count: int = 0
 
 
 class ChatMessageRead(Entity):
@@ -261,6 +287,117 @@ class PetRead(Entity):
     name: str
     asset_id: str | None
     updated_at: datetime
+
+
+class PetStateWrite(ApiModel):
+    """客户端行为脑的快照。服务端不解释内容，只负责存和算离线时长。"""
+
+    needs: dict[str, float] = Field(default_factory=dict)
+    mood: dict[str, Any] = Field(default_factory=dict)
+    relationship: dict[str, Any] = Field(default_factory=dict)
+    active_goal: str = Field(default="idle", max_length=40)
+    traits: dict[str, float] = Field(default_factory=dict)
+
+
+class PetStateRead(ApiModel):
+    companion_id: str
+    traits: dict[str, Any]
+    needs: dict[str, Any] | None
+    mood: dict[str, Any] | None
+    relationship: dict[str, Any] | None
+    active_goal: str
+    #: 距上次结算的秒数，**已夹到 cappedAt**。客户端拿它推进衰减。
+    elapsed_seconds: float
+    capped_at: int
+
+
+class PetCognitionRequest(ApiModel):
+    """客户端请求宠物「想一件事」。
+
+    `trigger` 是这次请求的来源。它会被对照 `FORBIDDEN_TRIGGERS` 检查——
+    鼠标移动、目光跟随、走路眨眼这些一律不得触发模型（架构文档 §5.1）。
+    """
+
+    type: Literal[
+        "user_message",
+        "ambiguous_intent",
+        "important_event",
+        "proactive_thought",
+        "relationship_reflection",
+        "task_planning",
+    ] = "proactive_thought"
+    trigger: str | None = None
+    needs: dict[str, float] = Field(default_factory=dict)
+    mood: dict[str, Any] = Field(default_factory=dict)
+    relationship: dict[str, Any] = Field(default_factory=dict)
+    page: str = Field(default="", max_length=200)
+    local_time: str = Field(default="", max_length=40)
+    recent_interactions: list[str] = Field(default_factory=list)
+    active_task: str | None = Field(default=None, max_length=120)
+    #: 与前端 PetInitiative 对齐。用户可以关闭主动交流或降低频率（§10）。
+    initiative: Literal["normal", "quiet", "off"] = "normal"
+
+
+class PetCognitionRead(ApiModel):
+    goal: str
+    emotion: str
+    reason: str
+    utterance: str | None
+    capability_request: str | None
+    memory_proposal: str | None
+    expires_in: int
+
+
+class PetEventWrite(ApiModel):
+    """客户端上报一条值得记住的事件（架构文档 §9）。
+
+    类型不在 Reflection 白名单里也照收——过滤在读取端，写下来的痕迹将来
+    调门槛时还能回溯。
+    """
+
+    type: str = Field(min_length=1, max_length=60)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    importance: int = Field(default=50, ge=0, le=100)
+
+
+class DirectMessageCreate(ApiModel):
+    body: str = Field(default="", max_length=20_000)
+    attachment_ids: list[str] = Field(default_factory=list, max_length=8)
+
+
+class DirectMessageRead(ApiModel):
+    id: str
+    created_at: datetime
+    sender_id: str
+    recipient_id: str
+    body: str
+    attachment_ids: list[str]
+    read_at: datetime | None
+
+
+class PetInterjectionRead(ApiModel):
+    id: str
+    created_at: datetime
+    kind: str
+    body: str
+    message_id: str | None
+
+
+class PartnerRead(ApiModel):
+    id: str
+    username: str
+    display_name: str
+
+
+class ChatThreadRead(ApiModel):
+    """聊天页一次拉全：对方是谁、消息、宠物的插话、我的未读数。"""
+
+    partner: PartnerRead
+    messages: list[DirectMessageRead]
+    #: 宠物在这条流里说过的话。单独一组，前端要把它和真人消息**明确区分**——
+    #: 宠物永远以自己的身份说话（计划文档 §3.2）。
+    interjections: list[PetInterjectionRead]
+    unread_count: int
 
 
 class PetActionRead(ApiModel):

@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 2,
+  "petId": "shiba",
+  "version": "v2",
+  "style": "photorealistic-rive-canonical-joints",
+  "source": "shiba-canonical-v6.riv",
+  "artboard": "ShibaPet",
+  "playback": "state-machine",
+  "animations": [
+    "idle",
+    "walk",
+    "sleep",
+    "held",
+    "thinking",
+    "working",
+    "waiting",
+    "asking",
+    "happy",
+    "success",
+    "error",
+    "land",
+    "eat",
+    "play",
+    "tap-head",
+    "tap-body",
+    "confused",
+    "gaze-x-left",
+    "gaze-x-center",
+    "gaze-x-right",
+    "gaze-y-up",
+    "gaze-y-center",
+    "gaze-y-down",
+    "eyes-open",
+    "breath-hold",
+    "breathe",
+    "blink",
+    "sit",
+    "crawl"
+  ],
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchorX": 0.5,
+    "anchorY": 0.846
+  },
+  "stateMachine": "PetSM",
+  "inputs": [
+    {
+      "name": "activity",
+      "type": "number"
+    },
+    {
+      "name": "lookX",
+      "type": "number"
+    },
+    {
+      "name": "lookY",
+      "type": "number"
+    },
+    {
+      "name": "motion",
+      "type": "bool"
+    },
+    {
+      "name": "blink",
+      "type": "trigger"
+    },
+    {
+      "name": "happy",
+      "type": "trigger"
+    },
+    {
+      "name": "success",
+      "type": "trigger"
+    },
+    {
+      "name": "error",
+      "type": "trigger"
+    },
+    {
+      "name": "land",
+      "type": "trigger"
+    },
+    {
+      "name": "eat",
+      "type": "trigger"
+    },
+    {
+      "name": "play",
+      "type": "trigger"
+    },
+    {
+      "name": "tap-head",
+      "type": "trigger"
+    },
+    {
+      "name": "tap-body",
+      "type": "trigger"
+    },
+    {
+      "name": "confused",
+      "type": "trigger"
+    }
+  ]
+}

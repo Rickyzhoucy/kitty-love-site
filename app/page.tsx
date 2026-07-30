@@ -18,7 +18,7 @@ const KittyScene = dynamic(() => import('./components/KittyScene'), { ssr: false
 
 const QUICK_LINKS = [
   { href: '/guestbook', num: '01', label: '留言板', en: 'Guestbook', icon: BookHeart },
-  { href: '/memo', num: '02', label: '备忘录', en: 'Memos', icon: StickyNote },
+  { href: '/plan', num: '02', label: '计划', en: 'Plans', icon: StickyNote },
   { href: '/gallery', num: '03', label: '照片墙', en: 'Gallery', icon: ImageIcon },
   { href: '/timeline', num: '04', label: '我们的故事', en: 'Our Story', icon: Sparkles },
 ];

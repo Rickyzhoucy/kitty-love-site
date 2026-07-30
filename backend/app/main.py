@@ -3,12 +3,14 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.agent_runtime import (
+from app.agents.cognition import CognitionAgent
+from app.agents.conversation import (
     AgentRuntime,
     CheckpointerLifecycle,
     build_agent,
     build_chat_model,
 )
+from app.agents.roles import AgentRole
 from app.api import router
 from app.config import get_settings
 from app.db import session_factory
@@ -16,6 +18,7 @@ from app.embeddings import (
     OpenAICompatibleEmbeddingProvider,
     UnavailableEmbeddingProvider,
 )
+from app.pet_cognition import PetCognitionService
 from app.queue import ProcrastinateJobQueue, procrastinate_app
 from app.skill_api import router as skill_router
 
@@ -24,6 +27,7 @@ from app.skill_api import router as skill_router
 async def lifespan(application: FastAPI):
     settings = get_settings()
     application.state.agent_runtime = None
+    application.state.cognition_service = None
     application.state.job_queue = None
     # AsyncExitStack 保证任一初始化步骤失败时已打开的资源都能反向清理
     async with AsyncExitStack() as stack:
@@ -47,6 +51,13 @@ async def lifespan(application: FastAPI):
                 embedding_provider,
                 job_queue,
                 embedding_enabled=bool(settings.embedding_api_key),
+            )
+            # 三个角色共用模型提供方，但温度与超时按角色取（架构文档 §4）。
+            # Cognition 不进 agent loop，所以只要一个模型，不要 checkpointer。
+            application.state.cognition_service = PetCognitionService(
+                CognitionAgent(
+                    build_chat_model(settings, role=AgentRole.COGNITION)
+                )
             )
         yield
 

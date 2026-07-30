@@ -2,29 +2,31 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { MessageCircle, StickyNote, Image as ImageIcon, Star, LogOut, User } from 'lucide-react';
+import { MessageCircle, StickyNote, Image as ImageIcon, Star, LogOut, User, Heart } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import styles from './page.module.css';
-import { memosApi, messagesApi, milestonesApi, photosApi } from '@/lib/api/resources';
+import { messagesApi, milestonesApi, photosApi, plansApi, wishesApi } from '@/lib/api/resources';
 import { authApi } from '@/lib/api/auth';
 
 export default function DashboardOverview() {
-    const [counts, setCounts] = useState({ messages: 0, memos: 0, photos: 0, milestones: 0 });
+    const [counts, setCounts] = useState({ messages: 0, plans: 0, wishes: 0, photos: 0, milestones: 0 });
     const router = useRouter();
 
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [msgs, memos, photos, miles] = await Promise.all([
+                const [msgs, plans, wishes, photos, miles] = await Promise.all([
                     messagesApi.list(),
-                    memosApi.list(),
+                    plansApi.list(),
+                    wishesApi.list(),
                     photosApi.list(),
                     milestonesApi.list(),
                 ]);
 
                 setCounts({
                     messages: Array.isArray(msgs) ? msgs.length : 0,
-                    memos: Array.isArray(memos) ? memos.length : 0,
+                    plans: Array.isArray(plans) ? plans.length : 0,
+                    wishes: Array.isArray(wishes) ? wishes.length : 0,
                     photos: Array.isArray(photos) ? photos.length : 0,
                     milestones: Array.isArray(miles) ? miles.length : 0,
                 });
@@ -43,7 +45,8 @@ export default function DashboardOverview() {
 
     const cards = [
         { title: '留言总数', count: counts.messages, icon: MessageCircle, color: 'var(--color-accent-soft)', href: '/admin/messages' },
-        { title: '备忘录', count: counts.memos, icon: StickyNote, color: 'var(--color-secondary-soft)', href: '/admin/memos' },
+        { title: '计划', count: counts.plans, icon: StickyNote, color: 'var(--color-secondary-soft)', href: '/admin/plans' },
+        { title: '心愿', count: counts.wishes, icon: Heart, color: 'var(--color-accent-soft)', href: '/wish' },
         { title: '照片', count: counts.photos, icon: ImageIcon, color: 'var(--color-sunken)', href: '/admin/photos' },
         { title: '里程碑', count: counts.milestones, icon: Star, color: 'var(--color-accent-soft)', href: '/admin/milestones' },
     ];

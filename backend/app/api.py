@@ -1,5 +1,5 @@
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -7,7 +7,13 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent_runtime import AgentRuntime
+from app.agents.cognition import CognitionInput
+from app.agents.conversation import AgentRuntime
+from app.agents.reflection import (
+    REFLECTION_BATCH_TRIGGER,
+    pending_count,
+    record_event,
+)
 from app.auth import (
     DUMMY_PASSWORD_HASH,
     SESSION_COOKIE_NAME,
@@ -16,43 +22,68 @@ from app.auth import (
     create_session,
     verify_password,
 )
+from app.cognition_queue import DAILY_PROACTIVE_BUDGET, CognitionType
 from app.config import Settings, get_settings
 from app.conversations import ConversationService
 from app.db import get_session, session_factory
+from app.direct_messages import (
+    PartnerUnavailable,
+    list_interjections,
+    list_thread,
+    mark_read,
+    oldest_unread,
+    resolve_partner,
+    send_message,
+    unread_count,
+    verify_attachments,
+)
 from app.events import stream_outbox
 from app.models import (
     Attachment,
     AuthAttempt,
+    ChatMessage,
+    Companion,
     CompanionPersona,
+    CompanionPetProfile,
     EventTimer,
-    Memo,
+    MemoryItem,
     Message,
     Milestone,
     OutboxEvent,
-    Pet,
     Photo,
-    Reminder,
+    Plan,
     SiteConfig,
     SiteConfigHistory,
     User,
     UserSession,
+    Wish,
     utcnow,
+)
+from app.pet_cognition import PetCognitionService
+from app.pet_mediation import run_mediation
+from app.pet_state import (
+    MAX_OFFLINE_SECONDS,
+    elapsed_seconds,
+    load_state,
+    resolve_pet,
+    save_state,
+    species_of,
 )
 from app.photo_service import ALLOWED_PHOTO_TYPES, PhotoService
 from app.schemas import (
     AttachmentRead,
     ChatMessageRead,
     ChatStreamRequest,
+    ChatThreadRead,
     CompleteUploadRequest,
     ConversationCreate,
     ConversationRead,
+    DirectMessageCreate,
+    DirectMessageRead,
     LoginRequest,
     LoginResponse,
-    MemoCreate,
-    MemoRead,
     MemoryCreate,
     MemoryRead,
-    MemoUpdate,
     MessageCreate,
     MessageRead,
     MessageUpdate,
@@ -62,23 +93,32 @@ from app.schemas import (
     PersonaRead,
     PersonaUpdate,
     PetActionRead,
+    PetCognitionRead,
+    PetCognitionRequest,
+    PetEventWrite,
+    PetInterjectionRead,
     PetRead,
+    PetStateRead,
+    PetStateWrite,
     PetUpdate,
     PhotoCreate,
     PhotoRead,
     PhotoUpdate,
+    PlanCreate,
+    PlanRead,
+    PlanUpdate,
     PresignUploadRequest,
     PresignUploadResponse,
     ProfileRead,
     ProfileUpdate,
-    ReminderCreate,
-    ReminderRead,
-    ReminderUpdate,
     SessionRead,
     SessionUser,
     TimerCreate,
     TimerRead,
     TimerUpdate,
+    WishCreate,
+    WishRead,
+    WishUpdate,
 )
 from app.services import CrudService
 from app.storage import ObjectStorage, get_storage
@@ -180,8 +220,8 @@ def crud_router(
 
 
 for args in [
-    ("memos", Memo, "memo", MemoCreate, MemoUpdate, MemoRead),
-    ("reminders", Reminder, "reminder", ReminderCreate, ReminderUpdate, ReminderRead),
+    ("plans", Plan, "plan", PlanCreate, PlanUpdate, PlanRead),
+    ("wishes", Wish, "wish", WishCreate, WishUpdate, WishRead),
     (
         "milestones",
         Milestone,
@@ -437,7 +477,61 @@ async def rollback_config(
 
 @router.get("/conversations", response_model=list[ConversationRead])
 async def list_conversations(db: Db, user: CurrentUser):
-    return await conversation_service.list(db, user.id, limit=200)
+    """对话列表，带首条用户发言的预览。
+
+    预览用一条聚合查询取回，不是逐个对话再查一次——列表页最多 200 条，
+    N+1 会让打开对话本变成几百次往返。
+    """
+    conversations = await conversation_service.list(db, user.id, limit=200)
+    if not conversations:
+        return []
+    ids = [item.id for item in conversations]
+
+    # 每个对话里 createdAt 最早的那条用户发言。
+    first_user = (
+        select(
+            ChatMessage.conversation_id.label("cid"),
+            func.min(ChatMessage.created_at).label("first_at"),
+        )
+        .where(
+            ChatMessage.conversation_id.in_(ids),
+            ChatMessage.role == "user",
+        )
+        .group_by(ChatMessage.conversation_id)
+        .subquery()
+    )
+    previews = {
+        row.cid: row.content
+        for row in await db.execute(
+            select(ChatMessage.conversation_id.label("cid"), ChatMessage.content)
+            .join(
+                first_user,
+                (ChatMessage.conversation_id == first_user.c.cid)
+                & (ChatMessage.created_at == first_user.c.first_at),
+            )
+            .where(ChatMessage.role == "user")
+        )
+    }
+    counts = {
+        row.cid: row.total
+        for row in await db.execute(
+            select(
+                ChatMessage.conversation_id.label("cid"),
+                func.count(ChatMessage.id).label("total"),
+            )
+            .where(ChatMessage.conversation_id.in_(ids))
+            .group_by(ChatMessage.conversation_id)
+        )
+    }
+    return [
+        ConversationRead.model_validate(item).model_copy(
+            update={
+                "preview": (previews.get(item.id) or "").strip()[:80] or None,
+                "message_count": counts.get(item.id, 0),
+            }
+        )
+        for item in conversations
+    ]
 
 
 @router.post(
@@ -587,56 +681,317 @@ async def create_memory(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
 
 
-async def get_or_create_pet(db: AsyncSession) -> Pet:
-    pet = await db.scalar(select(Pet).order_by(Pet.created_at).limit(1))
-    if pet is None:
-        pet = Pet(asset_id="kitty")
-        db.add(pet)
-        await db.commit()
-        await db.refresh(pet)
-    elif pet.asset_id not in {
-        "kitty",
-        "momo",
-        "hello-kitty",
-        "snoopy",
-        "shiba",
-        "bichon",
-    }:
-        pet.asset_id = "kitty"
-        await db.commit()
-        await db.refresh(pet)
-    return pet
+def pet_view(companion: Companion, profile: CompanionPetProfile) -> dict[str, Any]:
+    """把 Companion + Profile 投影成前端既有的 `/pet` 形状。
+
+    对外契约没变，变的是背后的真相来源：名字来自 Companion，外观来自
+    Profile，不再有全站单例。`id` 用 companionId——行为脑拿它当性格种子，
+    换成每用户之后两个人的宠物才会有不同的脾气。
+    """
+    return {
+        "id": companion.id,
+        "createdAt": companion.created_at,
+        "name": companion.name,
+        "assetId": profile.body_asset_id,
+        "updatedAt": profile.updated_at,
+    }
 
 
 @router.get("/pet", response_model=PetRead)
-async def read_pet(db: Db, _: CurrentUser):
-    return await get_or_create_pet(db)
+async def read_pet(db: Db, user: CurrentUser):
+    companion, profile = await resolve_pet(db, user.id)
+    await db.commit()
+    return pet_view(companion, profile)
 
 
 @router.patch("/pet", response_model=PetRead)
-async def update_pet(data: PetUpdate, db: Db, _: CurrentUser):
-    pet = await get_or_create_pet(db)
-    for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(pet, field, value)
+async def update_pet(data: PetUpdate, db: Db, user: CurrentUser):
+    companion, profile = await resolve_pet(db, user.id)
+    changes = data.model_dump(exclude_unset=True)
+    if "name" in changes and changes["name"]:
+        companion.name = changes["name"]
+    if "asset_id" in changes and changes["asset_id"]:
+        profile.body_asset_id = changes["asset_id"]
+        profile.species = species_of(changes["asset_id"])
+    profile.updated_at = utcnow()
     await db.commit()
-    await db.refresh(pet)
-    return pet
+    return pet_view(companion, profile)
+
+
+@router.get("/pet/state", response_model=PetStateRead)
+async def read_pet_state(db: Db, user: CurrentUser):
+    """返回上次落盘的快照，外加**已夹到上限**的离线时长。
+
+    衰减本身由客户端 `settleElapsed` 用这个时长推进——见 pet_state 模块开头
+    对分工的说明。没有快照时 elapsedSeconds 为 0，客户端按初始值起步。
+    """
+    companion, profile = await resolve_pet(db, user.id)
+    state = await load_state(db, companion)
+    await db.commit()
+    if state is None:
+        return {
+            "companionId": companion.id,
+            "traits": profile.traits,
+            "needs": None,
+            "mood": None,
+            "relationship": None,
+            "activeGoal": "idle",
+            "elapsedSeconds": 0.0,
+            "cappedAt": MAX_OFFLINE_SECONDS,
+        }
+    return {
+        "companionId": companion.id,
+        "traits": profile.traits,
+        "needs": state.needs,
+        "mood": state.mood,
+        "relationship": state.relationship,
+        "activeGoal": state.active_goal,
+        "elapsedSeconds": elapsed_seconds(state.evaluated_at),
+        "cappedAt": MAX_OFFLINE_SECONDS,
+    }
+
+
+@router.put("/pet/state", response_model=PetStateRead)
+async def write_pet_state(data: PetStateWrite, db: Db, user: CurrentUser):
+    companion, profile = await resolve_pet(db, user.id)
+    await save_state(
+        db,
+        companion,
+        needs=data.needs,
+        mood=data.mood,
+        relationship=data.relationship,
+        active_goal=data.active_goal,
+    )
+    # 性格由客户端从 petId 确定性派生，落库只是为了让 P4 的 Cognition Agent
+    # 不必重算一遍 FNV-1a。它不参与判断，因此不做校验。
+    if data.traits:
+        profile.traits = data.traits
+    await db.commit()
+    return {
+        "companionId": companion.id,
+        "traits": profile.traits,
+        "needs": data.needs,
+        "mood": data.mood,
+        "relationship": data.relationship,
+        "activeGoal": data.active_goal,
+        "elapsedSeconds": 0.0,
+        "cappedAt": MAX_OFFLINE_SECONDS,
+    }
+
+
+def get_cognition_service(request: Request) -> PetCognitionService:
+    service = getattr(request.app.state, "cognition_service", None)
+    if service is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Agent 模型尚未配置")
+    return service
+
+
+@router.post("/pet/cognition", response_model=PetCognitionRead | None)
+async def run_pet_cognition(
+    data: PetCognitionRequest,
+    db: Db,
+    user: CurrentUser,
+    service: Annotated[PetCognitionService, Depends(get_cognition_service)],
+    response: Response,
+):
+    """让宠物想一件事。
+
+    绝大多数情况下这里返回 204——被禁用触发源、预算、防抖或去重挡下来了。
+    这是设计意图，不是故障：连续移动鼠标五分钟，模型调用次数必须是 0
+    （架构文档 §16）。校验不过的模型输出同样返回 204，宠物继续按本地行为脑生活。
+    """
+    companion, _ = await resolve_pet(db, user.id)
+    proposal, rejection = await service.think(
+        db,
+        companion,
+        CognitionType(data.type),
+        CognitionInput(
+            needs=data.needs,
+            mood=data.mood,
+            relationship=data.relationship,
+            page=data.page,
+            local_time=data.local_time,
+            recent_interactions=data.recent_interactions,
+            # 直接查表而不是走 MemoryService：这里只要文本，不需要 embedding
+            # 检索，为此构造一个 provider 反而会把这条路径绑到 embedding 可用性上。
+            memories=list(
+                await db.scalars(
+                    select(MemoryItem.content)
+                    .where(
+                        MemoryItem.companion_id == companion.id,
+                        MemoryItem.owner_id == user.id,
+                    )
+                    .order_by(MemoryItem.importance.desc())
+                    .limit(6)
+                )
+            ),
+            active_task=data.active_task,
+            proactive_budget_left=DAILY_PROACTIVE_BUDGET,
+        ),
+        trigger=data.trigger,
+        quiet_mode=data.initiative == "quiet",
+        initiative_off=data.initiative == "off",
+    )
+    if proposal is None:
+        response.status_code = status.HTTP_204_NO_CONTENT
+        if rejection is not None:
+            response.headers["X-Cognition-Rejected"] = rejection.value
+        return None
+    return proposal
+
+
+@router.post(
+    "/pet/events",
+    response_model=None,
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def record_pet_event(
+    data: PetEventWrite,
+    db: Db,
+    user: CurrentUser,
+    request: Request,
+) -> Response:
+    companion, _ = await resolve_pet(db, user.id)
+    await record_event(
+        db,
+        companion.id,
+        data.type,
+        data.payload,
+        importance=data.importance,
+    )
+    await db.commit()
+
+    # 按量触发反思：攒够一批才想，孤立的一两件事提炼不出关系层面的东西。
+    # 队列锁按 companionId，已经排着的不会重复排；另有每日兜底扫描兜住
+    # 那些永远攒不满一批的不活跃用户。
+    queue = getattr(request.app.state, "job_queue", None)
+    if queue is not None and await pending_count(db, companion.id) >= (
+        REFLECTION_BATCH_TRIGGER
+    ):
+        try:
+            await queue.enqueue(
+                "pet.reflect",
+                {"companion_id": companion.id},
+                idempotency_key=companion.id,
+            )
+        except Exception:
+            # 上报事件不能因为队列不可用而失败——事件已经落库，兜底扫描会捡起来。
+            pass
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/chat/thread", response_model=ChatThreadRead)
+async def read_chat_thread(db: Db, user: CurrentUser):
+    """聊天页一次拉全。
+
+    刻意不做分页：这个站只有两个人，几百条消息一次拉回来比维护游标划算得多。
+    """
+    try:
+        partner = await resolve_partner(db, user.id)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    messages = await list_thread(db, user.id, partner.id)
+    interjections = await list_interjections(db, user.id)
+    return {
+        "partner": partner,
+        "messages": messages,
+        "interjections": interjections,
+        "unreadCount": await unread_count(db, user.id),
+    }
+
+
+@router.post(
+    "/chat/messages",
+    response_model=DirectMessageRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_direct_message(
+    data: DirectMessageCreate,
+    db: Db,
+    user: CurrentUser,
+):
+    if not data.body.strip() and not data.attachment_ids:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "说点什么或者带个附件")
+    try:
+        partner = await resolve_partner(db, user.id)
+        attachments = await verify_attachments(db, user.id, data.attachment_ids)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+    message = await send_message(db, user.id, partner.id, data.body, attachments)
+    # 走既有的 SSE 通道通知对方。人不在站上时收不到——那是已知边界，
+    # 真正的推送需要 Web Push，不在本次范围（计划文档 §3.6）。
+    db.add(
+        OutboxEvent(
+            topic="chat.message",
+            aggregate_type="directMessage",
+            aggregate_id=message.id,
+            payload={
+                "messageId": message.id,
+                "senderId": user.id,
+                "recipientId": partner.id,
+                # 不带正文：SSE 是广播给所有连接的，正文只该由收件人自己去拉
+                "hasAttachments": bool(attachments),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(message)
+    return message
+
+
+@router.post("/chat/read", response_model=None, status_code=status.HTTP_204_NO_CONTENT)
+async def mark_chat_read(db: Db, user: CurrentUser) -> Response:
+    """把发给我的未读全标为已读。
+
+    宠物的唠叨与代答全都以 `readAt` 为唯一依据，所以这个接口一被调用，
+    唠叨就该立刻停——这是「打开了就安静」那条行为的实现点。
+    """
+    marked = await mark_read(db, user.id)
+    if marked:
+        await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/chat/mediate", response_model=list[PetInterjectionRead])
+async def run_chat_mediation(
+    db: Db,
+    user: CurrentUser,
+    initiative: str = "normal",
+):
+    """跑一轮宠物中介：未读够久就催，对方还在等就代答。
+
+    由前端在聊天页与浮窗里定时调用。**这不是一个新的通知渠道**——所有输出都
+    落 `PetInterjection`，并受深夜静默与 initiative 三档约束（计划文档 §3.4）。
+    """
+    try:
+        partner = await resolve_partner(db, user.id)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    unread = await oldest_unread(db, user.id)
+    return await run_mediation(
+        db,
+        user.id,
+        partner.id,
+        unread,
+        initiative=initiative if initiative in {"normal", "quiet", "off"} else "normal",
+    )
 
 
 @router.post("/pet/actions/{action}", response_model=PetActionRead)
 async def run_pet_action(
     action: str,
     db: Db,
-    _: CurrentUser,
+    user: CurrentUser,
     animation: str | None = None,
     message: str | None = None,
     duration: int = 1800,
 ):
-    pet = await get_or_create_pet(db)
+    companion, profile = await resolve_pet(db, user.id)
     payload = {
         "action": action,
         "animation": animation or action,
-        "assetId": pet.asset_id,
+        "assetId": profile.body_asset_id,
         "message": message,
         "duration": max(100, min(duration, 60_000)),
     }
@@ -644,7 +999,7 @@ async def run_pet_action(
         OutboxEvent(
             topic="pet.action",
             aggregate_type="pet",
-            aggregate_id=pet.id,
+            aggregate_id=companion.id,
             payload=payload,
         )
     )

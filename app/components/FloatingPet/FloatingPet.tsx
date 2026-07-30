@@ -1,30 +1,63 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+    type CSSProperties,
+} from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { streamChat } from '@/lib/api/chat';
+import type { AgentTaskEvent } from '@/lib/api/events';
+import { recordPetEvent } from '@/lib/api/petCognition';
 import { uploadAttachment, type Attachment } from '@/lib/api/attachments';
 import { ApiError } from '@/lib/api/client';
-import { subscribeServerEvent, type PetActionEvent } from '@/lib/api/events';
+import { useChatNudge } from '../ChatMediationProvider';
 import styles from './FloatingPet.module.css';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
+import type { PetInitiative } from './petBodyProtocol';
 import { usePet } from './usePet';
-import ManifestFrameRenderer, {
-    type PetFrameAction,
-} from './renderers/ManifestFrameRenderer';
+import { usePetActivityBridge } from './usePetActivityBridge';
+import { usePetBrain } from './usePetBrain';
+import { usePetInteraction } from './usePetInteraction';
+import { PET_SIZES, usePetSize } from './usePetSize';
+import PetBodyRenderer from './renderers/PetBodyRenderer';
 
-type MenuType = 'none' | 'main' | 'appearance' | 'actions' | 'rename';
+type MenuType =
+    | 'none'
+    | 'main'
+    | 'appearance'
+    | 'actions'
+    | 'rename'
+    | 'settings'
+    | 'size';
 
-interface DragState {
-    pointerId: number;
-    startClientX: number;
-    startClientY: number;
-    startRight: number;
-    startBottom: number;
-    moved: boolean;
-}
+const MENU_TITLES: Record<Exclude<MenuType, 'none' | 'main'>, string> = {
+    actions: '动作',
+    appearance: '外观',
+    size: '大小',
+    settings: '主动性',
+    rename: '改名',
+};
 
-const DEFAULT_POSITION = { right: 20, bottom: 112 };
+type PetActionId = 'calm' | 'walk' | 'sleep' | 'play' | 'feed' | 'cheer';
+
+const PET_ACTIONS: { id: PetActionId; emoji: string; label: string }[] = [
+    { id: 'calm', emoji: '🍃', label: '安静待着' },
+    { id: 'walk', emoji: '🚶', label: '走两步' },
+    { id: 'sleep', emoji: '😴', label: '睡一会儿' },
+    { id: 'play', emoji: '🎾', label: '玩耍' },
+    { id: 'feed', emoji: '🍖', label: '吃东西' },
+    { id: 'cheer', emoji: '🎉', label: '开心一下' },
+];
+
+const INITIATIVE_OPTIONS: { id: PetInitiative; label: string; hint: string }[] = [
+    { id: 'normal', label: '偶尔主动', hint: '会自己走动，偶尔搭句话' },
+    { id: 'quiet', label: '安静模式', hint: '照常生活，但很少打扰你' },
+    { id: 'off', label: '完全安静', hint: '只在你叫它的时候动' },
+];
 
 export default function FloatingPet() {
     const pathname = usePathname();
@@ -39,10 +72,9 @@ export default function FloatingPet() {
     const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [newName, setNewName] = useState('');
-    const [frameAction, setFrameAction] = useState<PetFrameAction>('idle');
-    const [position, setPosition] = useState(DEFAULT_POSITION);
-    const dragRef = useRef<DragState | null>(null);
-    const actionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [initiative, setInitiative] = useState<PetInitiative>('normal');
+    const { size, setSize, scale } = usePetSize();
+    const bodyRef = useRef<HTMLElement | null>(null);
     const speechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const showSpeech = useCallback((text: string, duration = 3_000) => {
@@ -53,64 +85,133 @@ export default function FloatingPet() {
         }
     }, []);
 
-    const playAction = useCallback((action: string, duration = 1_800) => {
-        const next: PetFrameAction = action === 'walk'
-            ? 'walk'
-            : action === 'crawl'
-                ? 'crawl'
-                : 'idle';
-        if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
-        setFrameAction(next);
-        if (next !== 'idle') {
-            actionTimerRef.current = setTimeout(() => setFrameAction('idle'), duration);
-        }
+    const {
+        bodyState,
+        setActivity,
+        suggestTask,
+        setFacing,
+        react,
+        markInteraction,
+        agentThought,
+    } = usePetBrain({ bodyRef, initiative, petId: pet?.id, pathname, disabled: shouldSkip });
+
+    // Cognition Agent 想说的话。它是主动搭话，所以必须上报被接住还是被推开——
+    // 服务端的 `userDismissalRate` 全靠这个数据自动降频（架构文档 §10）。
+    // 没有反馈闭环的话，那个字段就只是个永远为 0 的摆设。
+    useEffect(() => {
+        if (!agentThought?.utterance) return;
+        showSpeech(agentThought.utterance, 8_000);
+
+        let settled = false;
+        const report = (accepted: boolean) => {
+            if (settled) return;
+            settled = true;
+            void recordPetEvent(
+                accepted ? 'proactive.accepted' : 'proactive.dismissed',
+                { goal: agentThought.goal, reason: agentThought.reason },
+                accepted ? 70 : 55,
+            );
+        };
+        // 搭话之后马上有互动，就算接住了；一直没动静才算被推开。
+        const onEngage = () => report(true);
+        window.addEventListener('pointerdown', onEngage, { once: true });
+        window.addEventListener('keydown', onEngage, { once: true });
+        const timer = setTimeout(() => report(false), 9_000);
+
+        return () => {
+            clearTimeout(timer);
+            window.removeEventListener('pointerdown', onEngage);
+            window.removeEventListener('keydown', onEngage);
+        };
+    }, [agentThought, showSpeech]);
+
+    // 聊天未读的中介催促（chat/mediate）。站点级轮询，见 ChatMediationProvider——
+    // 挪到这儿之前，催促逻辑长在 /chat 页面里，而那页一打开就会把未读清零，
+    // 导致提醒永远赶不上已读、实际上从没被人看到过。
+    const [nudge, consumeNudge] = useChatNudge();
+    useEffect(() => {
+        if (!nudge) return;
+        showSpeech(nudge.body, 8_000);
+        consumeNudge();
+    }, [nudge, consumeNudge, showSpeech]);
+
+    const activityBridge = usePetActivityBridge({
+        disabled: shouldSkip,
+        setActivity,
+        suggestTask,
+        react,
+        showSpeech,
+        refetchPet: refetch,
+    });
+    const handleHeldChange = useCallback((held: boolean) => {
+        setActivity(held ? 'held' : 'idle');
+    }, [setActivity]);
+    const handleWalkingChange = useCallback((walking: boolean) => {
+        setActivity(walking ? 'walking' : 'idle');
+    }, [setActivity]);
+    const handleTap = useCallback((area: 'head' | 'body') => {
+        react(area === 'head' ? 'tapHead' : 'tapBody');
+        markInteraction('pet');
+    }, [markInteraction, react]);
+    const handleMove = useCallback(() => {
+        markInteraction('drag');
+    }, [markInteraction]);
+    const handleOpenMenu = useCallback(() => {
+        setSpeech(null);
+        setMenuType(current => current === 'none' ? 'main' : 'none');
     }, []);
+    const {
+        position,
+        moving,
+        travelMs,
+        dragging,
+        petButtonProps,
+    } = usePetInteraction({
+        bodyRef,
+        disabled: shouldSkip,
+        onFacing: setFacing,
+        onHeldChange: handleHeldChange,
+        onWalkingChange: handleWalkingChange,
+        onLand: () => react('land'),
+        onTap: handleTap,
+        onOpenMenu: handleOpenMenu,
+        onInteraction: handleMove,
+        sizeToken: size,
+    });
 
     useEffect(() => {
         if (shouldSkip) return;
         setConversationId(localStorage.getItem('companionConversationId'));
-        const saved = localStorage.getItem('companionPetPosition');
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved) as typeof DEFAULT_POSITION;
-                if (Number.isFinite(parsed.right) && Number.isFinite(parsed.bottom)) {
-                    setPosition(parsed);
-                }
-            } catch {
-                localStorage.removeItem('companionPetPosition');
-            }
+        const savedInitiative = localStorage.getItem('companionPetInitiative');
+        if (savedInitiative === 'normal' || savedInitiative === 'quiet' || savedInitiative === 'off') {
+            setInitiative(savedInitiative);
         }
         return () => {
-            if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
             if (speechTimerRef.current) clearTimeout(speechTimerRef.current);
         };
     }, [shouldSkip]);
-
-    useEffect(() => {
-        if (shouldSkip) return;
-        return subscribeServerEvent<PetActionEvent>('pet.action', event => {
-            if (event.message) showSpeech(event.message, event.duration ?? 3_000);
-            playAction(event.animation ?? event.action, event.duration);
-            void refetch();
-        });
-    }, [playAction, refetch, shouldSkip, showSpeech]);
 
     const sendMessage = async (input = chatInput.trim()) => {
         const message = input || (pendingAttachments.length ? '请查看我发的附件' : '');
         if (!message || sending || uploading) return;
         setChatInput('');
         setSending(true);
+        markInteraction('chat');
+        activityBridge.beginThinking();
         let reply = '';
         const handleEvent = (event: Parameters<typeof streamChat>[1] extends
             (value: infer Event) => void ? Event : never) => {
             if (event.type === 'text.delta') {
                 reply += event.delta;
                 showSpeech(reply, 0);
-            } else if (event.type === 'tool.started' && !reply) {
-                showSpeech(`正在处理：${event.name}…`, 0);
+                // 开始说话就不再需要任务状态占着身体了，气泡本身就是反馈。
+                activityBridge.endTask();
+            } else if (event.type.startsWith('agent.task.')) {
+                // 身体表现只跟语义层走。tool.* 仍在流里，但那是审计用的，
+                // 工具名对宠物没有意义——见 usePetActivityBridge 的映射表。
+                activityBridge.applyTaskEvent(event as AgentTaskEvent);
             } else if (event.type === 'pet.action') {
-                if (event.message) showSpeech(event.message, event.duration ?? 3_000);
-                playAction(event.animation ?? event.action, event.duration);
+                activityBridge.playPetAction(event);
             } else if (event.type === 'message.completed') {
                 setConversationId(event.conversationId);
                 localStorage.setItem('companionConversationId', event.conversationId);
@@ -136,8 +237,10 @@ export default function FloatingPet() {
             setPendingAttachments([]);
         } catch (error) {
             showSpeech(error instanceof Error ? error.message : '网络好像有点问题');
+            activityBridge.fail();
         } finally {
             setSending(false);
+            activityBridge.endTask();
         }
     };
 
@@ -172,65 +275,80 @@ export default function FloatingPet() {
     const chooseAppearance = async (assetId: PetAssetId) => {
         if (await setAssetId(assetId)) {
             setMenuType('none');
-            setFrameAction('idle');
+            setActivity('idle');
+            react('celebrate');
             showSpeech('新造型登场啦');
         } else {
             showSpeech('更换造型失败，请重试');
         }
     };
 
-    const onPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
-        event.currentTarget.setPointerCapture(event.pointerId);
-        dragRef.current = {
-            pointerId: event.pointerId,
-            startClientX: event.clientX,
-            startClientY: event.clientY,
-            startRight: position.right,
-            startBottom: position.bottom,
-            moved: false,
-        };
-    };
-
-    const onPointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
-        const drag = dragRef.current;
-        if (!drag || drag.pointerId !== event.pointerId) return;
-        const deltaX = event.clientX - drag.startClientX;
-        const deltaY = event.clientY - drag.startClientY;
-        if (Math.abs(deltaX) + Math.abs(deltaY) > 6) drag.moved = true;
-        const size = event.currentTarget.getBoundingClientRect();
-        setPosition({
-            right: Math.max(8, Math.min(window.innerWidth - size.width - 8, drag.startRight - deltaX)),
-            bottom: Math.max(88, Math.min(window.innerHeight - size.height - 8, drag.startBottom - deltaY)),
-        });
-    };
-
-    const onPointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
-        const drag = dragRef.current;
-        if (!drag || drag.pointerId !== event.pointerId) return;
-        dragRef.current = null;
-        localStorage.setItem('companionPetPosition', JSON.stringify(position));
-        if (!drag.moved) {
-            setSpeech(null);
-            setMenuType(current => current === 'none' ? 'main' : 'none');
+    /** 菜单里的动作。刻意不关闭菜单——连着喂两次、玩一会儿是常见操作。 */
+    const runAction = (id: PetActionId) => {
+        switch (id) {
+            case 'calm':
+                setActivity('idle');
+                break;
+            case 'walk':
+                activityBridge.playPetAction({ action: 'walking', duration: 2_600 });
+                break;
+            case 'sleep':
+                setActivity('sleeping');
+                break;
+            case 'play':
+                markInteraction('play');
+                activityBridge.playPetAction({ action: 'play' });
+                break;
+            case 'feed':
+                markInteraction('feed');
+                activityBridge.playPetAction({ action: 'eat' });
+                break;
+            case 'cheer':
+                activityBridge.playPetAction({ action: 'celebrate' });
+                break;
         }
+    };
+
+    const changeInitiative = (next: PetInitiative) => {
+        setInitiative(next);
+        localStorage.setItem('companionPetInitiative', next);
+        setMenuType('none');
+        showSpeech(next === 'off'
+            ? '我会安静陪着你'
+            : next === 'quiet'
+                ? '我会少一点打扰'
+                : '我会偶尔自己活动');
     };
 
     if (shouldSkip) return null;
 
     return (
         <aside
-            className={styles.container}
-            style={{ right: position.right, bottom: position.bottom }}
+            ref={bodyRef}
+            className={`${styles.container} ${moving ? styles.moving : ''} ${dragging ? styles.dragging : ''}`}
+            style={{
+                right: position.right,
+                bottom: position.bottom,
+                '--pet-scale': scale,
+                '--pet-travel-ms': `${travelMs}ms`,
+            } as CSSProperties}
             aria-label="伴侣宠物"
+            data-no-pet-walk
         >
             {chatOpen && (
-                <section className={styles.panel} aria-label={`与 ${pet?.name ?? '伴侣'} 对话`}>
+                <section
+                    className={styles.panel}
+                    aria-label={`与 ${pet?.name ?? '伴侣'} 对话`}
+                    // 声明为障碍物，宠物不会站到面板上（见 platform/environment.ts）。
+                    // 加新面板时在那个面板上加这个属性，而不是回去改一份选择器清单。
+                    data-pet-obstacle
+                >
                     <header className={styles.panelHeader}>
                         <strong>与 {pet?.name ?? '伴侣'} 对话</strong>
                         <button type="button" onClick={() => setChatOpen(false)} aria-label="关闭对话">×</button>
                     </header>
                     <div className={styles.chips}>
-                        {['帮我查一下备忘', '今天有什么提醒', '帮我写一段话'].map(prompt => (
+                        {['今天有什么计划', '我们想一起做什么来着', '帮我写一段话'].map(prompt => (
                             <button key={prompt} type="button" onClick={() => void sendMessage(prompt)}>
                                 {prompt}
                             </button>
@@ -287,36 +405,126 @@ export default function FloatingPet() {
             )}
 
             {menuType !== 'none' && (
-                <section className={styles.menu} aria-label="伴侣菜单">
-                    {menuType !== 'main' && (
-                        <button type="button" onClick={() => setMenuType('main')}>← 返回</button>
-                    )}
+                <section className={styles.menu} aria-label="伴侣菜单" data-pet-obstacle>
+                    <header className={styles.menuHeader}>
+                        {menuType === 'main' ? (
+                            <span className={styles.menuTitle}>{pet?.name ?? '伴侣'}</span>
+                        ) : (
+                            <button
+                                type="button"
+                                className={styles.menuBack}
+                                onClick={() => setMenuType('main')}
+                            >
+                                ‹ {MENU_TITLES[menuType]}
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            className={styles.menuClose}
+                            onClick={() => setMenuType('none')}
+                            aria-label="关闭菜单"
+                        >
+                            ×
+                        </button>
+                    </header>
+
                     {menuType === 'main' && (
-                        <>
-                            <button type="button" onClick={() => { setChatOpen(true); setMenuType('none'); }}>💬 对话</button>
-                            <button type="button" onClick={() => setMenuType('actions')}>🐾 动作</button>
-                            <button type="button" onClick={() => setMenuType('appearance')}>🎨 外观</button>
-                            <button type="button" onClick={() => setMenuType('rename')}>✏️ 改名</button>
-                        </>
+                        <div className={styles.tileGrid}>
+                            <button type="button" className={styles.tile}
+                                onClick={() => { setChatOpen(true); setMenuType('none'); }}>
+                                <span aria-hidden="true">💬</span>说句话
+                            </button>
+                            <Link href="/companion" className={styles.tile} onClick={() => setMenuType('none')}>
+                                <span aria-hidden="true">📖</span>对话本
+                            </Link>
+                            <button type="button" className={styles.tile}
+                                onClick={() => setMenuType('actions')}>
+                                <span aria-hidden="true">🐾</span>动作
+                            </button>
+                            <button type="button" className={styles.tile}
+                                onClick={() => setMenuType('appearance')}>
+                                <span aria-hidden="true">🎨</span>外观
+                            </button>
+                            <button type="button" className={styles.tile}
+                                onClick={() => setMenuType('size')}>
+                                <span aria-hidden="true">🔍</span>大小
+                            </button>
+                            <button type="button" className={styles.tile}
+                                onClick={() => setMenuType('settings')}>
+                                <span aria-hidden="true">🌙</span>主动性
+                            </button>
+                            <button type="button" className={styles.tile}
+                                onClick={() => setMenuType('rename')}>
+                                <span aria-hidden="true">✏️</span>改名
+                            </button>
+                        </div>
                     )}
+
+                    {/* 动作**不自动关闭菜单**：想连着喂两次、玩一会儿是常见的，
+                        改造前每点一下就要重新翻开菜单。 */}
                     {menuType === 'actions' && (
-                        <>
-                            {(['idle', 'walk', 'crawl'] as const).map(action => (
+                        <div className={styles.tileGrid}>
+                            {PET_ACTIONS.map(action => (
                                 <button
-                                    key={action}
+                                    key={action.id}
                                     type="button"
-                                    onClick={() => { playAction(action); setMenuType('none'); }}
+                                    className={styles.tile}
+                                    onClick={() => runAction(action.id)}
                                 >
-                                    {action === 'idle' ? '坐下' : action === 'walk' ? '走动' : '爬动'}
+                                    <span aria-hidden="true">{action.emoji}</span>{action.label}
                                 </button>
                             ))}
-                        </>
+                        </div>
                     )}
-                    {menuType === 'appearance' && PET_ASSETS.map(asset => (
-                        <button key={asset.id} type="button" onClick={() => void chooseAppearance(asset.id)}>
-                            {asset.emoji} {asset.name}{pet?.assetId === asset.id ? ' ✓' : ''}
-                        </button>
-                    ))}
+
+                    {menuType === 'appearance' && (
+                        <div className={styles.assetGrid}>
+                            {PET_ASSETS.map(asset => (
+                                <button
+                                    key={asset.id}
+                                    type="button"
+                                    className={styles.assetTile}
+                                    aria-pressed={pet?.assetId === asset.id}
+                                    onClick={() => void chooseAppearance(asset.id)}
+                                >
+                                    <span aria-hidden="true">{asset.emoji}</span>{asset.name}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {menuType === 'size' && (
+                        <div className={styles.segmented} role="group" aria-label="宠物大小">
+                            {PET_SIZES.map(option => (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    aria-pressed={size === option.id}
+                                    onClick={() => setSize(option.id)}
+                                >
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    {menuType === 'settings' && (
+                        <div className={styles.optionList}>
+                            {INITIATIVE_OPTIONS.map(option => (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    className={styles.optionRow}
+                                    aria-pressed={initiative === option.id}
+                                    onClick={() => changeInitiative(option.id)}
+                                >
+                                    <strong>{option.label}</strong>
+                                    <small>{option.hint}</small>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
                     {menuType === 'rename' && (
                         <div className={styles.rename}>
                             <input
@@ -327,6 +535,7 @@ export default function FloatingPet() {
                                 }}
                                 placeholder={pet?.name ?? '新名字'}
                                 aria-label="宠物新名字"
+                                autoFocus
                             />
                             <button type="button" onClick={() => void submitRename()}>确定</button>
                         </div>
@@ -337,20 +546,17 @@ export default function FloatingPet() {
             <button
                 type="button"
                 className={styles.petButton}
-                onPointerDown={onPointerDown}
-                onPointerMove={onPointerMove}
-                onPointerUp={onPointerUp}
-                onPointerCancel={() => { dragRef.current = null; }}
+                {...petButtonProps}
                 aria-label={loading ? '正在加载伴侣宠物' : `打开 ${pet?.name ?? '伴侣'} 菜单`}
             >
                 {loading || !pet ? (
                     <span className={styles.loading}>🐾</span>
                 ) : (
-                    <ManifestFrameRenderer
+                    <PetBodyRenderer
                         assetId={pet.assetId ?? 'kitty'}
-                        action={frameAction}
+                        {...bodyState}
                         className={styles.frames}
-                        onError={error => console.error('Pet frame asset failed', error)}
+                        onError={error => console.error('Pet body asset failed', error)}
                     />
                 )}
             </button>

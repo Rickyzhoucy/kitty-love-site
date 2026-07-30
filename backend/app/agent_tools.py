@@ -3,31 +3,32 @@ from typing import Any
 
 from langchain.tools import ToolRuntime, tool
 from pydantic import BaseModel
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models import EventTimer, Memo, Message, Milestone, OutboxEvent, Pet, Reminder
+from app.models import EventTimer, Message, Milestone, OutboxEvent, Plan, Wish
+from app.pet_state import resolve_pet
 from app.photo_service import PhotoService
 from app.schemas import (
-    MemoCreate,
-    MemoUpdate,
     MessageCreate,
     MessageUpdate,
     MilestoneCreate,
     MilestoneUpdate,
     PhotoCreate,
     PhotoUpdate,
-    ReminderCreate,
-    ReminderUpdate,
+    PlanCreate,
+    PlanUpdate,
     TimerCreate,
     TimerUpdate,
+    WishCreate,
+    WishUpdate,
 )
 from app.services import CrudService
 
 ResourceDefinition = tuple[type, type[BaseModel], type[BaseModel]]
 RESOURCE_DEFINITIONS: dict[str, ResourceDefinition] = {
-    "memo": (Memo, MemoCreate, MemoUpdate),
-    "reminder": (Reminder, ReminderCreate, ReminderUpdate),
+    "plan": (Plan, PlanCreate, PlanUpdate),
+    "wish": (Wish, WishCreate, WishUpdate),
     "milestone": (Milestone, MilestoneCreate, MilestoneUpdate),
     "message": (Message, MessageCreate, MessageUpdate),
     "timer": (EventTimer, TimerCreate, TimerUpdate),
@@ -55,7 +56,7 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
     async def resource_list(
         resource: str, runtime: ToolRuntime
     ) -> list[dict[str, Any]]:
-        """查询站内资源。resource 为 memo/reminder/photo/milestone/message/timer。"""
+        """查询站内资源。resource 为 plan/wish/photo/milestone/message/timer。"""
         async with session_maker() as db:
             if resource == "photo":
                 return [
@@ -137,12 +138,13 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
     ) -> dict[str, Any]:
         """让桌面宠物执行动作；duration 为毫秒。"""
         async with session_maker() as db:
-            pet = await db.scalar(select(Pet).limit(1))
-            asset_id = pet.asset_id if pet else None
+            # 改造前这里读全站单例 Pet，两个用户共用一只。现在按调用方
+            # 上下文里的伴侣解析，各自的宠物各自动。
+            _, profile = await resolve_pet(db, runtime.context.user_id)
             payload = {
                 "action": action,
                 "animation": animation,
-                "assetId": asset_id,
+                "assetId": profile.body_asset_id,
                 "message": message,
                 "duration": duration,
             }
@@ -150,7 +152,7 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
                 OutboxEvent(
                     topic="pet.action",
                     aggregate_type="pet",
-                    aggregate_id=pet.id if pet else "default",
+                    aggregate_id=profile.companion_id,
                     payload=payload,
                 )
             )

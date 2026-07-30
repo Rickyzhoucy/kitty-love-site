@@ -1,7 +1,7 @@
 'use client';
 
 import { ApiError, apiUrl } from './client';
-import type { PetActionEvent } from './events';
+import type { AgentTaskEvent, PetActionEvent } from './events';
 import { desktopAuthorizationHeaders } from '@/lib/desktop';
 
 export interface TextDeltaEvent {
@@ -16,13 +16,29 @@ export interface ToolEvent {
     output?: unknown;
 }
 
+/**
+ * 助手在这一轮里生成了一个可下载的文件（目前只有 create_document 会产生）。
+ * 消息落库时也会写进 metadata.attachmentIds，这条事件只是让它**立刻**显示，
+ * 不用等一整轮结束。
+ */
+export interface AttachmentReadyEvent {
+    type: 'attachment.ready';
+    attachmentId: string;
+}
+
 export interface MessageCompletedEvent {
     type: 'message.completed';
     conversationId: string;
     messageId: string;
 }
 
-export type ChatStreamEvent = TextDeltaEvent | ToolEvent | PetActionEvent | MessageCompletedEvent;
+export type ChatStreamEvent =
+    | TextDeltaEvent
+    | ToolEvent
+    | PetActionEvent
+    | AgentTaskEvent
+    | AttachmentReadyEvent
+    | MessageCompletedEvent;
 
 function parseBlock(block: string): ChatStreamEvent | null {
     let eventType = '';

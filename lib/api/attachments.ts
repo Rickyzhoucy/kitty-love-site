@@ -24,6 +24,11 @@ interface PresignedUpload {
     expiresIn: number;
 }
 
+/** 按 id 取附件详情。历史消息只存了 attachmentIds，回看时要靠它还原。 */
+export function getAttachment(id: string): Promise<Attachment> {
+    return api.get<Attachment>(`/attachments/${id}`);
+}
+
 /**
  * 文件先直传 MinIO，再通知领域服务完成入库。
  * 预签名 URL 不携带站点 Cookie，避免跨源上传触发无关凭据校验。

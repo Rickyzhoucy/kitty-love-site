@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     embedding_dimensions: int = 1024
 
+    # 联网能力。没有 web_search_api_key 时 web_search 工具不会注册——
+    # 宁可少一个能力，也不要一个调用时才失败的工具。
+    web_search_provider: str = "bocha"
+    web_search_api_key: str = ""
+    web_search_max_results: int = 8
+    web_search_timeout: float = 12.0
+    web_fetch_timeout: float = 12.0
+    web_fetch_max_bytes: int = 2 * 1024 * 1024
+    web_fetch_max_chars: int = 12_000
+    web_fetch_user_agent: str = "KittyCompanionBot/1.0 (+private companion site)"
+
     skill_bucket: str = "skill-packages"
     skill_cache_dir: str = "/tmp/kitty-skill-cache"
     skill_worker_cache_dir: str = "/tmp/kitty-skill-worker-cache"

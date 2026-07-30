@@ -5,13 +5,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from app.agent_runtime import (
+from app.agent_tools import build_domain_tools
+from app.agents.conversation import (
     AgentRuntime,
     CheckpointerLifecycle,
     build_agent,
     build_chat_model,
 )
-from app.agent_tools import build_domain_tools
 from app.api import get_agent_runtime
 from app.auth import hash_password
 from app.config import Settings
@@ -41,7 +41,7 @@ class FakeAgent:
         yield {
             "event": "on_tool_start",
             "name": "site_resource_list",
-            "data": {"input": {"resource": "memo"}},
+            "data": {"input": {"resource": "plan"}},
         }
         yield {
             "event": "on_tool_end",
@@ -157,6 +157,16 @@ async def test_chat_stream_persists_messages_and_emits_contract(
     assert "event: pet.action" not in response.text
     assert "event: message.completed" in response.text
 
+    # 语义层与执行层并存：tool.* 面向审计，agent.task.* 面向宠物的身体表达。
+    assert "event: agent.task.created" in response.text
+    assert "event: agent.task.running" in response.text
+    assert "event: agent.task.progress" in response.text
+    assert "event: agent.task.succeeded" in response.text
+    # 摘要只由工具名与资源类型拼出，不得带上 payload。
+    assert '"safeSummary":"查询计划"' in response.text
+    assert '"capability":"site.plan"' in response.text
+    assert '"riskLevel":"none"' in response.text
+
     conversations = (await authenticated_client.get("/api/v1/conversations")).json()
     messages = (
         await authenticated_client.get(
@@ -211,6 +221,7 @@ async def test_interrupted_agent_reply_is_persisted(session_maker):
         conversation = (await conversations.list(db, user_id))[0]
         messages = await conversations.messages(db, user_id, conversation.id)
     assert "event: text.delta" in "".join(chunks)
+    assert "event: agent.task.failed" in "".join(chunks)
     assert [(message.role, message.content) for message in messages] == [
         ("user", "请回答"),
         ("assistant", "部分回答"),
@@ -254,20 +265,23 @@ async def test_domain_tools_share_crud_services(session_maker):
         context=SimpleNamespace(user_id=user_id, companion_id=None)
     )
     created = await tools["site_resource_create"].coroutine(
-        "reminder",
+        "plan",
         {
-            "content": "记得喝水",
-            "dueDate": "2026-07-28T20:00:00+08:00",
+            "title": "记得喝水",
+            "dueAt": "2026-07-28T20:00:00+08:00",
         },
         runtime,
     )
-    assert created["dueDate"] == "2026-07-28T20:00:00+08:00"
-    listed = await tools["site_resource_list"].coroutine("reminder", runtime)
+    assert created["dueAt"].startswith("2026-07-28T20:00:00")
+    listed = await tools["site_resource_list"].coroutine("plan", runtime)
     assert listed[0]["id"] == created["id"]
     updated = await tools["site_resource_update"].coroutine(
-        "reminder", created["id"], {"completed": True}, runtime
+        "plan",
+        created["id"],
+        {"completedAt": "2026-07-29T08:00:00+08:00"},
+        runtime,
     )
-    assert updated["completed"] is True
+    assert updated["completedAt"] is not None
     await tools["site_resource_delete"].coroutine(
-        "reminder", created["id"], runtime
+        "plan", created["id"], runtime
     )

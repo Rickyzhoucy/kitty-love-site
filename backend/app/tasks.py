@@ -1,11 +1,15 @@
 import json
+import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agent_runtime import build_chat_model
+from app.agents.conversation import build_chat_model
+from app.agents.reflection import ReflectionAgent, companions_with_pending
+from app.agents.roles import AgentRole
+from app.anniversaries import scan_anniversaries
 from app.attachment_processing import extract_text, thumbnail_webp
 from app.config import get_settings
 from app.db import session_factory
@@ -14,14 +18,17 @@ from app.memory import MemoryService
 from app.models import (
     Attachment,
     ChatMessage,
+    Companion,
     Conversation,
     ConversationSummary,
     MemoryItem,
     UserProfile,
 )
-from app.queue import register_job
+from app.queue import ProcrastinateJobQueue, procrastinate_app, register_job
 from app.schemas import MemoryCreate
 from app.storage import ObjectStorage
+
+logger = logging.getLogger(__name__)
 
 
 def _message_text(response) -> str:
@@ -271,6 +278,80 @@ async def handle_memory_extraction(
             )
             await memory.embed_item(db, item)
             await db.commit()
+
+
+@register_job("pet.reflect")
+async def reflect_pet_events(payload: dict) -> None:
+    """后台低频消费 CompanionPetEvent，把经历沉淀成记忆（架构文档 §4.3）。
+
+    用 Reflection 角色的模型：温度更低（0.3），因为这是提炼不是创作。
+    """
+    await handle_reflection(
+        payload,
+        build_chat_model(get_settings(), role=AgentRole.REFLECTION),
+        MemoryService(OpenAICompatibleEmbeddingProvider(get_settings())),
+        session_factory,
+    )
+
+
+async def handle_reflection(
+    payload: dict,
+    model: Any,
+    memory: MemoryService,
+    maker: async_sessionmaker[AsyncSession],
+) -> list[str]:
+    companion_id = str(payload["companion_id"])
+    async with maker() as db:
+        companion = await db.get(Companion, companion_id)
+        if companion is None:
+            return []
+        return await ReflectionAgent(model, memory).reflect(db, companion)
+
+
+@procrastinate_app.periodic(cron="7 1 * * *")
+@procrastinate_app.task(name="anniversary.scan", queue="companion")
+async def scan_anniversaries_daily(timestamp: int) -> None:
+    """每天扫一遍纪念日，到点的写成待表达事件（计划文档 §2.2）。
+
+    凌晨 1:07 跑：那时候不会和用户抢，写下的事件等人回到站上自然会被念出来。
+    不直接推送——事件要经过宠物的打扰预算，才不会绕开安静模式。
+    """
+    del timestamp
+    async with session_factory() as db:
+        written = await scan_anniversaries(db)
+    if written:
+        logger.info("今日纪念日提醒：%s", "；".join(written))
+
+
+@procrastinate_app.periodic(cron="23 4 * * *")
+@procrastinate_app.task(name="pet.reflect.sweep", queue="companion")
+async def sweep_pending_reflections(timestamp: int) -> None:
+    """每日兜底扫描（架构文档 §4.3「后台低频消费」）。
+
+    正常路径是按量触发——攒够 `REFLECTION_BATCH_TRIGGER` 条就入队一次。
+    但一个不活跃的用户可能永远攒不满，那些事件不该无限期挂着。这里每天扫一遍，
+    把有待处理事件的伴侣都排上。
+
+    凌晨 4:23 而不是整点：错开其它定时任务，也避开用户可能在线的时段。
+    """
+    del timestamp
+    settings = get_settings()
+    if not settings.chat_api_key:
+        # 没配模型就没有反思可言。静默返回，不要每天在日志里报一次错。
+        return
+    queue = ProcrastinateJobQueue()
+    async with session_factory() as db:
+        companion_ids = await companions_with_pending(db)
+    for companion_id in companion_ids:
+        try:
+            await queue.enqueue(
+                "pet.reflect",
+                {"companion_id": companion_id},
+                # 与按量触发共用同一把队列锁：已经排着的就不重复排。
+                idempotency_key=companion_id,
+            )
+        except Exception:
+            logger.info("兜底反思入队失败：%s", companion_id, exc_info=True)
 
 
 @register_job("memory.embed")

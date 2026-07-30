@@ -1,0 +1,714 @@
+/*
+ * 对话本。
+ *
+ * 视觉上跟着站内既有的语言走：暖奶油底、深玫瑰木主色、衬线体标题、
+ * 信纸 + 胶带的隐喻（见留言板页）。**不做成客服工单**——没有每条消息的
+ * 时间戳、没有已读回执，时间只在日期分隔线上出现一次。
+ *
+ * 气泡是有的，但两边形状不同：伴侣那侧像一张压在信纸上的便签（surface 白底、
+ * 左下角收成小尖），用户那侧像自己写的批注（accent-soft、右下角收尖）。
+ * 靠形状和材质区分说话人，而不是靠一排头像。
+ */
+
+.page {
+  /* 6rem 是 layout 里 <main> 的 pb-24——底部导航是浮在那块留白上的胶囊。
+     不减掉它，输入框会被导航压住。 */
+  display: grid;
+  height: calc(100dvh - 6rem);
+  grid-template-columns: 292px 1fr;
+  overflow: hidden;
+  background:
+    radial-gradient(
+      120% 90% at 88% 0%,
+      color-mix(in oklch, var(--color-secondary-soft), transparent 55%),
+      transparent 60%
+    ),
+    var(--color-base);
+}
+
+/* ── 侧栏：一叠信 ───────────────────────────────────────── */
+
+.sidebar {
+  display: grid;
+  border-right: 1px solid color-mix(in oklch, var(--color-ink), transparent 92%);
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.sidebarHeader {
+  padding: 26px 22px 14px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.36em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 8px 0 0;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.05;
+}
+
+/* 站内页头的固定手法：末字描边留白，整体不至于太实 */
+.titleOutline {
+  -webkit-text-stroke: 1.5px var(--color-accent);
+  color: transparent;
+}
+
+.newButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border: 1px solid color-mix(in oklch, var(--color-accent) 35%, transparent);
+  border-radius: 999px;
+  color: var(--color-accent);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s var(--ease-spring), background 0.2s;
+}
+
+.newButton:hover {
+  transform: translateY(-1px);
+  background: var(--color-accent-soft);
+}
+
+.list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 6px 14px 22px;
+  overflow-y: auto;
+}
+
+/* 每条像一张对折的小信笺：左侧一道主色书脊 */
+.listItem {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px 12px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.listItem::before {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  content: '';
+  transition: background 0.2s;
+}
+
+.listItem:hover {
+  background: color-mix(in oklch, var(--color-surface), transparent 30%);
+}
+
+.listItem[aria-current='true'] {
+  border-color: color-mix(in oklch, var(--color-accent), transparent 72%);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.listItem[aria-current='true']::before {
+  background: var(--color-accent);
+}
+
+.listPreview {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-size: 13px;
+  line-height: 1.55;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listMeta {
+  color: var(--color-ink-muted);
+  font-size: 11px;
+}
+
+.empty {
+  padding: 30px 16px;
+  color: var(--color-ink-muted);
+  font-family: var(--font-display);
+  font-size: 14px;
+  line-height: 2;
+  text-align: center;
+}
+
+/* ── 正文：信纸 ─────────────────────────────────────────── */
+
+.main {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: 1fr auto;
+}
+
+.thread {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 34px clamp(18px, 5vw, 64px) 26px;
+  overflow-y: auto;
+}
+
+/* 日期分隔线做成一小段胶带，呼应留言板那张信纸卡 */
+.dayDivider {
+  display: flex;
+  justify-content: center;
+  margin: 26px 0 18px;
+}
+
+.dayDivider span {
+  padding: 4px 14px;
+  transform: rotate(-1.2deg);
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--color-secondary-soft), transparent 20%);
+  box-shadow: var(--shadow-soft);
+  color: color-mix(in oklch, var(--color-ink), transparent 25%);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 6px 0;
+}
+
+.rowUser {
+  flex-direction: row-reverse;
+}
+
+/* 头像只在一段连续发言的最后一条出现，避免一排重复的圆点 */
+.avatar {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.avatarSpacer {
+  width: 32px;
+  flex: none;
+}
+
+.bubble {
+  position: relative;
+  max-width: min(60ch, 78%);
+  padding: 12px 17px;
+  border-radius: var(--radius-md);
+}
+
+/* 伴侣：白底便签，左下角收尖，衬线体 */
+.fromPet {
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 93%);
+  border-bottom-left-radius: 5px;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.95;
+}
+
+/* 用户：主色淡底批注，右下角收尖，圆体 */
+.fromUser {
+  border-bottom-right-radius: 5px;
+  color: var(--color-ink);
+  background: var(--color-accent-soft);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* 光标接在**最后一段的末尾**，而不是整个气泡后面——挂在气泡上会因为
+   里面是块级元素而自己占一行，看着像个漏出来的字符。 */
+.streaming .markdown > :last-child::after {
+  display: inline-block;
+  width: 0.5em;
+  margin-left: 2px;
+  animation: blink 1.1s steps(1) infinite;
+  content: '▍';
+  vertical-align: baseline;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ── Markdown ──────────────────────────────────────────── */
+
+/*
+ * 分寸感：目标是「一封排过版的信」，不是 README。标题不放大到夸张、
+ * 列表不加重底色、代码块低调。首尾元素去掉外边距，否则每条消息上下
+ * 都会多出一截空白，气泡的内边距就白设了。
+ */
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0 0 0.65em;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 1em 0 0.45em;
+  font-size: 1.04em;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0.35em 0 0.75em;
+  padding-left: 1.35em;
+}
+
+.markdown li {
+  margin: 0.18em 0;
+}
+
+.markdown li::marker {
+  color: var(--color-accent);
+}
+
+.markdown a {
+  color: var(--color-accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown a:hover {
+  text-decoration-thickness: 2px;
+}
+
+.markdown code {
+  padding: 0.1em 0.36em;
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--color-sunken), transparent 25%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86em;
+}
+
+.markdown pre {
+  margin: 0.55em 0 0.85em;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-sunken), transparent 10%);
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: 0.84em;
+  line-height: 1.7;
+}
+
+.markdown blockquote {
+  margin: 0.55em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid color-mix(in oklch, var(--color-accent), transparent 55%);
+  color: var(--color-ink-muted);
+}
+
+/* 表格可能很宽，让它自己横向滚，别把气泡撑破 */
+.markdown table {
+  display: block;
+  max-width: 100%;
+  margin: 0.55em 0 0.85em;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.markdown th,
+.markdown td {
+  padding: 6px 11px;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 88%);
+  text-align: left;
+}
+
+.markdown th {
+  background: color-mix(in oklch, var(--color-sunken), transparent 45%);
+  font-weight: 600;
+}
+
+/* 正文里的图片（Markdown 的 ![]()）：模型引用的外部图，尺寸不可控，必须夹住 */
+.markdown img {
+  max-width: min(320px, 100%);
+  height: auto;
+  margin: 0.35em 0;
+  border-radius: var(--radius-sm);
+  cursor: zoom-in;
+}
+
+.markdown hr {
+  margin: 1.1em 0;
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, var(--color-ink), transparent 90%);
+}
+
+/* 用户那侧底色本来就深，代码块再加底色会糊成一片 */
+.fromUser .markdown code,
+.fromUser .markdown pre {
+  background: color-mix(in oklch, var(--color-surface), transparent 20%);
+}
+
+/* ── 附件 ──────────────────────────────────────────────── */
+
+/* 图片不套气泡——一张照片本身就是内容 */
+.attachedRow {
+  display: flex;
+  max-width: min(60ch, 78%);
+  /* flex 默认 stretch：并排两张比例不同的图会被拉到等高，矮的那张下面
+     露出一条白边。顶部对齐让每张保持自己的比例。 */
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachedImage {
+  display: block;
+  max-width: 260px;
+  padding: 6px 6px 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  /* 拍立得：白边 + 微微倾斜，跟相册页一个调子 */
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lift);
+  cursor: zoom-in;
+  line-height: 0;
+  transition: transform 0.2s var(--ease-spring);
+}
+
+.attachedImage:nth-child(even) {
+  transform: rotate(0.8deg);
+}
+
+.attachedImage:nth-child(odd) {
+  transform: rotate(-0.6deg);
+}
+
+.attachedImage:hover {
+  transform: rotate(0deg) scale(1.02);
+}
+
+.attachedImage img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 3px;
+}
+
+.attachedFile {
+  display: inline-flex;
+  max-width: 280px;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 92%);
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+  font-size: 13px;
+  text-decoration: none;
+  transition: transform 0.15s var(--ease-spring), border-color 0.2s;
+}
+
+.attachedFile:hover {
+  transform: translateY(-1px);
+  border-color: var(--color-accent);
+}
+
+.attachedName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachedFile small {
+  flex: none;
+  color: var(--color-ink-muted);
+  font-size: 11px;
+}
+
+/* ── 输入区 ────────────────────────────────────────────── */
+
+.composerWrap {
+  border-top: 1px solid color-mix(in oklch, var(--color-ink), transparent 92%);
+  background: color-mix(in oklch, var(--color-surface), transparent 12%);
+  backdrop-filter: blur(12px);
+}
+
+/* 拖拽悬停时整条输入区高亮，而不是只在某个小图标上给反馈 */
+.dropping {
+  border-top-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.pendingRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px clamp(18px, 5vw, 64px) 0;
+}
+
+.pendingChip {
+  display: inline-flex;
+  max-width: 220px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 5px;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 90%);
+  border-radius: 999px;
+  color: var(--color-ink-muted);
+  background: var(--color-surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pendingChip:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.pendingChip img {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
+.pendingName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 14px clamp(18px, 5vw, 64px) 20px;
+}
+
+.attachButton {
+  flex: none;
+  width: 44px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 90%);
+  border-radius: var(--radius-md);
+  color: var(--color-ink-muted);
+  background: var(--color-surface);
+  font-size: 18px;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.attachButton:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.attachButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.composer textarea {
+  min-height: 46px;
+  max-height: 180px;
+  flex: 1;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 90%);
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+  outline: none;
+  resize: none;
+  transition: border-color 0.2s;
+}
+
+.composer textarea:focus {
+  border-color: var(--color-accent);
+}
+
+.sendButton {
+  padding: 13px 24px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s var(--ease-spring), box-shadow 0.2s;
+}
+
+.sendButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-soft);
+}
+
+.sendButton:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.hint {
+  margin: 0;
+  padding: 0 clamp(18px, 5vw, 64px) 8px;
+  color: var(--color-danger);
+  font-size: 11px;
+}
+
+/* ── 大图 ──────────────────────────────────────────────── */
+
+.lightbox {
+  position: fixed;
+  z-index: 200;
+  display: grid;
+  padding: 5vh 5vw;
+  animation: lightboxIn 0.18s ease-out;
+  background: color-mix(in oklch, #241d17, transparent 12%);
+  backdrop-filter: blur(6px);
+  cursor: zoom-out;
+  inset: 0;
+  place-items: center;
+}
+
+@keyframes lightboxIn {
+  from {
+    opacity: 0;
+  }
+}
+
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-modal);
+  cursor: default;
+  object-fit: contain;
+}
+
+.lightboxClose,
+.lightboxDownload {
+  position: absolute;
+  border: 1px solid rgb(255 255 255 / 0.25);
+  border-radius: 999px;
+  color: #fff;
+  background: rgb(255 255 255 / 0.12);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.lightboxClose {
+  top: 18px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.lightboxDownload {
+  bottom: 20px;
+  padding: 9px 20px;
+  font-size: 13px;
+}
+
+.lightboxClose:hover,
+.lightboxDownload:hover {
+  background: rgb(255 255 255 / 0.24);
+}
+
+.mobileBack {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  /* 窄屏用两态切换而不是压缩成两栏：292px 的侧栏挤掉正文之后，两边都不好用 */
+  .page {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+  }
+
+  .page[data-view='thread'] .sidebar,
+  .page[data-view='list'] .main {
+    display: none;
+  }
+
+  .title {
+    font-size: 34px;
+  }
+
+  .bubble,
+  .attachedRow {
+    max-width: 84%;
+  }
+
+  .mobileBack {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 12px clamp(18px, 5vw, 64px) 0;
+    border: 0;
+    color: var(--color-ink-muted);
+    background: transparent;
+    font-size: 13px;
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attachedImage,
+  .lightbox {
+    animation: none;
+    transform: none;
+    transition: none;
+  }
+}
