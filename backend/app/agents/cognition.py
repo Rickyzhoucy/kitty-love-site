@@ -92,6 +92,10 @@ class CognitionInput:
     memories: list[str]
     active_task: str | None
     proactive_budget_left: int
+    #: 对方今天的情绪打卡，人话形式（"有点低落（没睡好）"）。没打卡就是 None。
+    #: 有了它，主动搭话才能从「你很久没互动了」变成「有事说事」（计划文档 §2.4）。
+    #: **宠物只知道对方标了什么，不知道为什么**——可以关心，不可以推断原因。
+    partner_mood: str | None = None
 
 
 def _strip_fence(raw: str) -> str:
@@ -148,6 +152,7 @@ def build_prompt(payload: CognitionInput) -> str:
         f"最近互动：{interactions}\n"
         f"相关长期记忆：\n{memories}\n"
         f"当前任务：{payload.active_task or '无'}\n"
+        f"对方今天的心情：{payload.partner_mood or '今天还没打卡'}\n"
         f"今天还能主动打扰的次数：{payload.proactive_budget_left}\n"
     )
 

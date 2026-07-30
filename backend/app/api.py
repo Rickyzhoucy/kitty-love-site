@@ -39,6 +39,12 @@ from app.direct_messages import (
     verify_attachments,
 )
 from app.events import stream_outbox
+from app.future_letters import (
+    create as create_letter,
+    list_letters,
+    open_letter,
+    redact,
+)
 from app.models import (
     Attachment,
     AuthAttempt,
@@ -47,6 +53,7 @@ from app.models import (
     CompanionPersona,
     CompanionPetProfile,
     EventTimer,
+    MapPin,
     MemoryItem,
     Message,
     Milestone,
@@ -59,6 +66,11 @@ from app.models import (
     UserSession,
     Wish,
     utcnow,
+)
+from app.moods import (
+    history as mood_history,
+    partner_today as mood_of_partner,
+    upsert as upsert_mood,
 )
 from app.pet_cognition import PetCognitionService
 from app.pet_mediation import run_mediation
@@ -83,8 +95,13 @@ from app.schemas import (
     DailyQuestionStateRead,
     DirectMessageCreate,
     DirectMessageRead,
+    FutureLetterCreate,
+    FutureLetterRead,
     LoginRequest,
     LoginResponse,
+    MapPinCreate,
+    MapPinRead,
+    MapPinUpdate,
     MemoryCreate,
     MemoryRead,
     MessageCreate,
@@ -93,6 +110,8 @@ from app.schemas import (
     MilestoneCreate,
     MilestoneRead,
     MilestoneUpdate,
+    MoodBoardRead,
+    MoodWrite,
     PersonaRead,
     PersonaUpdate,
     PetActionRead,
@@ -235,6 +254,8 @@ for args in [
     ),
     ("messages", Message, "message", MessageCreate, MessageUpdate, MessageRead),
     ("timers", EventTimer, "timer", TimerCreate, TimerUpdate, TimerRead),
+    # 恋爱地图的点就是普通 CRUD，没有揭晓/锁这类规则，用同一个工厂即可
+    ("map-pins", MapPin, "mapPin", MapPinCreate, MapPinUpdate, MapPinRead),
 ]:
     router.include_router(crud_router(*args))
 
@@ -804,6 +825,13 @@ async def run_pet_cognition(
     （架构文档 §16）。校验不过的模型输出同样返回 204，宠物继续按本地行为脑生活。
     """
     companion, _ = await resolve_pet(db, user.id)
+    # 对方今天的心情。拿不到「对方」时不算错误——单人环境下宠物照常思考，
+    # 只是少一项输入，不该因为没配第二个账号就让整条认知链路失败。
+    try:
+        partner = await resolve_partner(db, user.id)
+        partner_mood = await mood_of_partner(db, partner.id)
+    except PartnerUnavailable:
+        partner_mood = None
     proposal, rejection = await service.think(
         db,
         companion,
@@ -830,6 +858,7 @@ async def run_pet_cognition(
             ),
             active_task=data.active_task,
             proactive_budget_left=DAILY_PROACTIVE_BUDGET,
+            partner_mood=partner_mood,
         ),
         trigger=data.trigger,
         quiet_mode=data.initiative == "quiet",
@@ -1061,6 +1090,80 @@ async def answer_daily_question(
         "partnerAnswered": theirs is not None,
         "partnerAnswer": theirs if both else None,
     }
+
+
+@router.get("/moods", response_model=MoodBoardRead)
+async def read_mood_board(db: Db, user: CurrentUser):
+    """两个人的心情曲线。画在一起才有意义，所以一次把两边都返回。"""
+    try:
+        partner = await resolve_partner(db, user.id)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    return {
+        "partner": partner,
+        "mine": await mood_history(db, user.id),
+        "theirs": await mood_history(db, partner.id),
+    }
+
+
+@router.put("/moods", response_model=MoodBoardRead)
+async def write_mood(data: MoodWrite, db: Db, user: CurrentUser):
+    """打卡。一人一天一条，同一天再打是更新——心情会变，下午改一次很正常。"""
+    try:
+        partner = await resolve_partner(db, user.id)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    await upsert_mood(db, user.id, data.mood, data.note, data.date)
+    await db.commit()
+    return {
+        "partner": partner,
+        "mine": await mood_history(db, user.id),
+        "theirs": await mood_history(db, partner.id),
+    }
+
+
+@router.get("/letters", response_model=list[FutureLetterRead])
+async def read_letters(db: Db, _: CurrentUser):
+    """信箱。**锁着的信不带正文**——`redact` 在服务端就把它摘掉了。
+
+    列表不按作者过滤：这是两个人共同的信箱，知道「有一封在等着」正是这个功能
+    好玩的地方；至于里面写了什么，到点才看得到（计划文档 §2.6）。
+    """
+    return [redact(letter) for letter in await list_letters(db)]
+
+
+@router.post(
+    "/letters",
+    response_model=FutureLetterRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def write_letter(data: FutureLetterCreate, db: Db, user: CurrentUser):
+    if data.unlock_at <= utcnow():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "解锁时间要在将来——写给未来的信才有意义。",
+        )
+    try:
+        attachments = await verify_attachments(db, user.id, data.attachment_ids)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    letter = await create_letter(
+        db, user.id, data.body.strip(), attachments, data.unlock_at
+    )
+    await db.commit()
+    await db.refresh(letter)
+    # 刚写完必然是锁着的，所以这里返回的也没有正文——接口行为保持一致。
+    return redact(letter)
+
+
+@router.get("/letters/{letter_id}", response_model=FutureLetterRead)
+async def read_letter(letter_id: str, db: Db, _: CurrentUser):
+    letter = await open_letter(db, letter_id)
+    if letter is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这封信")
+    await db.commit()
+    await db.refresh(letter)
+    return redact(letter)
 
 
 @router.post("/pet/actions/{action}", response_model=PetActionRead)

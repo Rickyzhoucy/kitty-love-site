@@ -8,9 +8,12 @@ import {
     StickyNote,
     Image as ImageIcon,
     Sparkles,
+    Mail,
+    Map as MapIcon,
     MessageCircleHeart,
     MessageCircleQuestion,
     MessagesSquare,
+    SmilePlus,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -23,7 +26,10 @@ const navItems = [
     { href: '/plan', label: '计划', icon: StickyNote },
     { href: '/gallery', label: '相册', icon: ImageIcon },
     { href: '/timeline', label: '故事', icon: Sparkles },
+    { href: '/map', label: '地图', icon: MapIcon },
     { href: '/daily-question', label: '一问', icon: MessageCircleQuestion },
+    { href: '/mood', label: '心情', icon: SmilePlus },
+    { href: '/letters', label: '情书', icon: Mail },
     { href: '/chat', label: '聊天', icon: MessagesSquare },
     { href: '/companion', label: '对话本', icon: MessageCircleHeart },
 ];

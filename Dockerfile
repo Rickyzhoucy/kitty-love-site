@@ -29,10 +29,15 @@ ARG API_INTERNAL_URL=http://api:8000
 ARG PET_ASSET_INTERNAL_URL=http://minio:9000
 ARG NEXT_PUBLIC_API_BASE_URL=
 ARG NEXT_PUBLIC_EVENT_BASE_URL=
+# 高德 JS API 的 Key。它天生是公开的（必须写在浏览器读得到的地方），靠域名
+# 白名单保护，不靠保密——所以走 NEXT_PUBLIC_ 没问题。**安全密钥不在这儿**，
+# 那个是运行时变量，只留在服务端（见 app/%5FAMapService）。
+ARG NEXT_PUBLIC_AMAP_KEY=
 ENV API_INTERNAL_URL=$API_INTERNAL_URL
 ENV PET_ASSET_INTERNAL_URL=$PET_ASSET_INTERNAL_URL
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_EVENT_BASE_URL=$NEXT_PUBLIC_EVENT_BASE_URL
+ENV NEXT_PUBLIC_AMAP_KEY=$NEXT_PUBLIC_AMAP_KEY
 
 # Next.js collects completely anonymous telemetry data about general usage.
 # Learn more here: https://nextjs.org/telemetry

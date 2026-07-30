@@ -8,6 +8,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -604,3 +605,73 @@ class DailyAnswer(StringIdMixin, CreatedAtMixin, Base):
     __table_args__ = (
         UniqueConstraint("questionId", "userId"),
     )
+
+
+class MoodEntry(StringIdMixin, CreatedAtMixin, Base):
+    """一天一个心情（计划文档 §2.4）。
+
+    **真正的价值不在图表**，在于给 Cognition Agent 一个有依据的关心理由：
+    从「你很久没互动了」变成「对方今天标了低落」。所以 `mood` 是个能比较的
+    数值，不是自由文本——note 只是补充。
+    """
+
+    __tablename__ = "MoodEntry"
+    user_id: Mapped[str] = mapped_column(
+        "userId", ForeignKey("User.id", ondelete="CASCADE")
+    )
+    #: YYYY-MM-DD。用字符串而不是 date：与 DailyQuestion 一致，也避免时区把
+    #: 「今天」挪到前一天——打卡这件事的「今天」是用户本地的今天。
+    date: Mapped[str] = mapped_column(String(10))
+    #: 1(低落) – 5(很好)
+    mood: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    __table_args__ = (
+        # 一人一天一条，重复打卡是更新而不是插入
+        UniqueConstraint("userId", "date"),
+        Index("MoodEntry_date_idx", "date"),
+    )
+
+
+class FutureLetter(StringIdMixin, CreatedAtMixin, Base):
+    """写给未来的信（计划文档 §2.6）。
+
+    **`unlockAt` 之前服务端不返回正文。** 只在前端藏等于没锁——接口把正文发
+    出去了，谁都能在网络面板里看到。这是这个功能唯一的技术要求，也是它唯一
+    可能被做错的地方，所以 API 层有专门的测试守着。
+
+    刻意没有 recipientId：这是封写给「我们」的信，解锁后两个人都能看。也刻意
+    不让作者提前重读——封进去就是封进去了，能偷看的时间胶囊没有意义。
+    """
+
+    __tablename__ = "FutureLetter"
+    author_id: Mapped[str] = mapped_column(
+        "authorId", ForeignKey("User.id", ondelete="CASCADE")
+    )
+    body: Mapped[str] = mapped_column(Text)
+    attachment_ids: Mapped[list[str]] = mapped_column(
+        "attachmentIds", JsonType, default=list
+    )
+    unlock_at: Mapped[datetime] = mapped_column("unlockAt", DateTime(timezone=True))
+    #: 第一次被读到的时刻。解锁当天宠物来送信，这个字段是「送过了」的依据。
+    opened_at: Mapped[datetime | None] = mapped_column(
+        "openedAt", DateTime(timezone=True), nullable=True
+    )
+    __table_args__ = (Index("FutureLetter_unlockAt_idx", "unlockAt"),)
+
+
+class MapPin(StringIdMixin, CreatedAtMixin, AttributionMixin, Base):
+    """去过的地方（计划文档 §2.5）。
+
+    坐标是 **GCJ-02**（高德原生，2026-07-30 选型决定）。存进去什么样画出来
+    就什么样，前后端都不做坐标转换——转换写在哪一侧都迟早会漏一处。
+    """
+
+    __tablename__ = "MapPin"
+    title: Mapped[str] = mapped_column(Text)
+    lat: Mapped[float] = mapped_column(Float)
+    lng: Mapped[float] = mapped_column(Float)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: 去的那天，自由格式字符串（与 Photo.date 一致）
+    date: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    #: 与相册、时间线复用同一批 Attachment
+    photo_ids: Mapped[list[str]] = mapped_column("photoIds", JsonType, default=list)

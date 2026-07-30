@@ -428,6 +428,79 @@ class DailyQuestionStateRead(ApiModel):
     partner_answer: DailyAnswerRead | None
 
 
+class MoodEntryRead(ApiModel):
+    id: str
+    created_at: datetime
+    user_id: str
+    date: str
+    mood: int
+    note: str | None
+
+
+class MoodWrite(ApiModel):
+    """打卡。`date` 留空就是今天——由服务端按 UTC 取，客户端要补昨天就明确传。"""
+
+    mood: int = Field(ge=1, le=5)
+    note: str | None = Field(default=None, max_length=2_000)
+    date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
+class MoodBoardRead(ApiModel):
+    """两个人的曲线画在一起，所以一次把两边都返回。"""
+
+    partner: PartnerRead
+    mine: list[MoodEntryRead]
+    theirs: list[MoodEntryRead]
+
+
+class FutureLetterCreate(ApiModel):
+    body: str = Field(min_length=1, max_length=50_000)
+    attachment_ids: list[str] = Field(default_factory=list, max_length=8)
+    unlock_at: datetime
+
+
+class FutureLetterRead(ApiModel):
+    """未解锁的信 `body` 恒为 null、`attachment_ids` 恒为空。
+
+    正文用 `str | None` 而不是 `str`：类型本身就说明「可能没有」，调用方不会
+    以为拿到空字符串是内容为空。服务端在锁着的时候**根本不把正文放进响应**，
+    不是发出去再让前端藏（计划文档 §2.6）。
+    """
+
+    id: str
+    created_at: datetime
+    author_id: str
+    unlock_at: datetime
+    opened_at: datetime | None
+    unlocked: bool
+    body: str | None
+    attachment_ids: list[str]
+
+
+class MapPinCreate(ApiModel):
+    """坐标是 GCJ-02（高德原生）。前后端都不做转换，见 models.MapPin。"""
+
+    title: str = Field(min_length=1, max_length=10_000)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    note: str | None = Field(default=None, max_length=10_000)
+    date: str | None = Field(default=None, max_length=80)
+    photo_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class MapPinUpdate(ApiModel):
+    title: str | None = Field(default=None, min_length=1, max_length=10_000)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+    note: str | None = Field(default=None, max_length=10_000)
+    date: str | None = Field(default=None, max_length=80)
+    photo_ids: list[str] | None = Field(default=None, max_length=20)
+
+
+class MapPinRead(Entity, MapPinCreate):
+    pass
+
+
 class PetActionRead(ApiModel):
     action: str
     animation: str

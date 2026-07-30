@@ -199,9 +199,14 @@ services:
         PET_ASSET_INTERNAL_URL: http://minio:9000
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
         NEXT_PUBLIC_EVENT_BASE_URL: ${NEXT_PUBLIC_EVENT_BASE_URL:-}
+        # 构建期变量：改了必须重建镜像，重启容器不生效
+        NEXT_PUBLIC_AMAP_KEY: ${NEXT_PUBLIC_AMAP_KEY:-}
     environment:
       NODE_ENV: production
       API_INTERNAL_URL: http://api:8000
+      # 安全密钥是**运行时**变量，只在服务端用（代理往高德转发时拼上去），
+      # 所以不进 build args，也不带 NEXT_PUBLIC_ 前缀——那样会被打进前端包。
+      AMAP_SECURITY_JS_CODE: ${AMAP_SECURITY_JS_CODE:-}
     ports:
       - "3000:3000"
     depends_on:
