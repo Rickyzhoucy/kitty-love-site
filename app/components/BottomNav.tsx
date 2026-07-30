@@ -9,6 +9,7 @@ import {
     Image as ImageIcon,
     Sparkles,
     MessageCircleHeart,
+    MessageCircleQuestion,
     MessagesSquare,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -22,6 +23,7 @@ const navItems = [
     { href: '/plan', label: '计划', icon: StickyNote },
     { href: '/gallery', label: '相册', icon: ImageIcon },
     { href: '/timeline', label: '故事', icon: Sparkles },
+    { href: '/daily-question', label: '一问', icon: MessageCircleQuestion },
     { href: '/chat', label: '聊天', icon: MessagesSquare },
     { href: '/companion', label: '对话本', icon: MessageCircleHeart },
 ];

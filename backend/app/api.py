@@ -25,6 +25,7 @@ from app.auth import (
 from app.cognition_queue import DAILY_PROACTIVE_BUDGET, CognitionType
 from app.config import Settings, get_settings
 from app.conversations import ConversationService
+from app.daily_questions import both_answered, ensure_today, get_answer, submit_answer
 from app.db import get_session, session_factory
 from app.direct_messages import (
     PartnerUnavailable,
@@ -78,6 +79,8 @@ from app.schemas import (
     CompleteUploadRequest,
     ConversationCreate,
     ConversationRead,
+    DailyAnswerCreate,
+    DailyQuestionStateRead,
     DirectMessageCreate,
     DirectMessageRead,
     LoginRequest,
@@ -976,6 +979,88 @@ async def run_chat_mediation(
         unread,
         initiative=initiative if initiative in {"normal", "quiet", "off"} else "normal",
     )
+
+
+@router.get("/daily-question/today", response_model=DailyQuestionStateRead)
+async def read_daily_question(db: Db, user: CurrentUser):
+    """今天的题 + 我和对方的作答状态。
+
+    `partnerAnswer` 在两人都答完之前恒为 null——揭晓逻辑在服务层做，不能只在
+    前端藏，那等于没锁（计划文档 §2.1 / §2.6 同一原则）。
+    """
+    try:
+        partner = await resolve_partner(db, user.id)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+    question = await ensure_today(db)
+    await db.commit()
+    await db.refresh(question)
+
+    mine = await get_answer(db, question.id, user.id)
+    theirs = await get_answer(db, question.id, partner.id)
+    both = await both_answered(db, question.id)
+    return {
+        "question": question,
+        "partner": partner,
+        "myAnswer": mine,
+        "partnerAnswered": theirs is not None,
+        "partnerAnswer": theirs if both else None,
+    }
+
+
+@router.post("/daily-question/answer", response_model=DailyQuestionStateRead)
+async def answer_daily_question(
+    data: DailyAnswerCreate, db: Db, user: CurrentUser, request: Request
+):
+    try:
+        partner = await resolve_partner(db, user.id)
+    except PartnerUnavailable as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+    question = await ensure_today(db)
+    _, just_completed = await submit_answer(db, question.id, user.id, data.body.strip())
+
+    if just_completed:
+        # 两人都答完：给两边各自的宠物都写一条，各自的 Reflection Agent
+        # 才都能消费到——这是每日一问和宠物咬合的地方（计划文档 §2.1）。
+        me_companion, _ = await resolve_pet(db, user.id)
+        partner_companion, _ = await resolve_pet(db, partner.id)
+        payload = {"questionId": question.id, "prompt": question.prompt}
+        await record_event(
+            db, me_companion.id, "dailyQuestion.completed", payload, importance=65
+        )
+        await record_event(
+            db, partner_companion.id, "dailyQuestion.completed", payload, importance=65
+        )
+        await db.commit()
+
+        # 按量触发反思，与 /pet/events 同一条规则（攒够一批才想）。
+        queue = getattr(request.app.state, "job_queue", None)
+        if queue is not None:
+            for companion_id in {me_companion.id, partner_companion.id}:
+                if await pending_count(db, companion_id) >= REFLECTION_BATCH_TRIGGER:
+                    try:
+                        await queue.enqueue(
+                            "pet.reflect",
+                            {"companion_id": companion_id},
+                            idempotency_key=companion_id,
+                        )
+                    except Exception:
+                        pass
+    await db.commit()
+    await db.refresh(question)
+
+    mine = await get_answer(db, question.id, user.id)
+    theirs = await get_answer(db, question.id, partner.id)
+    both = await both_answered(db, question.id)
+    return {
+        "question": question,
+        "partner": partner,
+        "myAnswer": mine,
+        "partnerAnswered": theirs is not None,
+        "partnerAnswer": theirs if both else None,
+    }
 
 
 @router.post("/pet/actions/{action}", response_model=PetActionRead)

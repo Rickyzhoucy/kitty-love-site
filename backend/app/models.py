@@ -568,3 +568,39 @@ class PetInterjection(StringIdMixin, CreatedAtMixin, Base):
     __table_args__ = (
         Index("PetInterjection_audience_createdAt_idx", "audienceId", "createdAt"),
     )
+
+
+# 每日一问（计划文档 §2.1）。
+#
+# 「两个人都答完才能看到对方的答案」是核心机制——回答从表演变成交换。
+# 一天一道题，两人共享同一条 DailyQuestion，各自的回答分开存。
+
+
+class DailyQuestion(StringIdMixin, Base):
+    """今天该答的题。`date` 唯一，两人共享同一道。"""
+
+    __tablename__ = "DailyQuestion"
+    #: YYYY-MM-DD，唯一约束防止同一天生出两道题（并发请求下靠它兜底）
+    date: Mapped[str] = mapped_column(String(10), unique=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    #: daily / memory / imagine / confess，对应「日常/回忆/想象/坦白」
+    category: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(
+        "createdAt", DateTime(timezone=True), default=utcnow
+    )
+
+
+class DailyAnswer(StringIdMixin, CreatedAtMixin, Base):
+    """一个人对某天问题的回答。揭晓逻辑（两人都答完才互相可见）在服务层，不在这张表。"""
+
+    __tablename__ = "DailyAnswer"
+    question_id: Mapped[str] = mapped_column(
+        "questionId", ForeignKey("DailyQuestion.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[str] = mapped_column(
+        "userId", ForeignKey("User.id", ondelete="CASCADE")
+    )
+    body: Mapped[str] = mapped_column(Text)
+    __table_args__ = (
+        UniqueConstraint("questionId", "userId"),
+    )

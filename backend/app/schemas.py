@@ -400,6 +400,34 @@ class ChatThreadRead(ApiModel):
     unread_count: int
 
 
+class DailyQuestionRead(ApiModel):
+    id: str
+    date: str
+    prompt: str
+    category: str
+
+
+class DailyAnswerRead(ApiModel):
+    id: str
+    created_at: datetime
+    user_id: str
+    body: str
+
+
+class DailyAnswerCreate(ApiModel):
+    body: str = Field(min_length=1, max_length=10_000)
+
+
+class DailyQuestionStateRead(ApiModel):
+    """今天的题 + 揭晓状态。`partner_answer` 在两人都答完之前恒为 null。"""
+
+    question: DailyQuestionRead
+    partner: PartnerRead
+    my_answer: DailyAnswerRead | None
+    partner_answered: bool
+    partner_answer: DailyAnswerRead | None
+
+
 class PetActionRead(ApiModel):
     action: str
     animation: str
