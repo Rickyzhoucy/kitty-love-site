@@ -52,7 +52,9 @@
   transition: transform 180ms ease-out;
 }
 
-.petVisual[data-facing="right"] {
+/* 翻不翻由 PetBodyRenderer 按素材自身朝向算好，这里只负责执行。
+   不要改回按 data-facing 判断——那等于假设所有素材朝向一致，而它们不一致。 */
+.petVisual[data-flip="true"] {
   transform: scaleX(-1);
 }
 

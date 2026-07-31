@@ -115,7 +115,10 @@ export default function MapPage() {
                 </p>
             </header>
 
-            <Card className="mb-5 overflow-hidden p-0">
+            {/* 地图上的点击是「在这儿加个点」，不是「宠物过来」。没有这个属性的话
+                每标一个地方宠物都要横穿屏幕走过来（见 usePetInteraction 的
+                WALK_EXCLUSION）。 */}
+            <Card className="mb-5 overflow-hidden p-0" data-no-pet-walk>
                 <AmapCanvas
                     pins={pins}
                     onPickLocation={pick}

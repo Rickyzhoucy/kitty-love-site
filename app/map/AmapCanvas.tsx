@@ -26,12 +26,26 @@ interface AmapMap {
     add(overlay: AmapMarker): void;
     remove(overlay: AmapMarker): void;
     setFitView(overlays?: AmapMarker[] | null): void;
+    setCenter(position: [number, number]): void;
+    setZoom(zoom: number): void;
     on(event: string, handler: (event: { lnglat: { lng: number; lat: number } }) => void): void;
     destroy(): void;
+}
+interface AmapCitySearchResult {
+    /** 城市中心点。类型里给成可选，SDK 在定位不到时确实会不带这个字段。 */
+    bounds?: { getCenter(): { lng: number; lat: number } };
+    city?: string;
+}
+interface AmapCitySearch {
+    getLocalCity(
+        callback: (status: string, result: AmapCitySearchResult | string) => void,
+    ): void;
 }
 interface AmapNamespace {
     Map: new (container: HTMLElement, options: Record<string, unknown>) => AmapMap;
     Marker: new (options: Record<string, unknown>) => AmapMarker;
+    CitySearch?: new () => AmapCitySearch;
+    plugin(names: string[], onReady: () => void): void;
 }
 declare global {
     interface Window {
@@ -44,17 +58,19 @@ const AMAP_KEY = process.env.NEXT_PUBLIC_AMAP_KEY ?? '';
 const SCRIPT_ID = 'amap-jsapi';
 
 /**
- * 要不要启用「安全密钥代理」模式。
+ * 「安全密钥代理」模式。
  *
- * **底图和 Marker 不需要它**——安全密钥只在调用 Web 服务（POI 搜索、地理编码）
- * 时才必须。而一旦开了这个模式，SDK 会把校验也一起打开：serviceHost 稍有不合
- * 它的预期就整个罢工（底图空白、地图不响应点击），而报错只有一个语焉不详的
- * 弹窗。当前这一页只用底图 + 打点，所以默认关着。
+ * 底图和 Marker 本身不需要它，但**定位当前城市需要**（CitySearch 走的是 Web
+ * 服务）。密钥由 app/%5FAMapService 在服务端拼上，不进浏览器。
  *
- * 等真要加地址搜索时把它打开——代理路由（app/%5FAMapService）已经写好并验证过
- * 能正确转发签名请求，那时只需要把这里改成 true。
+ * 开这个模式时 serviceHost 必须严丝合缝，否则 SDK 会弹一个语焉不详的窗然后
+ * 整个罢工（底图空白、点击没反应）。路径为什么必须是 `/_AMapService`、目录名
+ * 为什么要写成 `%5FAMapService`，见那个路由文件的注释。
  */
-const USE_SECURITY_PROXY = false;
+const USE_SECURITY_PROXY = true;
+
+/** 定位失败时的落点。北京天安门——总得有个地方。 */
+const FALLBACK_CENTER: [number, number] = [116.397428, 39.90923];
 
 /** 只加载一次。多个组件实例共用同一个 script 标签和同一个 Promise。 */
 let loaderPromise: Promise<AmapNamespace> | null = null;
@@ -97,6 +113,37 @@ function loadAmap(): Promise<AmapNamespace> {
     return loaderPromise;
 }
 
+/**
+ * 按 IP 把视野挪到当前城市。
+ *
+ * **全程失败即放弃**，不向用户报错：定位不到就停在兜底点上，地图照样能用能
+ * 打点。为这种事弹一个「定位失败」除了添堵没有别的作用。
+ *
+ * `skip()` 在回调真正执行时才求值——CitySearch 是异步的，等它回来时用户可能
+ * 已经离开这一页，或者已有的点已经把视野定好了。那两种情况下再挪一次镜头，
+ * 是把用户正在看的东西抢走。
+ */
+function centerOnCurrentCity(
+    AMap: AmapNamespace,
+    map: AmapMap,
+    skip: () => boolean,
+): void {
+    AMap.plugin(['AMap.CitySearch'], () => {
+        if (!AMap.CitySearch || skip()) return;
+        try {
+            new AMap.CitySearch().getLocalCity((status, result) => {
+                if (skip() || status !== 'complete' || typeof result === 'string') return;
+                const center = result.bounds?.getCenter();
+                if (!center) return;
+                map.setCenter([center.lng, center.lat]);
+                map.setZoom(11);
+            });
+        } catch {
+            // 插件加载成功但调用炸了（配额、网络）——同样静默留在兜底点
+        }
+    });
+}
+
 interface AmapCanvasProps {
     pins: MapPin[];
     /** 点地图空白处：用于新增点。给的是 GCJ-02 坐标。 */
@@ -125,6 +172,13 @@ export default function AmapCanvas({
         selectRef.current = onSelectPin;
     }, [onPickLocation, onSelectPin]);
 
+    // 定位是异步的，回来时可能点已经加载好并定好视野了。用 ref 而不是把 pins
+    // 放进初始化 effect 的依赖里——那会让地图在每次点变化时重建。
+    const hasPinsRef = useRef(false);
+    useEffect(() => {
+        hasPinsRef.current = pins.length > 0;
+    }, [pins]);
+
     useEffect(() => {
         // 没配 Key 是个构建期就定了的静态事实，不需要过 state——渲染时直接判断，
         // 免得为一个永远不变的条件触发一次多余的渲染。
@@ -135,8 +189,9 @@ export default function AmapCanvas({
                 if (cancelled || !containerRef.current) return;
                 const map = new AMap.Map(containerRef.current, {
                     zoom: 11,
-                    // 北京天安门。真正的视野在有点之后由 setFitView 决定。
-                    center: [116.397428, 39.90923],
+                    // 先落在兜底点上，随后按 IP 定位挪到当前城市；已经有点的话
+                    // 由下面的 setFitView 覆盖——你标过的地方比你现在在哪更重要。
+                    center: FALLBACK_CENTER,
                     viewMode: '2D',
                 });
                 map.on('click', event => {
@@ -144,6 +199,7 @@ export default function AmapCanvas({
                 });
                 mapRef.current = map;
                 setReady(true);
+                centerOnCurrentCity(AMap, map, () => cancelled || hasPinsRef.current);
             })
             .catch((reason: Error) => {
                 if (!cancelled) setError(reason.message);

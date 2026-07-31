@@ -36,6 +36,8 @@ const UPSTREAM = 'https://restapi.amap.com';
  */
 const ALLOWED_PREFIXES = [
     '/v3/log',
+    // CitySearch 按 IP 定位当前城市，地图打开时用它决定初始视野
+    '/v3/ip',
     '/v3/place',
     '/v5/place',
     '/v3/geocode',

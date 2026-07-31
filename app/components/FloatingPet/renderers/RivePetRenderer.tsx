@@ -70,6 +70,8 @@ interface RivePetRendererProps {
     artboard: string;
     activity: PetPersistentActivity;
     facing: PetFacing;
+    /** 外层是否被 CSS 镜像了。目光取向要跟着它走，不能自己按 facing 猜。 */
+    flipped: boolean;
     gaze: PetGaze;
     reaction: PetReactionEvent | null;
     className?: string;
@@ -83,6 +85,7 @@ export default function RivePetRenderer({
     artboard,
     activity,
     facing,
+    flipped,
     gaze,
     reaction,
     className,
@@ -119,15 +122,16 @@ export default function RivePetRenderer({
 
     // 目光由两个 blend1d 层连续插值，取代原来的五档离散动画。
     //
-    // 素材本身朝左，`facing="left"` 是未翻转的原始朝向；只有 `facing="right"`
-    // 才会被 CSS 的 scaleX(-1) 镜像（见 FloatingPet.module.css）。被镜像时画板
-    // 的 +x 指向屏幕左边，所以要取反的是 right 而不是 left。
+    // 被 CSS 的 scaleX(-1) 镜像时，画板的 +x 指向屏幕左边，所以 lookX 要取反。
+    // 判断依据是 `flipped` 而不是 `facing`：翻不翻取决于素材自身朝哪边，由
+    // PetBodyRenderer 统一算（见那里的注释）。这里自己按 facing 猜的话，
+    // 换个朝向相反的素材，眼睛就会往反方向看。
     useEffect(() => {
         if (!loaded) return;
         const clamp = (value: number) => Math.max(-1, Math.min(1, value));
-        setInput(rive, 'lookX', clamp(facing === 'right' ? -gaze.x : gaze.x));
+        setInput(rive, 'lookX', clamp(flipped ? -gaze.x : gaze.x));
         setInput(rive, 'lookY', clamp(gaze.y));
-    }, [facing, gaze.x, gaze.y, loaded, rive]);
+    }, [flipped, gaze.x, gaze.y, loaded, rive]);
 
     useEffect(() => {
         if (!loaded) return;
@@ -161,6 +165,7 @@ export default function RivePetRenderer({
             className={`${className ?? ''} ${styles.riveStage}`}
             data-asset={assetId}
             data-facing={facing}
+            data-flip={flipped ? 'true' : undefined}
         >
             {!loaded && <span className={styles.riveLoading} aria-hidden="true">🐾</span>}
             <RiveComponent className={styles.riveCanvas} aria-label={`${assetId} 互动宠物`} />

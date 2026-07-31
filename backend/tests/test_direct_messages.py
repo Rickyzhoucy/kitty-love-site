@@ -245,15 +245,20 @@ async def test_mediation_writes_interjections_separate_from_real_messages(
 ):
     """宠物的话单独一张表。混进 DirectMessage 会让「谁发的」多出第三种取值。"""
     me, partner_id = await _two_users(session_maker)
+    # 固定在中午跑，别用真实时间：深夜静默是 23:00–08:00，用 now() 的话这条
+    # 断言「催一条 + 代答一条」的用例每天夜里都会红——催促被正确地拦掉了，
+    # 挂的是测试而不是功能。上面那些单元用例本来就都用固定的 _now()。
+    now = _now()
     async with session_maker() as db:
         message = await send_message(db, partner_id, me, "在吗", [])
-        message.created_at = datetime.now(UTC) - timedelta(hours=2)
+        message.created_at = now - timedelta(hours=2)
         # 对方又发了一条，说明他在等
-        await send_message(db, partner_id, me, "还在吗", [])
+        later = await send_message(db, partner_id, me, "还在吗", [])
+        later.created_at = now - timedelta(minutes=5)
         await db.commit()
 
         unread = await oldest_unread(db, me)
-        created = await run_mediation(db, me, partner_id, unread)
+        created = await run_mediation(db, me, partner_id, unread, now=now)
 
         messages = list(await db.scalars(select(DirectMessage)))
         interjections = list(await db.scalars(select(PetInterjection)))
