@@ -175,12 +175,31 @@ async def oldest_unread(
     )
 
 
+#: 不进聊天记录的插话类型。
+#:
+#: `unread_nudge` 是「快去看消息」，说给还没打开聊天页的人听——等你真的在看这
+#: 条流了，它的使命已经完成。留在记录里的唯一效果是：以后回看这段对话时，每两
+#: 条消息之间夹一句「有新消息哦」，把真正说过的话冲淡。
+#:
+#: 它**照常落库**，只是不在这条流里显示：宠物的递减节奏（0/10/30 分钟后不再
+#: 主动提）就是靠数这些行算「这是第几次」的，见 pet_mediation.count_interjections。
+#: 真正的送达渠道是浮窗宠物的气泡（ChatMediationProvider → FloatingPet），
+#: 那里说完就散，正好是这种话该有的生命周期。
+#:
+#: 代答（standin / company）不在此列：那是说给**在等的另一个人**听的，解释了
+#: 对话里的那段空白，属于对话记录的一部分。
+THREAD_HIDDEN_KINDS = frozenset({"unread_nudge"})
+
+
 async def list_interjections(
     db: AsyncSession,
     audience_id: str,
     since: datetime | None = None,
+    hide_kinds: frozenset[str] = THREAD_HIDDEN_KINDS,
 ) -> list[PetInterjection]:
     query = select(PetInterjection).where(PetInterjection.audience_id == audience_id)
+    if hide_kinds:
+        query = query.where(PetInterjection.kind.notin_(hide_kinds))
     if since is not None:
         query = query.where(PetInterjection.created_at >= since)
     else:

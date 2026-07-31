@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.auth import hash_password
 from app.direct_messages import (
     PartnerUnavailable,
+    list_interjections,
     mark_read,
     oldest_unread,
     resolve_partner,
@@ -274,6 +275,59 @@ async def test_mediation_writes_interjections_separate_from_real_messages(
     standin = next(item for item in interjections if item.kind == "standin")
     assert nudge.audience_id == me
     assert standin.audience_id == partner_id
+
+
+async def test_nudges_stay_out_of_the_thread_but_stay_in_the_ledger(session_maker):
+    """催促不进对话记录，但**必须还在库里**。
+
+    进了记录的话，以后回看这段对话，每两条消息之间都夹一句「有新消息哦」——
+    你人已经在看聊天页了，这句话早就完成使命了。它真正的送达渠道是浮窗宠物的
+    气泡，说完就散。
+
+    但不能因此不落库：递减节奏（0/10/30 分钟后不再提）就是靠数这些行算第几次
+    的。所以这条同时断言两件事——流里看不到，表里还在。
+    """
+    me, partner_id = await _two_users(session_maker)
+    now = _now()
+    async with session_maker() as db:
+        message = await send_message(db, partner_id, me, "在吗", [])
+        message.created_at = now - timedelta(hours=2)
+        later = await send_message(db, partner_id, me, "还在吗", [])
+        later.created_at = now - timedelta(minutes=5)
+        await db.commit()
+
+        unread = await oldest_unread(db, me)
+        await run_mediation(db, me, partner_id, unread, now=now)
+
+        shown = await list_interjections(db, me)
+        stored = list(
+            await db.scalars(
+                select(PetInterjection).where(PetInterjection.audience_id == me)
+            )
+        )
+
+    assert [item.kind for item in stored] == ["unread_nudge"]
+    assert shown == []
+
+
+async def test_standins_do_show_in_the_thread(session_maker):
+    """代答是说给**在等的那个人**听的，解释了对话里的那段空白，该留在记录里。"""
+    me, partner_id = await _two_users(session_maker)
+    now = _now()
+    async with session_maker() as db:
+        message = await send_message(db, partner_id, me, "在吗", [])
+        message.created_at = now - timedelta(hours=2)
+        later = await send_message(db, partner_id, me, "还在吗", [])
+        later.created_at = now - timedelta(minutes=5)
+        await db.commit()
+
+        unread = await oldest_unread(db, me)
+        await run_mediation(db, me, partner_id, unread, now=now)
+
+        # 代答说给对方听，所以要看对方那一侧的流
+        shown = await list_interjections(db, partner_id)
+
+    assert [item.kind for item in shown] == ["standin"]
 
 
 async def test_mediation_does_nothing_once_the_message_is_read(session_maker):
