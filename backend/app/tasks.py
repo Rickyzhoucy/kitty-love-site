@@ -6,10 +6,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.conversation import build_chat_model
+from app.agents.conversation import build_agent, build_chat_model
 from app.agents.reflection import ReflectionAgent, companions_with_pending
 from app.agents.roles import AgentRole
-from app.anniversaries import scan_anniversaries
+from app.anniversaries import deliver_due, scan_anniversaries
 from app.attachment_processing import extract_text, thumbnail_webp
 from app.config import get_settings
 from app.db import session_factory
@@ -324,6 +324,20 @@ async def scan_anniversaries_daily(timestamp: int) -> None:
         logger.info("今日纪念日提醒：%s", "；".join(written))
 
 
+@procrastinate_app.periodic(cron="*/20 8-22 * * *")
+@procrastinate_app.task(name="anniversary.deliver", queue="companion")
+async def deliver_anniversaries(timestamp: int) -> None:
+    """把扫出来的纪念日提醒送到宠物嘴里（anniversaries.deliver_due 有详细说明）。
+
+    与扫描分开、且**只在白天跑**：扫描凌晨 1:07 做完，那个点推送出去没人看得到，
+    而送达即标记已处理，等于白白丢掉。8 点到 22 点每 20 分钟看一次，人回到站上
+    最多等 20 分钟就会听到那句话。深夜不跑——宠物的安静时段是 23:00–08:00。
+    """
+    del timestamp
+    async with session_factory() as db:
+        await deliver_due(db)
+
+
 @procrastinate_app.periodic(cron="23 4 * * *")
 @procrastinate_app.task(name="pet.reflect.sweep", queue="companion")
 async def sweep_pending_reflections(timestamp: int) -> None:
@@ -426,21 +440,26 @@ async def answer_chat_mention(payload: dict) -> None:
     ——用户敲完回车，自己的话要等宠物想完才出现在屏幕上。发消息必须是即时的，
     所以这里只排队，答案回来后写成插话并发一条 SSE，两边的界面自然刷出来。
     """
-    await handle_chat_assist(
-        payload,
-        build_chat_model(get_settings()),
-        session_factory,
-    )
+    settings = get_settings()
+    model = build_chat_model(settings, role=AgentRole.ASSIST)
+    # 带工具的 Agent：站内只读 + 联网查，一个写操作都没有（见 roles.ASSIST_TOOLS）。
+    # checkpointer 传 None——每次 @ 都是独立的一问一答，不需要跨轮历史，
+    # 也就不该和用户的对话线程共用 checkpoint。
+    agent = build_agent(model, None, session_factory, role=AgentRole.ASSIST)
+    await handle_chat_assist(payload, model, session_factory, agent=agent)
 
 
 async def handle_chat_assist(
     payload: dict,
     model: Any,
     maker: async_sessionmaker[AsyncSession],
+    agent: Any = None,
 ) -> None:
-    from app.chat_assist import ASSIST_KIND, answer, prepare
+    from app.agent_context import AgentContext
+    from app.chat_assist import ASSIST_KIND, answer, answer_with_tools, prepare
     from app.models import OutboxEvent
     from app.pet_mediation import record_interjection
+    from app.pet_state import resolve_pet
 
     asker_id = str(payload["user_id"])
     partner_id = str(payload["partner_id"])
@@ -453,7 +472,27 @@ async def handle_chat_assist(
         if asker is None:
             return
         request = await prepare(db, asker, partner_id, pet_name, body)
-        reply = await answer(model, request, pet_name)
+
+        if agent is not None:
+            companion, _ = await resolve_pet(db, asker_id)
+            await db.commit()
+            context = AgentContext(
+                user_id=asker_id,
+                # 不挂在任何真实对话上：这一问一答不属于用户的对话本。
+                # 必须是 None 而不是编一个 id——工具审计会把它写进 ToolRun 的
+                # 外键列，不存在的 id 会让整轮回答在提交时炸掉（而且是被
+                # answer_with_tools 的 except 吞掉，表现成「宠物不吭声」）。
+                conversation_id=None,
+                companion_id=companion.id,
+                persona_name=pet_name,
+                persona_prompt="",
+                user_profile={},
+                conversation_summary="",
+                memory_context="",
+            )
+            reply = await answer_with_tools(agent, request, pet_name, context)
+        else:
+            reply = await answer(model, request, pet_name)
         if not reply:
             return
         # 问题是在双人聊天里问的，答案两个人都该看到——插话按 audience 存，

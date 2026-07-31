@@ -69,23 +69,20 @@ def test_unknown_tool_defaults_to_denied_for_restricted_roles(session_maker):
 
 
 def test_checkpoint_namespaces_never_collide():
-    """三个角色跑在同一个 checkpointer 上，前缀相同就会读到彼此的历史。"""
-    ids = {
-        thread_id(role, "conversation-1", "seg")
-        for role in (
-            AgentRole.CONVERSATION,
-            AgentRole.COGNITION,
-            AgentRole.REFLECTION,
-        )
-    }
-    assert len(ids) == 3
+    """角色共用同一个 checkpointer，前缀相同就会读到彼此的历史。
+
+    对 AgentRole 全集断言而不是写死几个：新增角色时忘了给前缀，这条会直接红，
+    而不是等到 Reflection 的分析漏进用户看得见的对话里才发现。
+    """
+    ids = {thread_id(role, "conversation-1", "seg") for role in AgentRole}
+    assert len(ids) == len(list(AgentRole))
 
 
 def test_每个角色都有独立预算与超时():
     budgets = {spec_for(role).daily_budget for role in AgentRole}
     timeouts = {spec_for(role).timeout_seconds for role in AgentRole}
-    assert len(budgets) == 3
-    assert len(timeouts) == 3
+    assert len(budgets) == len(list(AgentRole))
+    assert len(timeouts) == len(list(AgentRole))
     # 想不出来就别想了：认知的超时必须明显短于对话。
     assert (
         spec_for(AgentRole.COGNITION).timeout_seconds

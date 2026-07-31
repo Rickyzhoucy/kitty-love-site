@@ -41,9 +41,24 @@ MEANINGFUL_TYPES = frozenset(
         "proactive.accepted",        # 主动搭话被接住了（FloatingPet）
         "proactive.dismissed",       # 主动搭话被推开了（FloatingPet）
         "task.highRisk",             # 高风险操作完成（agents/conversation）
+        "dailyQuestion.completed",   # 两人都答完了每日一问（api）
+        "wish.completed",            # 预留：一起做到了一件想做的事
         "interaction.longSession",   # 预留：罕见的长时间陪伴
         "user.sentiment",            # 预留：明确的情绪表达
     }
+)
+
+#: **刻意不进记忆的事件**，写在这里是为了让「为什么没有它」有据可查——
+#: 否则下一个人只会看到白名单里没有，以为是漏了。
+#:
+#: - `anniversary.due`：日期是算出来的，不是想起来的。`EventTimer` 里存着，
+#:   每年都会重新算；把「今天是第 300 天」写成记忆，明年就是条错的。
+#: - `mood.checkIn`：一天一条，一年三百多条，都进记忆会把真正的事淹掉。
+#:   它的价值在**当下**（给 Cognition 一个关心的理由），不在回顾。
+#: - `chat.*` / `pet.action`：私聊内容属于两个人，不该被宠物二次转述成
+#:   「我记得你们那天吵架了」；宠物动作则是执行细节，不是经历。
+DELIBERATELY_FORGOTTEN = frozenset(
+    {"anniversary.due", "mood.checkIn", "pet.action"}
 )
 
 #: 攒到这么多条待反思事件就触发一次反思。

@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from langchain.agents import create_agent
 from langchain.agents.middleware import (
     ModelRequest,
+    SummarizationMiddleware,
     after_agent,
     before_model,
     dynamic_prompt,
@@ -113,6 +114,29 @@ class AgentGraph(Protocol):
     def astream_events(self, *args, **kwargs): ...
 
 
+def build_compaction_middleware(
+    model: BaseChatModel,
+    settings: Settings | None = None,
+) -> SummarizationMiddleware:
+    """对话历史自动压缩。
+
+    用 LangChain 自带的 `SummarizationMiddleware`，**不自己写**：这类东西的难点
+    从来不是「摘要一下」，而是那些边角——工具调用消息必须和它的结果成对保留，
+    否则模型会看到一个没有结果的调用；摘要本身也要计入预算；触发点要留余量，
+    卡到 100% 再动手时那次压缩调用自己就超长了。这些它都处理过了。
+
+    阈值取模型上下文的一个比例（默认 75%），而不是写死 token 数——换模型时只要
+    改 `chat_context_tokens` 一个值，触发点自动跟着走。
+    """
+    config = settings or get_settings()
+    budget = int(config.chat_context_tokens * config.chat_compact_at)
+    return SummarizationMiddleware(
+        model=model,
+        trigger=("tokens", budget),
+        keep=("messages", config.chat_compact_keep_messages),
+    )
+
+
 def build_agent(
     model: BaseChatModel,
     checkpointer,
@@ -141,6 +165,8 @@ def build_agent(
             validate_agent_context,
             log_agent_completion,
             build_tool_audit_middleware(session_maker),
+            # 上下文压缩。放在最后：前面几个 middleware 还要看完整的消息列表。
+            build_compaction_middleware(model),
         ],
         context_schema=AgentContext,
         checkpointer=checkpointer,

@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     chat_api_key: str = ""
     chat_temperature: float = 0.7
     chat_timeout: float = 60.0
+
+    #: 模型的上下文预算（token）。换模型时改这一个值即可。
+    chat_context_tokens: int = Field(default=256_000, ge=8_000, le=4_000_000)
+    #: 用掉这个比例就触发压缩。留一截余量：压缩本身也要把历史发给模型，
+    #: 卡到 100% 再动手的话，那一次调用自己就会超长。
+    chat_compact_at: float = Field(default=0.75, gt=0.1, le=0.95)
+    #: 压缩后原样保留的最近消息条数。太少会把刚说的事也摘掉，
+    #: 用户会感觉宠物「刚说完就忘」。
+    chat_compact_keep_messages: int = Field(default=20, ge=4, le=200)
     checkpointer_pool_min_size: int = Field(default=2, ge=1, le=20)
     checkpointer_pool_max_size: int = Field(default=12, ge=1, le=50)
 

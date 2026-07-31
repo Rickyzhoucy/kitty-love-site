@@ -19,7 +19,13 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Companion, CompanionPetEvent, EventTimer, utcnow
+from app.models import (
+    Companion,
+    CompanionPetEvent,
+    EventTimer,
+    OutboxEvent,
+    utcnow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -222,3 +228,67 @@ def next_scan_at(now: datetime | None = None) -> datetime:
     """下一次扫描时刻。仅供测试与日志用。"""
     now = now or utcnow()
     return (now + timedelta(days=1)).replace(hour=1, minute=7, second=0, microsecond=0)
+
+
+async def deliver_due(
+    db: AsyncSession,
+    now: datetime | None = None,
+) -> list[dict]:
+    """把还没送达的纪念日提醒变成宠物真的会说出来的话。
+
+    ## 为什么需要这一步
+
+    `scan_anniversaries` 只负责**写事件**，写完就完了。改造前没有任何代码读它
+    ——事件安静地堆在表里，宠物一次都没念过。这个函数就是那个缺失的消费端：
+    把未处理的事件转成 `pet.action`（宠物已有的说话通道，前端 usePetActivityBridge
+    在听），然后标记已处理。
+
+    ## 送达即标记，即使没人在线
+
+    `processedAt` 记的是「已经送出去了」，不是「用户看到了」。人不在站上时这条
+    SSE 就丢了——那是已知边界（计划文档 §3.6 同一条），真正的推送要 Web Push。
+    不标记的话，事件会在下一次扫描时再送一遍，攒上几天就变成一串刷屏。
+    """
+    moment = now or utcnow()
+    pending = list(
+        await db.scalars(
+            select(CompanionPetEvent)
+            .where(
+                CompanionPetEvent.type == ANNIVERSARY_EVENT,
+                CompanionPetEvent.processed_at.is_(None),
+            )
+            .order_by(CompanionPetEvent.occurred_at)
+            .limit(20)
+        )
+    )
+    if not pending:
+        return []
+
+    delivered: list[dict] = []
+    for event in pending:
+        payload = event.payload or {}
+        text = str(payload.get("text") or "").strip()
+        event.processed_at = moment
+        if not text:
+            continue
+        action = {
+            "action": "celebrate" if payload.get("urgent") else "idle",
+            "animation": "celebrate" if payload.get("urgent") else "idle",
+            "message": text,
+            # 当天那条留久一点，提前提醒的说完就走
+            "duration": 9_000 if payload.get("urgent") else 6_000,
+        }
+        db.add(
+            OutboxEvent(
+                topic="pet.action",
+                aggregate_type="pet",
+                aggregate_id=event.companion_id,
+                payload=action,
+            )
+        )
+        delivered.append(action)
+
+    await db.commit()
+    if delivered:
+        logger.info("纪念日提醒送达 %s 条", len(delivered))
+    return delivered
