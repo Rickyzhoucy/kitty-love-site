@@ -15,6 +15,7 @@ from app.agents.reflection import (
     pending_count,
     record_event,
 )
+from app.anniversaries import upcoming as upcoming_anniversaries
 from app.auth import (
     DUMMY_PASSWORD_HASH,
     SESSION_COOKIE_NAME,
@@ -40,7 +41,7 @@ from app.direct_messages import (
     unread_count,
     verify_attachments,
 )
-from app.events import stream_outbox
+from app.events import SSE_HEADERS, stream_outbox
 from app.future_letters import (
     create as create_letter,
 )
@@ -49,6 +50,7 @@ from app.future_letters import (
     open_letter,
     redact,
 )
+from app.localtime import local_today
 from app.models import (
     Attachment,
     AuthAttempt,
@@ -630,11 +632,7 @@ async def chat_stream(
             data.attachment_ids,
         ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_HEADERS,
     )
 
 
@@ -862,6 +860,17 @@ async def run_pet_cognition(
             active_task=data.active_task,
             proactive_budget_left=DAILY_PROACTIVE_BUDGET,
             partner_mood=partner_mood,
+            # 近期纪念日。查一次表就有，宠物却因此能在纪念日前一周说人话，
+            # 而不是只会「你很久没理我了」。
+            upcoming_anniversaries=[
+                f"还有 {item['daysLeft']} 天：{item['title']}"
+                if item["daysLeft"] > 0
+                else f"今天：{item['title']}"
+                for item in upcoming_anniversaries(
+                    list(await db.scalars(select(EventTimer))),
+                    local_today(),
+                )
+            ],
         ),
         trigger=data.trigger,
         quiet_mode=data.initiative == "quiet",
@@ -1410,6 +1419,8 @@ async def attachment_thumbnail(
         ),
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
     )
+
+
 @router.get("/events")
 async def events(
     request: Request,
@@ -1428,9 +1439,5 @@ async def events(
             settings.outbox_retention_days,
         ),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_HEADERS,
     )

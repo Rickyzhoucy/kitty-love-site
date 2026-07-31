@@ -6,7 +6,7 @@ export function isTauriDesktop(): boolean {
     return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export async function loadDesktopToken(): Promise<string | null> {
+async function loadDesktopToken(): Promise<string | null> {
     if (!isTauriDesktop()) return null;
     if (cachedToken !== undefined) return cachedToken;
     const { invoke } = await import('@tauri-apps/api/core');

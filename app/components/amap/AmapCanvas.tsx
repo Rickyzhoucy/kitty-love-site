@@ -26,6 +26,9 @@ const PRECISE_ZOOM = 15;
 const HERE_FILL = '#f5a524';
 const HERE_STROKE = '#ffffff';
 
+/** 选中的那个点外面套的那圈环。与「我在这儿」的黄点刻意不同色。 */
+const SELECTED_STROKE = '#b04c5d';
+
 /**
  * 画一个「我在这儿」的黄点。
  *
@@ -155,6 +158,8 @@ interface AmapCanvasProps {
      * 带 nonce 是为了「再选一次同一个地方」也能重新居中。
      */
     focus?: { lng: number; lat: number; nonce: number } | null;
+    /** 当前选中的点。左边列表选了哪条，地图上就该看得出来是哪个点。 */
+    selectedId?: string | null;
     className?: string;
 }
 
@@ -163,11 +168,12 @@ export default function AmapCanvas({
     onPickLocation,
     onSelectPin,
     focus,
+    selectedId,
     className,
 }: AmapCanvasProps) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const mapRef = useRef<AmapMap | null>(null);
-    const markersRef = useRef<AmapMarker[]>([]);
+    const markersRef = useRef<Map<string, AmapMarker>>(new Map());
     /** 「我在这儿」的黄点。与 markersRef 分开，免得重画点位时被一起清掉。 */
     const hereRef = useRef<AmapOverlay[]>([]);
     const [error, setError] = useState<string | null>(null);
@@ -216,28 +222,64 @@ export default function AmapCanvas({
             cancelled = true;
             mapRef.current?.destroy();
             mapRef.current = null;
-            markersRef.current = [];
+            markersRef.current = new Map();
             hereRef.current = [];
         };
     }, []);
 
     // 点变了就重画。几十个量级，全量重建比 diff 简单且够快。
+    //
+    // 存成 id → marker 的映射而不是数组：选中高亮要按 id 找回对应的点，
+    // 按下标找的话，pins 一重排就会高亮错的那个。
     useEffect(() => {
         const map = mapRef.current;
         const AMap = window.AMap;
         if (!ready || !map || !AMap) return;
 
         markersRef.current.forEach(marker => map.remove(marker));
-        markersRef.current = pins.map(pin => {
-            const marker = new AMap.Marker({
-                position: [pin.lng, pin.lat],
-                title: pin.title,
-            });
-            marker.on('click', () => selectRef.current?.(pin));
-            map.add(marker);
-            return marker;
-        });
+        markersRef.current = new Map(
+            pins.map(pin => {
+                const marker = new AMap.Marker({
+                    position: [pin.lng, pin.lat],
+                    title: pin.title,
+                });
+                marker.on('click', () => selectRef.current?.(pin));
+                map.add(marker);
+                return [pin.id, marker] as const;
+            }),
+        );
     }, [pins, ready]);
+
+    // 给选中的那个点套一圈高亮环。左右两栏是用来互相对照的，光把地图移过去
+    // 还不够——移过去之后要能一眼认出「就是这个点」，尤其是同一条街上挤了
+    // 好几个的时候。
+    //
+    // 用另画一个 CircleMarker，而不是去调 Marker 自己的 setAnimation/setzIndex：
+    // 那两个方法在这个版本的 SDK 上**不存在**，调下去是运行时 TypeError，
+    // 整页白屏。CircleMarker 是这个文件里已经在用、已经验证过的东西。
+    useEffect(() => {
+        const map = mapRef.current;
+        const AMap = window.AMap;
+        if (!ready || !map || !AMap) return;
+
+        const pin = pins.find(item => item.id === selectedId);
+        if (!pin) return;
+        const ring = new AMap.CircleMarker({
+            center: [pin.lng, pin.lat],
+            radius: 16,
+            fillOpacity: 0,
+            strokeColor: SELECTED_STROKE,
+            strokeWeight: 3,
+            strokeOpacity: 0.9,
+            // 点击穿透到底下的 Marker，否则高亮环会把它自己挡住
+            bubble: true,
+            zIndex: 95,
+        });
+        map.add(ring);
+        return () => {
+            map.remove(ring);
+        };
+    }, [selectedId, ready, pins]);
 
     // 搜索选中 / 点了列表里的某一项。
     //

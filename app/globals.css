@@ -16,8 +16,18 @@
   /* 暖金实心底上的前景色：恒定深棕（两主题均保证对比度） */
   --color-on-secondary: oklch(28% 0.06 70);
 
-  /* ── 基础色板：暖奶油系 ── */
-  --color-base: #f6f1ea;
+  /* ── 基础色板：暖奶油系 ──
+   *
+   * 这个色**曾经叫 `--color-base`，绝对不要改回去。** Tailwind v4 会为每个
+   * `--color-*` 生成 `text-<名字>`，而 `text-base` 同时是内建的字号工具类
+   * （1rem）。两者撞名之后，`text-base` 一条规则里既设字号又设颜色——于是
+   * 页面上所有 `md:text-base` 的正文都被刷成了**和背景一模一样的奶油色**，
+   * 对比度 1:1。首页那封情书、几个页面的副标题都中过招，症状是「字看得见
+   * 一点但读不出来」，很容易误判成设计得太淡。
+   *
+   * 同理，新增颜色时避开 Tailwind 的字号刻度：sm / base / lg / xl / 2xl…
+   */
+  --color-canvas: #f6f1ea;
   /* 暖奶油 */
   --color-surface: #fffdf9;
   --color-sunken: #ece4d8;
@@ -120,15 +130,25 @@
   display: block;
 }
 
-/* 描边空心字：巨型排版装饰用 */
+/* 描边空心字：巨型排版装饰用。
+ *
+ * 描边宽度必须**跟着字号走**（em 而不是 px）：固定 1.5px 在 48px 的标题上还算
+ * 清楚，到了首页 110px 的「小世界」就细成了一根发丝——字越大反而越看不清，
+ * 正好和直觉相反。`max()` 兜住小字号那头，别细到消失。
+ *
+ * 另外给一层极淡的填充。纯空心字在浅色底上只剩两条轮廓线，眼睛要自己脑补
+ * 笔画；补一点点底色，字形就立刻立住了，而「空心」的观感几乎没变。
+ * 描边用 accent-strong 而不是 accent：前者 6.95:1，后者 4.63:1，而描边这种
+ * 只有轮廓的形态本来就比实心字难认，该往高了给。
+ */
 @utility text-stroke-accent {
-  -webkit-text-stroke: 1.5px var(--color-accent);
-  color: transparent;
+  -webkit-text-stroke: max(2px, 0.032em) var(--color-accent-strong);
+  color: color-mix(in oklch, var(--color-accent), transparent 88%);
 }
 
 @utility text-stroke-ink {
-  -webkit-text-stroke: 1.5px var(--color-ink);
-  color: transparent;
+  -webkit-text-stroke: max(2px, 0.032em) var(--color-ink);
+  color: color-mix(in oklch, var(--color-ink), transparent 90%);
 }
 
 /* ── 后台管理页通用元素（ui-* 前缀仅供 app/admin 使用） ── */
@@ -220,7 +240,7 @@
   --color-accent-soft: color-mix(in oklch, var(--color-accent), black 76%);
   --color-on-accent: oklch(25% 0.04 12);
   --color-secondary-soft: color-mix(in oklch, var(--color-secondary), black 72%);
-  --color-base: #171311;
+  --color-canvas: #171311;
   --color-surface: #221c18;
   --color-sunken: #2f2721;
   --color-ink: #f2e9e0;
@@ -252,7 +272,7 @@ body {
 body {
   font-family: var(--font-rounded);
   color: var(--color-ink);
-  background-color: var(--color-base);
+  background-color: var(--color-canvas);
   /* 三层极光光晕：左上玫瑰、右上暖金、底部玫瑰回光 */
   background-image:
     radial-gradient(

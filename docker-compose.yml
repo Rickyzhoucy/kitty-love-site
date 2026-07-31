@@ -7,7 +7,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-kitty_love_db}
       POSTGRES_USER: ${POSTGRES_USER:-kitty}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
-      TZ: Asia/Shanghai
+      TZ: ${SITE_TIMEZONE:-Asia/Shanghai}
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-35432}:5432"
     volumes:
@@ -80,6 +80,15 @@ services:
         fi
     environment: &backend-environment
       APP_ENV: ${APP_ENV:-development}
+      # 容器默认跑在 UTC，而 procrastinate 的 cron 是按**进程本地时区**算的
+      # （croniter 拿 epoch 秒走 datetime.fromtimestamp，不带 tz）。不设这个，
+      # `7 1 * * *`（写着「凌晨 1:07 跑，不跟用户抢」）在东八区实际是早上 9:07，
+      # 而 `*/20 8-22 * * *`（写着「只在白天送，深夜不打扰」）实际是下午四点到
+      # 第二天凌晨六点——注释和行为正好相反。
+      # 应用代码里的「今天」「深夜」另有 SITE_TIMEZONE 管，见 app/localtime.py；
+      # 两者要一起改，不要只改一个。
+      TZ: ${SITE_TIMEZONE:-Asia/Shanghai}
+      SITE_TIMEZONE: ${SITE_TIMEZONE:-Asia/Shanghai}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-kitty}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-kitty_love_db}
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}

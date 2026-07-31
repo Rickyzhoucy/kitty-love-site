@@ -160,6 +160,3 @@ class PetCognitionService:
             await db.commit()
         return proposal, None
 
-
-def can_be_proactive_now(budget: BudgetState, now: float | None = None) -> bool:
-    return allow_proactive(budget, now if now is not None else utcnow().timestamp())

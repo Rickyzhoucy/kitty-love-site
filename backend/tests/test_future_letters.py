@@ -10,7 +10,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
+from app.anniversaries import ANNIVERSARY_EVENT, deliver_due
 from app.future_letters import (
+    LETTER_EVENT,
+    announce_unlocked,
     create,
     is_unlocked,
     list_letters,
@@ -18,7 +21,7 @@ from app.future_letters import (
     open_letter,
     redact,
 )
-from app.models import FutureLetter, User
+from app.models import Companion, CompanionPetEvent, FutureLetter, OutboxEvent, User
 
 
 def _future() -> datetime:
@@ -207,3 +210,96 @@ async def test_api_rejects_unlock_in_the_past(authenticated_client):
 async def test_api_missing_letter_is_404(authenticated_client):
     response = await authenticated_client.get("/api/v1/letters/nope")
     assert response.status_code == 404
+
+
+# ---- 解锁播报 ----
+
+
+async def _companion(session_maker) -> str:
+    async with session_maker() as db:
+        user = await db.scalar(select(User).limit(1))
+        companion = Companion(owner_id=user.id, name="yo yo")
+        db.add(companion)
+        await db.commit()
+        return companion.id
+
+
+async def test_unlocked_letter_gets_announced(session_maker):
+    """**一封信到了日子，必须有人说一声。**
+
+    `newly_unlocked()` 原本写好了却没有任何调用方——信到期，界面上悄悄多出
+    一段正文，没有任何提示。「到时候才看得到」这个功能，最要紧的就是到时候
+    那一下，少了它就只剩个倒计时。
+    """
+    companion_id = await _companion(session_maker)
+    async with session_maker() as db:
+        me = await db.scalar(select(User.id))
+        await create(db, me, "到期的", [], _past())
+        await create(db, me, "还锁着的", [], _future())
+        await db.commit()
+
+        announced = await announce_unlocked(db)
+        assert len(announced) == 1
+
+        events = list(
+            await db.scalars(
+                select(CompanionPetEvent).where(
+                    CompanionPetEvent.type == LETTER_EVENT
+                )
+            )
+        )
+    assert [event.companion_id for event in events] == [companion_id]
+    assert "到时候了" in events[0].payload["text"]
+
+
+async def test_announcing_twice_says_it_once(session_maker):
+    """去重靠 payload.dedupe，**不靠 openedAt**。
+
+    拿 `openedAt` 当「已通知」会把两件事纠缠起来：用户没点开那封信，宠物就
+    每二十分钟提醒一次。这条守住那个区别。
+    """
+    await _companion(session_maker)
+    async with session_maker() as db:
+        me = await db.scalar(select(User.id))
+        await create(db, me, "到期的", [], _past())
+        await db.commit()
+
+        assert len(await announce_unlocked(db)) == 1
+        assert await announce_unlocked(db) == []
+
+        count = len(
+            list(
+                await db.scalars(
+                    select(CompanionPetEvent).where(
+                        CompanionPetEvent.type == LETTER_EVENT
+                    )
+                )
+            )
+        )
+    assert count == 1
+
+
+async def test_unlock_announcement_is_delivered_with_the_anniversaries(session_maker):
+    """播报要真的被送出去。
+
+    事件写进表里只完成一半——`deliver_due` 默认只认纪念日那一种类型，漏了
+    `LETTER_EVENT` 的话，这些事件会和当初的纪念日一样堆在表里没人读。
+    """
+    await _companion(session_maker)
+    async with session_maker() as db:
+        me = await db.scalar(select(User.id))
+        await create(db, me, "到期的", [], _past())
+        await db.commit()
+        await announce_unlocked(db)
+
+        delivered = await deliver_due(
+            db, types=frozenset({ANNIVERSARY_EVENT, LETTER_EVENT})
+        )
+        actions = list(
+            await db.scalars(
+                select(OutboxEvent).where(OutboxEvent.topic == "pet.action")
+            )
+        )
+    assert len(delivered) == 1
+    assert len(actions) == 1
+    assert "到时候了" in actions[0].payload["message"]

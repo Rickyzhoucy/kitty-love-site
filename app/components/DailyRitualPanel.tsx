@@ -9,7 +9,7 @@ import {
     type DailyQuestionState,
 } from '@/lib/api/dailyQuestion';
 import { checkInMood, fetchMoodBoard, type MoodBoard } from '@/lib/api/moods';
-import { fetchLetters, writeLetter, type FutureLetter } from '@/lib/api/letters';
+import { fetchLetter, fetchLetters, writeLetter, type FutureLetter } from '@/lib/api/letters';
 import { cn } from '@/lib/utils';
 
 /**
@@ -103,6 +103,13 @@ export default function DailyRitualPanel({ onClose }: { onClose: () => void }) {
         } finally {
             setBusy(false);
         }
+    };
+
+    /** 拆信。服务端在这一下记下 `openedAt`，宠物才知道这封不用再提醒了。 */
+    const openLetter = async (id: string) => {
+        const opened = await fetchLetter(id);
+        setLetters(current =>
+            current.map(item => (item.id === id ? opened : item)));
     };
 
     const submitLetter = async () => {
@@ -303,20 +310,38 @@ export default function DailyRitualPanel({ onClose }: { onClose: () => void }) {
                         </p>
                         {letters.length > 0 && (
                             <div className="flex flex-col gap-1.5 border-t border-ink/5 pt-3">
-                                {letters.slice(0, 6).map(letter => (
-                                    <div
-                                        key={letter.id}
-                                        className="rounded-md bg-sunken/50 px-2.5 py-2 text-xs"
-                                    >
-                                        <span className="text-ink-muted">
-                                            {new Date(letter.unlockAt).toLocaleDateString('zh-CN')}
-                                        </span>
-                                        <span className="ml-2 text-ink">
-                                            {/* body 为 null 就是还没到时候——服务端不发 */}
-                                            {letter.body ?? '封着的'}
-                                        </span>
-                                    </div>
-                                ))}
+                                {letters.slice(0, 6).map(letter => {
+                                    const day = new Date(letter.unlockAt)
+                                        .toLocaleDateString('zh-CN');
+                                    // 到了日子但还没拆——拆信该是个动作，不该
+                                    // 是「列表里悄悄多出一段字」。点开才写 openedAt，
+                                    // 宠物也据此知道这封已经送到了。
+                                    if (letter.unlocked && !letter.openedAt) {
+                                        return (
+                                            <button
+                                                key={letter.id}
+                                                type="button"
+                                                onClick={() => void openLetter(letter.id)}
+                                                className="flex cursor-pointer items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-2.5 py-2 text-left text-xs text-accent"
+                                            >
+                                                <span aria-hidden>✉️</span>
+                                                <span>{day} 的信到时候了 · 点开看</span>
+                                            </button>
+                                        );
+                                    }
+                                    return (
+                                        <div
+                                            key={letter.id}
+                                            className="rounded-md bg-sunken/50 px-2.5 py-2 text-xs"
+                                        >
+                                            <span className="text-ink-muted">{day}</span>
+                                            <span className="ml-2 whitespace-pre-wrap text-ink">
+                                                {/* body 为 null 就是还没到时候——服务端不发 */}
+                                                {letter.body ?? '封着的'}
+                                            </span>
+                                        </div>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

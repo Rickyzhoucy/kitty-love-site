@@ -19,6 +19,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.localtime import local_today
 from app.models import (
     Companion,
     CompanionPetEvent,
@@ -56,7 +57,7 @@ def parse_date(raw: str) -> date | None:
     parts = text.split("-")
     if len(parts) == 2 and all(part.isdigit() for part in parts):
         try:
-            return date(date.today().year, int(parts[0]), int(parts[1]))
+            return date(local_today().year, int(parts[0]), int(parts[1]))
         except ValueError:
             return None
     return None
@@ -139,7 +140,7 @@ async def scan_anniversaries(
 
     幂等：同一个纪念日、同一天只写一条。定时任务重跑或手工触发都不会重复念叨。
     """
-    today = today or datetime.now(UTC).date()
+    today = today or local_today()
     companions = list(await db.scalars(select(Companion)))
     if not companions:
         return []
@@ -224,17 +225,13 @@ def upcoming(timers: list[EventTimer], today: date, within_days: int = 30) -> li
     return sorted(result, key=lambda item: item["daysLeft"])
 
 
-def next_scan_at(now: datetime | None = None) -> datetime:
-    """下一次扫描时刻。仅供测试与日志用。"""
-    now = now or utcnow()
-    return (now + timedelta(days=1)).replace(hour=1, minute=7, second=0, microsecond=0)
-
 
 async def deliver_due(
     db: AsyncSession,
     now: datetime | None = None,
+    types: frozenset[str] = frozenset({ANNIVERSARY_EVENT}),
 ) -> list[dict]:
-    """把还没送达的纪念日提醒变成宠物真的会说出来的话。
+    """把还没送达的「到点了」事件变成宠物真的会说出来的话。
 
     ## 为什么需要这一步
 
@@ -242,6 +239,13 @@ async def deliver_due(
     ——事件安静地堆在表里，宠物一次都没念过。这个函数就是那个缺失的消费端：
     把未处理的事件转成 `pet.action`（宠物已有的说话通道，前端 usePetActivityBridge
     在听），然后标记已处理。
+
+    ## `types` 为什么是参数
+
+    纪念日不是唯一一件「到了日子该说一声」的事——未来情书解锁同理。这两件事
+    在这一步的处理完全一样（取未处理的、念出来、标记已送达），所以共用这段
+    而不是复制一份：复制出来的第二份迟早会漏掉其中一边的修复。
+    调用方在 tasks 里传全集，见 `DELIVERABLE_EVENTS`。
 
     ## 送达即标记，即使没人在线
 
@@ -254,7 +258,7 @@ async def deliver_due(
         await db.scalars(
             select(CompanionPetEvent)
             .where(
-                CompanionPetEvent.type == ANNIVERSARY_EVENT,
+                CompanionPetEvent.type.in_(types),
                 CompanionPetEvent.processed_at.is_(None),
             )
             .order_by(CompanionPetEvent.occurred_at)
@@ -290,5 +294,5 @@ async def deliver_due(
 
     await db.commit()
     if delivered:
-        logger.info("纪念日提醒送达 %s 条", len(delivered))
+        logger.info("到点提醒送达 %s 条", len(delivered))
     return delivered

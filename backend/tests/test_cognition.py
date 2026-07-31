@@ -1,9 +1,12 @@
 """Cognition Agent 的输出校验与认知队列的闸门（架构文档 §4.2 / §5）。"""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from app.agents.cognition import CognitionAgent, CognitionInput, parse_proposal
 from app.cognition_queue import (
+    DAILY_CALL_BUDGET,
     DAILY_PROACTIVE_BUDGET,
     BudgetState,
     CognitionQueue,
@@ -14,6 +17,7 @@ from app.cognition_queue import (
     is_forbidden_trigger,
     proactive_gap_seconds,
 )
+from app.localtime import to_local
 
 VALID = (
     '{"goal":"seekAttention","emotion":"curious","reason":"用户很久没互动了",'
@@ -166,13 +170,51 @@ def test_cancel_removes_without_popping():
     assert queue.pop(0.0) is None
 
 
+def _ordinal_at(moment: float) -> int:
+    """`moment` 那一刻在当地是哪一天。构造「今天已经用掉的预算」要用它。"""
+    return to_local(datetime.fromtimestamp(moment, UTC)).date().toordinal()
+
+
 def test_daily_proactive_budget_is_enforced():
-    budget = BudgetState(daily_proactive_count=DAILY_PROACTIVE_BUDGET)
+    budget = BudgetState(
+        daily_proactive_count=DAILY_PROACTIVE_BUDGET,
+        # 必须标成**当天**用掉的。不标的话 `day_ordinal` 是 0，提交时
+        # 会被判定为跨天而清零——那正是下一条用例要的行为。
+        day_ordinal=_ordinal_at(1e9),
+    )
     queue = CognitionQueue(budget)
     rejection = queue.submit(
         CognitionRequest(type=CognitionType.PROACTIVE_THOUGHT), 1e9
     )
     assert rejection is RejectReason.PROACTIVE_BUDGET
+
+
+def test_daily_budget_rolls_over_to_the_next_day():
+    """**「每日」必须真的按天翻篇。**
+
+    队列是进程内的，而原先没有任何地方调那个 `reset_daily()`——计数从进程
+    启动起只增不减。跑满 `DAILY_CALL_BUDGET` 之后宠物不是「今天不说话了」，
+    是在这个进程重启前**再也不说话了**。这条用例守住那个坑。
+    """
+    day_one = 1e9
+    day_two = day_one + 86_400
+    budget = BudgetState(
+        daily_call_count=DAILY_CALL_BUDGET,
+        daily_proactive_count=DAILY_PROACTIVE_BUDGET,
+        day_ordinal=_ordinal_at(day_one),
+    )
+    queue = CognitionQueue(budget)
+
+    assert (
+        queue.submit(CognitionRequest(type=CognitionType.USER_MESSAGE), day_one)
+        is RejectReason.DAILY_BUDGET
+    )
+    assert (
+        queue.submit(CognitionRequest(type=CognitionType.USER_MESSAGE), day_two)
+        is None
+    )
+    assert budget.daily_call_count == 0
+    assert budget.daily_proactive_count == 0
 
 
 @pytest.mark.parametrize("field", ["quiet_mode", "initiative_off"])

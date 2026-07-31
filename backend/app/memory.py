@@ -239,28 +239,6 @@ class MemoryService:
         db.add(embedding)
         return embedding
 
-    async def rebuild_profile(self, db: AsyncSession) -> EmbeddingProfile:
-        target = await self.ensure_profile(db)
-        target = await db.scalar(
-            select(EmbeddingProfile)
-            .where(EmbeddingProfile.id == target.id)
-            .with_for_update()
-        )
-        if target is None:
-            raise RuntimeError("Embedding profile disappeared during rebuild")
-        if target.active:
-            return target
-        items = list(await db.scalars(select(MemoryItem).order_by(MemoryItem.created_at)))
-        for item in items:
-            await self.embed_item(db, item)
-            await db.flush()
-        await db.execute(
-            EmbeddingProfile.__table__.update().values(active=False)
-        )
-        target.active = True
-        await db.commit()
-        return target
-
     def _profile_matches_provider(self, profile: EmbeddingProfile) -> bool:
         return (
             profile.provider == self.embedding_provider.provider_name

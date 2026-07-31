@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { motion } from 'framer-motion';
-import { Calendar, Heart, List, MapPin as MapPinIcon, Map as MapIcon, Plus, X } from 'lucide-react';
+import { Calendar, Heart, MapPin as MapPinIcon, Plus, X } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { Input, Textarea } from '../components/ui/Input';
@@ -17,12 +17,16 @@ import { cn } from '@/lib/utils';
 /**
  * 我们的故事。
  *
- * 「故事」和「地图」原本是两张表两个页面，但它们本来就是同一件事的两种看法
- * ——发生过的事，有时间，**有时候**还有地点。分成两处的代价是：一次旅行要记
- * 两遍，而且两边都不完整（没地点的事进不了地图，有地点的事在时间轴上又看不到
- * 它在哪）。
+ * 「故事」和「地图」原本是两张表两个页面，后来并成了一个页面的两个视图——但
+ * **视图切换是错的**：这两样东西的价值恰恰在于同时看见。「去年三月那趟旅行」
+ * 和「地图上那个点」是同一件事，隔着一次点击就对不上了。
  *
- * 现在是一批数据两个视图：时间轴看全部，地图只画有坐标的那些。
+ * 所以现在是左右两栏，同一份数据两种排法：左边按时间读，右边按位置看，选中
+ * 状态两边共享。点左边的条目地图飞过去并让那个点跳一下；点地图上的点左边滚到
+ * 对应那条并高亮。
+ *
+ * 窄屏放不下并排，改成地图吸顶 + 列表在下面滚——**仍然是同时可见的**，
+ * 这才是重点，左右只是宽屏上实现它的方式。
  */
 
 const AmapCanvas = dynamic(() => import('../components/amap/AmapCanvas'), {
@@ -33,8 +37,6 @@ const AmapCanvas = dynamic(() => import('../components/amap/AmapCanvas'), {
         </div>
     ),
 });
-
-type View = 'timeline' | 'map';
 
 interface Draft {
     title: string;
@@ -60,9 +62,9 @@ export default function Timeline() {
     const [showForm, setShowForm] = useState(false);
     const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
     const [submitting, setSubmitting] = useState(false);
-    const [view, setView] = useState<View>('timeline');
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [focus, setFocus] = useState<{ lng: number; lat: number; nonce: number } | null>(null);
+    const itemRefs = useRef<Map<string, HTMLElement>>(new Map());
     const { toast } = useToast();
 
     const loadMilestones = useCallback(async () => {
@@ -82,10 +84,6 @@ export default function Timeline() {
     useResourceEvents(['milestones'], () => void loadMilestones());
 
     const placed = useMemo(() => milestones.filter(hasPlace), [milestones]);
-    const selected = useMemo(
-        () => milestones.find(item => item.id === selectedId) ?? null,
-        [milestones, selectedId],
-    );
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -126,13 +124,26 @@ export default function Timeline() {
         setFocus({ lng: place.lng, lat: place.lat, nonce: Date.now() });
     }, []);
 
-    const selectOnMap = useCallback((item: { id: string; lat: number; lng: number }) => {
+    /** 左边点了一条：地图飞过去。 */
+    const selectFromList = useCallback((item: Milestone) => {
         setSelectedId(item.id);
-        setFocus({ lng: item.lng, lat: item.lat, nonce: Date.now() });
+        if (hasPlace(item)) {
+            setFocus({ lng: item.lng, lat: item.lat, nonce: Date.now() });
+        }
+    }, []);
+
+    /** 右边点了一个点：左边滚到对应那条。 */
+    const selectFromMap = useCallback((pin: { id: string; lat: number; lng: number }) => {
+        setSelectedId(pin.id);
+        setFocus({ lng: pin.lng, lat: pin.lat, nonce: Date.now() });
+        itemRefs.current.get(pin.id)?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+        });
     }, []);
 
     return (
-        <div className="mx-auto max-w-4xl px-4 py-6">
+        <div className="mx-auto max-w-7xl px-4 py-6">
             <header className="mb-6 pt-2 animate-fade-up">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.4em] text-accent m-0">
                     Our Story
@@ -146,36 +157,7 @@ export default function Timeline() {
                 </p>
             </header>
 
-            <div className="mb-5 flex flex-wrap items-center justify-center gap-3">
-                {/* 视图切换。地图那一档标出有地点的条数——不然用户会以为地图坏了，
-                    其实只是记的事都还没填地点。 */}
-                <div className="flex items-center gap-1 rounded-full bg-sunken/70 p-1" role="group" aria-label="视图">
-                    <button
-                        type="button"
-                        onClick={() => setView('timeline')}
-                        aria-pressed={view === 'timeline'}
-                        className={cn(
-                            'flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm transition-colors',
-                            view === 'timeline' ? 'bg-surface text-ink shadow-soft' : 'text-ink-muted'
-                        )}
-                    >
-                        <List size={15} /> 时间轴
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setView('map')}
-                        aria-pressed={view === 'map'}
-                        className={cn(
-                            'flex cursor-pointer items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm transition-colors',
-                            view === 'map' ? 'bg-surface text-ink shadow-soft' : 'text-ink-muted'
-                        )}
-                    >
-                        <MapIcon size={15} /> 地图
-                        {placed.length > 0 && (
-                            <span className="tabular-nums text-xs text-ink-muted">{placed.length}</span>
-                        )}
-                    </button>
-                </div>
+            <div className="mb-5">
                 <Button onClick={() => setShowForm(!showForm)}>
                     <Plus size={16} />
                     {showForm ? '取消' : '记录新的故事'}
@@ -186,7 +168,7 @@ export default function Timeline() {
                 <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
-                    className="mb-8 overflow-hidden"
+                    className="mb-6 overflow-hidden"
                 >
                     <Card className="p-6 md:p-8">
                         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -198,7 +180,7 @@ export default function Timeline() {
                                 placeholder="给这一天起个名字"
                                 aria-label="标题"
                                 required
-                                className="w-full border-0 border-b-2 border-sunken bg-transparent px-0 pb-3 font-display text-2xl md:text-3xl font-semibold tracking-wide text-ink placeholder:text-ink-muted/50 outline-none transition-colors focus:border-accent"
+                                className="w-full border-0 border-b-2 border-sunken bg-transparent px-0 pb-3 font-display text-2xl md:text-3xl font-semibold tracking-wide text-ink placeholder:text-ink-muted/70 outline-none transition-colors focus:border-accent"
                             />
                             <div className="flex flex-wrap items-end gap-4">
                                 <div className="min-w-[170px]">
@@ -266,113 +248,97 @@ export default function Timeline() {
                 <p className="text-center text-ink-muted py-8">加载故事中...</p>
             ) : milestones.length === 0 ? (
                 <EmptyState icon="⭐" title="还没有记录故事" hint="点击上方按钮添加吧" />
-            ) : view === 'map' ? (
-                <div className="flex flex-col gap-4">
-                    <Card className="overflow-hidden p-0" data-no-pet-walk>
-                        <AmapCanvas
-                            pins={placed}
-                            onSelectPin={selectOnMap}
-                            focus={focus}
-                            className="h-[52vh] w-full min-h-[360px]"
-                        />
-                    </Card>
-                    {selected && hasPlace(selected) && (
-                        <Card className="p-5">
-                            <div className="flex items-start gap-3">
-                                <span aria-hidden>📍</span>
-                                <div className="min-w-0 flex-1">
-                                    <div className="font-display text-lg font-semibold tracking-wide text-accent">
-                                        {selected.date}
+            ) : (
+                <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+                    {/* 地图。窄屏吸顶、宽屏吸在右侧——两种情况下它都必须**留在视野里**，
+                        否则左右分栏就退化回了「翻到另一页去看」。 */}
+                    <div className="sticky top-0 z-10 order-1 -mx-4 px-4 pb-3 pt-1 lg:order-2 lg:top-4 lg:mx-0 lg:px-0 lg:pb-0 lg:pt-0">
+                        <Card className="overflow-hidden p-0" data-no-pet-walk>
+                            <AmapCanvas
+                                pins={placed}
+                                onSelectPin={selectFromMap}
+                                focus={focus}
+                                selectedId={selectedId}
+                                className="h-[34vh] w-full lg:h-[calc(100vh-11rem)] lg:min-h-[420px]"
+                            />
+                        </Card>
+                        {placed.length === 0 && (
+                            <p className="mt-2 mb-0 text-center text-xs text-ink-muted">
+                                还没有带地点的故事——记录时搜一个地方，它就会出现在这儿。
+                            </p>
+                        )}
+                    </div>
+
+                    {/* 故事列表。一列而不是原来左右交错的时间轴：交错版在半幅宽度里
+                        每张卡只剩一半可读宽度，而它换来的对称感在这儿没有用武之地。 */}
+                    <ol className="order-2 m-0 grid list-none gap-3 p-0 lg:order-1">
+                        {milestones.map(item => {
+                            const placedItem = hasPlace(item);
+                            const active = item.id === selectedId;
+                            const body = (
+                                <>
+                                    <div className="flex items-baseline gap-2">
+                                        <span className="font-display text-lg font-semibold tracking-wide text-accent">
+                                            {item.date}
+                                        </span>
+                                        {placedItem && (
+                                            <MapPinIcon
+                                                size={13}
+                                                aria-label="有地点"
+                                                className="shrink-0 translate-y-px text-accent"
+                                            />
+                                        )}
                                     </div>
-                                    <h3 className="m-0 mt-1 font-display text-xl font-semibold tracking-wide text-ink">
-                                        {selected.title}
+                                    <h3 className="mt-1 mb-0 font-display text-xl font-semibold tracking-wide text-ink">
+                                        {item.title}
                                     </h3>
-                                    {selected.description && (
-                                        <p className="mb-0 mt-2 text-sm leading-loose text-ink-muted">
-                                            {selected.description}
+                                    {item.description && (
+                                        <p className="mt-2 mb-0 text-sm leading-relaxed text-ink-muted">
+                                            {item.description}
                                         </p>
                                     )}
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setSelectedId(null)}
-                                    aria-label="收起"
-                                    className="shrink-0 cursor-pointer text-ink-muted/60 hover:text-ink"
-                                >
-                                    <X size={16} />
-                                </button>
-                            </div>
-                        </Card>
-                    )}
-                    {placed.length === 0 && (
-                        <EmptyState
-                            icon="🗺️"
-                            title="还没有带地点的故事"
-                            hint="记录故事时搜一个地方，它就会出现在这儿"
-                        />
-                    )}
-                </div>
-            ) : (
-                <div className="relative">
-                    <div
-                        className="absolute top-0 bottom-0 w-0.5 left-4 md:left-1/2 md:-translate-x-1/2 rounded-full bg-gradient-to-b from-accent/10 via-accent/50 to-accent/10"
-                        aria-hidden
-                    />
-                    <div className="flex flex-col gap-8">
-                        {milestones.map((item, index) => {
-                            const isLeft = index % 2 === 0;
+                                </>
+                            );
                             return (
-                                <div
+                                <li
                                     key={item.id}
-                                    className={cn(
-                                        'timeline-reveal relative pl-12 md:pl-0 md:w-1/2',
-                                        isLeft ? 'md:pr-12' : 'md:pl-12 md:ml-auto'
-                                    )}
+                                    // 大括号里不能写成表达式体：React 19 把 ref
+                                    // 回调的返回值当成 cleanup 函数，而 Map.set
+                                    // 返回 Map、delete 返回 boolean，两个都会让
+                                    // 它当场抛「Unexpected return value」。
+                                    ref={node => {
+                                        if (node) {
+                                            itemRefs.current.set(item.id, node);
+                                        } else {
+                                            itemRefs.current.delete(item.id);
+                                        }
+                                    }}
                                 >
-                                    <div
+                                    <Card
                                         className={cn(
-                                            'absolute top-5 flex h-9 w-9 items-center justify-center rounded-full border-2 border-accent bg-surface shadow-soft',
-                                            'left-0 md:left-auto',
-                                            isLeft
-                                                ? 'md:right-0 md:translate-x-1/2'
-                                                : 'md:left-0 md:-translate-x-1/2'
+                                            'transition-shadow duration-200',
+                                            active && 'ring-2 ring-accent'
                                         )}
-                                        aria-hidden
                                     >
-                                        <Heart size={14} className="text-accent" fill="currentColor" />
-                                    </div>
-                                    <Card className={cn(
-                                        'p-5 transition-all duration-300 ease-spring hover:shadow-lift hover:rotate-0 hover:-translate-y-0.5',
-                                        isLeft ? 'md:rotate-[0.6deg]' : 'md:-rotate-[0.6deg]'
-                                    )}>
-                                        <div className="font-display text-2xl font-semibold tracking-wide text-accent">
-                                            {item.date}
-                                        </div>
-                                        <h3 className="mt-2 font-display text-xl font-semibold tracking-wide text-ink mb-0">
-                                            {item.title}
-                                        </h3>
-                                        {item.description && (
-                                            <p className="mt-2 text-sm leading-loose text-ink-muted mb-0">
-                                                {item.description}
-                                            </p>
-                                        )}
-                                        {hasPlace(item) && (
+                                        {/* 只有带地点的条目可点——点没有地点的那些，地图无处可去。
+                                            用真的 button 而不是给 div 挂 onClick：键盘也要能选。 */}
+                                        {placedItem ? (
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    setView('map');
-                                                    selectOnMap(item);
-                                                }}
-                                                className="mt-3 flex cursor-pointer items-center gap-1 text-xs text-accent hover:underline"
+                                                onClick={() => selectFromList(item)}
+                                                aria-pressed={active}
+                                                className="w-full cursor-pointer rounded-lg p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
                                             >
-                                                <MapPinIcon size={12} /> 在地图上看
+                                                {body}
                                             </button>
+                                        ) : (
+                                            <div className="p-4">{body}</div>
                                         )}
                                     </Card>
-                                </div>
+                                </li>
                             );
                         })}
-                    </div>
+                    </ol>
                 </div>
             )}
         </div>

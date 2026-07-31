@@ -19,9 +19,16 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import FutureLetter, utcnow
+from app.models import Companion, CompanionPetEvent, FutureLetter, utcnow
 
 logger = logging.getLogger(__name__)
+
+#: 「有信解锁了」的待表达事件类型。与 `anniversary.due` 并列，由
+#: `anniversaries.deliver_due` 统一送达。
+LETTER_EVENT = "letter.unlocked"
+
+#: 与纪念日当天同级：一封等了一年的信到了日子，值得盖过日常闲聊。
+IMPORTANCE_UNLOCKED = 80
 
 
 @dataclass(frozen=True)
@@ -129,3 +136,76 @@ async def newly_unlocked(
         )
     )
     return [letter for letter in rows if is_unlocked(letter, moment)]
+
+
+async def announce_unlocked(
+    db: AsyncSession,
+    now: datetime | None = None,
+) -> list[str]:
+    """给刚解锁的信写一条待表达事件，让宠物去说一声。返回写了哪些。
+
+    ## 这一步原本是缺的
+
+    `newly_unlocked()` 写好了却没有任何调用方——一封信到了日子，界面上悄悄
+    多出一段正文，没有任何人被告知。一个「到时候才看得到」的功能，最要紧的
+    那一下就是**到时候那一下**，少了它整个功能等于只剩个倒计时。
+
+    ## 为什么走 CompanionPetEvent 而不是直接发 SSE
+
+    与纪念日同一条理由：这样它自动经过宠物已有的打扰预算与深夜静默，而不是
+    绕开那套约束另开一个通知渠道。送达由 `anniversaries.deliver_due` 统一做。
+
+    ## 去重靠 dedupe，不靠 openedAt
+
+    `openedAt` 的语义是「有人读过了」，只有真的去读那封信才该写。拿它当
+    「已通知」的标记会让两件事纠缠：用户没点开，宠物就每二十分钟提醒一次。
+    所以这里沿用纪念日那套 `payload.dedupe` 去重键（每封信只播报一次）。
+    """
+    moment = now or utcnow()
+    letters = await newly_unlocked(db, moment)
+    if not letters:
+        return []
+
+    companions = list(await db.scalars(select(Companion)))
+    if not companions:
+        return []
+
+    # 已播报过的键。一次查回来在内存里比对——理由同 anniversaries.scan：
+    # JSON 路径查询的语法在 SQLite 与 Postgres 之间不一致。
+    announced = {
+        str((event.payload or {}).get("dedupe", ""))
+        for event in await db.scalars(
+            select(CompanionPetEvent).where(
+                CompanionPetEvent.type == LETTER_EVENT
+            )
+        )
+    }
+
+    written: list[str] = []
+    for letter in letters:
+        dedupe = f"letter:{letter.id}"
+        if dedupe in announced:
+            continue
+        announced.add(dedupe)
+        text = "有一封写给以后的信到时候了，去看看吧。"
+        for companion in companions:
+            db.add(
+                CompanionPetEvent(
+                    companion_id=companion.id,
+                    type=LETTER_EVENT,
+                    payload={
+                        "dedupe": dedupe,
+                        "letterId": letter.id,
+                        "text": text,
+                        # 拆信是件值得停下来的事，允许它像纪念日当天那样张扬一点
+                        "urgent": True,
+                    },
+                    importance=IMPORTANCE_UNLOCKED,
+                )
+            )
+        written.append(letter.id)
+
+    if written:
+        await db.commit()
+        logger.info("情书解锁播报 %s 封", len(written))
+    return written

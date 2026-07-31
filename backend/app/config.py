@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     attachment_max_workbook_rows: int = 20_000
     attachment_max_workbook_cells: int = 200_000
 
+    #: 这两个人所在的时区。**所有「今天」「深夜」都按它算，不按容器时区算。**
+    #: 容器跑在 UTC，改这个不需要动容器；详见 app/localtime.py。
+    site_timezone: str = "Asia/Shanghai"
+
     outbox_poll_seconds: float = 1.0
     outbox_retention_days: int = Field(default=7, ge=1, le=90)
     cors_origins: list[str] = ["http://localhost:3000"]

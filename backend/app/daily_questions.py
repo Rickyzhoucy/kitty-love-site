@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.localtime import local_today
 from app.models import DailyAnswer, DailyQuestion
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ async def ensure_today(db: AsyncSession, today: date | None = None) -> DailyQues
     并发下两个请求可能同时判断『不存在』——靠 `date` 的唯一约束兜底：
     后写入的那个捕获 `IntegrityError`，回滚后重新查一次即可，不需要显式加锁。
     """
-    today = today or date.today()
+    today = today or local_today()
     iso = today.isoformat()
     existing = await db.scalar(select(DailyQuestion).where(DailyQuestion.date == iso))
     if existing is not None:

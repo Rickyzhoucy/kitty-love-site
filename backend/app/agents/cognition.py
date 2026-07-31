@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -96,6 +96,13 @@ class CognitionInput:
     #: 有了它，主动搭话才能从「你很久没互动了」变成「有事说事」（计划文档 §2.4）。
     #: **宠物只知道对方标了什么，不知道为什么**——可以关心，不可以推断原因。
     partner_mood: str | None = None
+    #: 近期纪念日，人话形式（"还有 3 天：恋爱一周年"）。
+    #:
+    #: 与 `anniversary.due` 那条提醒是两回事：那条是**到点了通知**，走
+    #: CompanionPetEvent → pet.action，一天最多响一次；这里是**背景知识**，
+    #: 让宠物在别的话题里也知道「快到日子了」。没有它，宠物在纪念日前一周
+    #: 主动搭话只能说「你很久没理我了」，而不是「快到日子了要不要准备点什么」。
+    upcoming_anniversaries: list[str] = field(default_factory=list)
 
 
 def _strip_fence(raw: str) -> str:
@@ -153,6 +160,7 @@ def build_prompt(payload: CognitionInput) -> str:
         f"相关长期记忆：\n{memories}\n"
         f"当前任务：{payload.active_task or '无'}\n"
         f"对方今天的心情：{payload.partner_mood or '今天还没打卡'}\n"
+        f"近期纪念日：{'、'.join(payload.upcoming_anniversaries) or '最近没有'}\n"
         f"今天还能主动打扰的次数：{payload.proactive_budget_left}\n"
     )
 

@@ -9,12 +9,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.localtime import local_today
 from app.models import MoodEntry
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ async def upsert(
     心情会变，下午改一次很正常；插入新记录的话同一天就有两个值，曲线不知道
     该画哪个。并发下靠 `(userId, date)` 唯一约束兜底。
     """
-    iso = day or datetime.now(UTC).date().isoformat()
+    iso = day or local_today().isoformat()
     existing = await db.scalar(
         select(MoodEntry).where(
             MoodEntry.user_id == user_id,
@@ -85,7 +86,7 @@ async def history(
     user_id: str,
     window_days: int = DEFAULT_WINDOW_DAYS,
 ) -> list[MoodEntry]:
-    since = (datetime.now(UTC).date() - timedelta(days=window_days)).isoformat()
+    since = (local_today() - timedelta(days=window_days)).isoformat()
     return list(
         await db.scalars(
             select(MoodEntry)
@@ -100,7 +101,7 @@ async def entry_for(
     user_id: str,
     day: date | None = None,
 ) -> MoodEntry | None:
-    iso = (day or datetime.now(UTC).date()).isoformat()
+    iso = (day or local_today()).isoformat()
     return await db.scalar(
         select(MoodEntry).where(MoodEntry.user_id == user_id, MoodEntry.date == iso)
     )

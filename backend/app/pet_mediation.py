@@ -32,6 +32,7 @@ from datetime import datetime, time, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.localtime import to_local
 from app.models import DirectMessage, PetInterjection, utcnow
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,14 @@ NUDGE_TEMPLATES: tuple[str, ...] = (
     "我就提醒到这里，你忙完再看。",
 )
 
-#: 替你答的话。说给**对方**听——每一句都只陈述事实或提出宠物自己能做的事，
-#: 一句都不许编造原因。顺序即优先级。
+#: 替你答的话。说给**对方**听——只陈述事实，一句都不许编造原因。
+#:
+#: 这里原本有三条，配套一个「宠物给出几个可点选项」的交互（`standin_options()`
+#: 加聊天页的一排按钮）。那个交互从来没有落地，于是后两条从写下起就没被读过，
+#: 而注释还写着「三句一起给」——比没有注释更糟。现在只留真的会说出口的那句。
+#: 要加回选项，先把前端做出来，再一起加。
 STANDIN_TEMPLATES: tuple[tuple[InterjectionKind, str], ...] = (
     ("standin", "他还没看到呢。"),
-    ("standin", "要我去催催吗？"),
-    ("company", "要不要先跟我玩会儿？"),
 )
 
 
@@ -75,9 +78,14 @@ class NudgeDecision:
 
 
 def in_quiet_hours(now: datetime) -> bool:
-    """深夜时段。跨零点，所以是「晚于起点 或 早于终点」。"""
+    """深夜时段。跨零点，所以是「晚于起点 或 早于终点」。
+
+    **先换算到站点本地时区再取小时。** 直接拿 `now.time()` 比的话，传进来的
+    是 `utcnow()`（容器跑在 UTC），23:00–08:00 就变成了本地的 07:00–16:00
+    ——宠物白天一天不说话、后半夜反倒活跃，症状完全反过来。见 localtime 模块。
+    """
     start, end = QUIET_HOURS
-    current = now.time()
+    current = to_local(now).time()
     return current >= start or current < end
 
 
@@ -139,8 +147,6 @@ def decide_standin(
     if waited < STANDIN_AFTER_MINUTES:
         return False, "", "", f"未读 {waited:.0f} 分钟，还没到 {STANDIN_AFTER_MINUTES}"
 
-    # 三句一起给：陈述事实 + 提供动作 + 转移陪伴。前端一次展示，
-    # 对方可以点「要我去催催吗」触发一次更显眼的提醒。
     kind, body = STANDIN_TEMPLATES[0]
     return True, kind, body, f"未读 {waited:.0f} 分钟且对方在等"
 
@@ -258,13 +264,3 @@ async def run_mediation(
     return created
 
 
-def standin_options() -> list[dict[str, str]]:
-    """代答时一并给出的选项。供前端渲染成可点的按钮。"""
-    return [{"kind": kind, "body": body} for kind, body in STANDIN_TEMPLATES]
-
-
-def next_nudge_at(unread_since: datetime, already_nudged: int) -> datetime | None:
-    """下一次该催的时刻。仅供调试与日志。"""
-    if already_nudged >= len(NUDGE_SCHEDULE_MINUTES):
-        return None
-    return unread_since + timedelta(minutes=NUDGE_SCHEDULE_MINUTES[already_nudged])

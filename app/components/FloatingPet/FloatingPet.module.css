@@ -423,7 +423,7 @@
   border: 1px solid var(--color-sunken);
   border-radius: var(--radius-sm);
   color: var(--color-ink);
-  background: var(--color-base);
+  background: var(--color-canvas);
   outline: none;
 }
 

@@ -113,7 +113,7 @@ async def test_failed_reflection_keeps_events_for_next_time(session_maker):
     """反思失败不能把事件标记成已处理——那等于悄悄丢掉它们。"""
     companion_id = await _companion(session_maker)
     async with session_maker() as db:
-        await record_event(db, companion_id, "user.sentiment", {"mood": "低落"}, 80)
+        await record_event(db, companion_id, "wish.completed", {"title": "去看海"}, 80)
         await db.commit()
 
     async with session_maker() as db:
@@ -139,8 +139,10 @@ async def test_pending_count_matches_what_reflection_can_actually_consume(
     async with session_maker() as db:
         for _ in range(3):
             await record_event(db, companion_id, "interaction.milestone", {}, 80)
+        # 类型不在白名单里 → 不算
         await record_event(db, companion_id, "tool.completed", {}, 99)
-        await record_event(db, companion_id, "user.sentiment", {}, 10)
+        # 类型对但重要度不够 → 也不算。两道关卡各测一条。
+        await record_event(db, companion_id, "wish.completed", {}, 10)
         await db.commit()
 
         assert await pending_count(db, companion_id) == 3

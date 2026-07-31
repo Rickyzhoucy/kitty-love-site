@@ -23,7 +23,7 @@
       color-mix(in oklch, var(--color-secondary-soft), transparent 55%),
       transparent 60%
     ),
-    var(--color-base);
+    var(--color-canvas);
 }
 
 /* ── 侧栏：一叠信 ───────────────────────────────────────── */

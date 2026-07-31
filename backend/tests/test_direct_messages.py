@@ -19,6 +19,7 @@ from app.direct_messages import (
     send_message,
     unread_count,
 )
+from app.localtime import site_zone
 from app.models import DirectMessage, PetInterjection, User
 from app.pet_mediation import (
     NUDGE_SCHEDULE_MINUTES,
@@ -168,9 +169,19 @@ def test_quiet_and_off_suppress_the_bubble(initiative):
     assert initiative in decision.reason
 
 
+def _at_local(hour: int, minute: int = 0) -> datetime:
+    """**当地**某个钟点，返回带时区的时刻。
+
+    这些用例必须按当地钟点写。原先它们直接传 UTC，于是在东八区跑出来的语义是
+    「UTC 的深夜」——测试和实现一起错，两边对上了，谁都发现不了宠物其实是
+    白天不说话、后半夜活跃。
+    """
+    return datetime(2026, 7, 30, hour, minute, tzinfo=site_zone())
+
+
 @pytest.mark.parametrize("hour", [23, 2, 6])
 def test_deep_night_is_silent(hour):
-    night = datetime(2026, 7, 30, hour, 30, tzinfo=UTC)
+    night = _at_local(hour, 30)
     assert in_quiet_hours(night) is True
     decision = decide_nudge(night - timedelta(hours=1), 0, night)
     assert decision.should_nudge is False
@@ -179,7 +190,20 @@ def test_deep_night_is_silent(hour):
 
 @pytest.mark.parametrize("hour", [9, 14, 20])
 def test_daytime_is_not_silent(hour):
-    assert in_quiet_hours(datetime(2026, 7, 30, hour, tzinfo=UTC)) is False
+    assert in_quiet_hours(_at_local(hour)) is False
+
+
+def test_quiet_hours_follow_the_couple_not_the_server():
+    """同一个**时刻**，在当地是深夜就该静默——哪怕它在 UTC 是大白天。
+
+    这条是上面那组的守门人：把 `in_quiet_hours` 改回直接读 `now.time()`，
+    上面两组仍会通过（它们传的是带时区的当地时间，`.time()` 恰好对），
+    只有这条会挂。
+    """
+    local_midnight = _at_local(1)
+    assert in_quiet_hours(local_midnight) is True
+    # 同一时刻换成 UTC 表示，结论必须不变
+    assert in_quiet_hours(local_midnight.astimezone(UTC)) is True
 
 
 def test_no_unread_means_nothing_to_say():

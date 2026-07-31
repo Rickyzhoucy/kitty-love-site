@@ -6,6 +6,7 @@ import { Check, Plane, Plus, ShoppingBag, Trash2, Utensils } from 'lucide-react'
 import Card from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import { useToast } from '../components/ui/Toast';
+import { recordPetEvent } from '@/lib/api/petCognition';
 import { wishesApi, type Wish, type WishCategory } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
@@ -76,7 +77,14 @@ export default function WishSection() {
             current.map(item => (item.id === wish.id ? { ...item, completedAt } : item)));
         try {
             await wishesApi.update(wish.id, { completedAt });
-            if (completedAt) toast('又做到一件 🎉');
+            if (completedAt) {
+                toast('又做到一件 🎉');
+                // 「一起做到了一件想做的事」正是值得沉淀成共同记忆的那类事。
+                // `wish.completed` 在 reflection 的白名单里挂着一直没有生产者
+                // ——白名单里有、没人发，等于这条记忆永远不会出现。
+                // 重要度给高：想做的事清单上划掉一条，半年后回头看仍然算数。
+                void recordPetEvent('wish.completed', { title: wish.title }, 75);
+            }
         } catch {
             setWishes(previous);
             toast('操作失败，请重试', 'error');

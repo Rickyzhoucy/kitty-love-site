@@ -104,42 +104,11 @@
     gap: 0.5rem;
 }
 
-.currentTag {
-    font-size: 0.7rem;
-    background: var(--color-secondary-soft);
-    color: var(--color-secondary);
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-    font-weight: 500;
-}
-
-.meta {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    margin-top: 0.4rem;
-}
-
 .badge {
     font-size: 0.75rem;
     padding: 0.2rem 0.5rem;
     border-radius: 4px;
     font-weight: 500;
-}
-
-.approved {
-    background: color-mix(in oklch, var(--color-success), white 88%);
-    color: var(--color-success);
-}
-
-.pending {
-    background: var(--color-sunken);
-    color: #FB8C00;
-}
-
-.rejected {
-    background: color-mix(in oklch, var(--color-danger), white 90%);
-    color: var(--color-danger);
 }
 
 .date {
@@ -160,36 +129,6 @@
     transition: all 0.2s;
 }
 
-.approveBtn {
-    background: color-mix(in oklch, var(--color-success), white 88%);
-    color: var(--color-success);
-}
-
-.approveBtn:hover {
-    background: var(--color-success);
-    color: var(--color-on-accent);
-}
-
-.rejectBtn {
-    background: color-mix(in oklch, var(--color-danger), white 90%);
-    color: var(--color-danger);
-}
-
-.rejectBtn:hover {
-    background: var(--color-danger);
-    color: var(--color-on-accent);
-}
-
-.passwordBtn {
-    background: var(--color-secondary-soft);
-    color: var(--color-secondary);
-}
-
-.passwordBtn:hover {
-    background: var(--color-secondary);
-    color: var(--color-on-secondary);
-}
-
 .deleteBtn {
     background: color-mix(in oklch, var(--color-danger), white 90%);
     color: var(--color-danger);
@@ -198,59 +137,6 @@
 .deleteBtn:hover {
     background: var(--color-danger);
     color: var(--color-on-accent);
-}
-
-/* Modal */
-.modalOverlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 1rem;
-}
-
-.modal {
-    background: var(--color-surface);
-    padding: 2rem;
-    border-radius: 16px;
-    max-width: 400px;
-    width: 100%;
-}
-
-.modal h3 {
-    margin: 0 0 0.5rem;
-    color: var(--color-ink);
-}
-
-.modal p {
-    margin: 0 0 1.5rem;
-    color: var(--color-ink-muted);
-}
-
-.modalInput {
-    width: 100%;
-    padding: 0.8rem 1rem;
-    border: 2px solid var(--color-sunken);
-    border-radius: 10px;
-    font-size: 1rem;
-    outline: none;
-    margin-bottom: 1.5rem;
-}
-
-.modalInput:focus {
-    border-color: var(--color-accent);
-}
-
-.modalActions {
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
 }
 
 .cancelBtn {

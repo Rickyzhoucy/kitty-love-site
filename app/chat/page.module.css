@@ -15,7 +15,7 @@
   height: calc(100dvh - 6rem);
   grid-template-rows: auto 1fr auto;
   overflow: hidden;
-  background: var(--color-base);
+  background: var(--color-canvas);
 }
 
 .header {
@@ -153,27 +153,6 @@
   letter-spacing: 0.08em;
 }
 
-.interjectionActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.interjectionActions button {
-  padding: 5px 12px;
-  border: 1px solid color-mix(in oklch, var(--color-accent) 40%, transparent);
-  border-radius: 999px;
-  color: var(--color-accent-strong);
-  background: var(--color-surface);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.interjectionActions button:hover {
-  background: var(--color-accent-soft);
-}
-
 /* 附件：比对话本紧凑，无拍立得白边 */
 .attachedRow {
   display: flex;
@@ -261,9 +240,65 @@
 
 /* 输入区 */
 .composerWrap {
+  position: relative;
   border-top: 1px solid color-mix(in oklch, var(--color-ink), transparent 92%);
   background: color-mix(in oklch, var(--color-surface), transparent 15%);
   backdrop-filter: blur(12px);
+}
+
+/* 打 @ 弹出的候选。贴着输入区上沿往上开——往下开会被底部导航压住。 */
+.mentionMenu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: clamp(16px, 5vw, 48px);
+  z-index: 5;
+  width: min(280px, calc(100vw - 32px));
+  padding: 4px;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 88%);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lift);
+}
+
+.mentionItem {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mentionItem[aria-selected='true'] {
+  background: var(--color-accent-soft);
+}
+
+.mentionItem span:first-child {
+  flex: none;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.mentionName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mentionHint {
+  flex: none;
+  color: var(--color-ink-muted);
+  font-size: 11px;
 }
 
 .dropping {

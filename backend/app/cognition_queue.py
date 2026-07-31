@@ -14,8 +14,11 @@ import heapq
 import itertools
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+
+from app.localtime import to_local
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +106,16 @@ class BudgetState:
     daily_call_count: int = 0
     #: 主动搭话被推开的比例。上去了就自动降频——不需要用户去设置里关。
     user_dismissal_rate: float = 0.0
+    #: 当前这一天的编号（本地日期的 `toordinal()`）。跨天时两个 daily 计数清零。
+    #:
+    #: **这个字段修的是一个真的会让宠物哑掉的 bug。** 原本有个 `reset_daily()`
+    #: 方法，但整个代码库里没有一处调用它——队列是进程内的，计数于是从进程启动
+    #: 起只增不减。跑够 `DAILY_CALL_BUDGET` 次之后，`submit()` 就永远返回
+    #: `DAILY_BUDGET`：宠物不是今天不说话了，是**在这个进程重启前再也不说话了**。
+    #:
+    #: 改成随时间自己翻篇，而不是再补一个「谁来按时调 reset」的定时任务——
+    #: 那等于把同一个「忘了接上」的坑再挖一遍。
+    day_ordinal: int = 0
 
 
 #: 每日模型调用上限（所有类型合计）。
@@ -165,6 +178,7 @@ class CognitionQueue:
 
         拒绝是常态而不是异常——这个队列大部分时间在说「不」。
         """
+        self.roll_over(now)
         if trigger and is_forbidden_trigger(trigger):
             return RejectReason.FORBIDDEN
         if request.expires_at and request.expires_at <= now:
@@ -218,14 +232,28 @@ class CognitionQueue:
 
     def record_call(self, request: CognitionRequest, now: float) -> None:
         """记一次实际发生的模型调用。预算只在真的调了之后才扣。"""
+        self.roll_over(now)
         self.budget.daily_call_count += 1
         if request.type is CognitionType.PROACTIVE_THOUGHT:
             self.budget.daily_proactive_count += 1
             self.budget.last_proactive_at = now
 
-    def reset_daily(self) -> None:
+    def roll_over(self, now: float) -> bool:
+        """跨天就把两个 daily 计数清零。返回是否真的翻了篇。
+
+        在 `submit` 与 `record_call` 的**开头**调用，也就是每一次可能读写预算
+        之前——只在其中一处调的话，另一处就会拿到上一天的余额做判断。
+
+        按**站点本地日期**翻篇，不按 UTC：预算是「今天还能打扰几次」，这个
+        「今天」和用户墙上那只钟是同一个（见 localtime 模块）。
+        """
+        today = to_local(datetime.fromtimestamp(now, UTC)).date().toordinal()
+        if today == self.budget.day_ordinal:
+            return False
+        self.budget.day_ordinal = today
         self.budget.daily_call_count = 0
         self.budget.daily_proactive_count = 0
+        return True
 
     def __len__(self) -> int:
         return sum(1 for _, _, item in self._heap if not item.cancelled)

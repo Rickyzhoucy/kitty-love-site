@@ -10,11 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.conversation import build_agent, build_chat_model
 from app.agents.reflection import ReflectionAgent, companions_with_pending
 from app.agents.roles import AgentRole
-from app.anniversaries import deliver_due, scan_anniversaries
+from app.anniversaries import ANNIVERSARY_EVENT, deliver_due, scan_anniversaries
 from app.attachment_processing import extract_text, thumbnail_webp
 from app.config import get_settings
 from app.db import session_factory
 from app.embeddings import OpenAICompatibleEmbeddingProvider
+from app.future_letters import LETTER_EVENT, announce_unlocked
 from app.memory import MemoryService
 from app.models import (
     Attachment,
@@ -310,25 +311,37 @@ async def handle_reflection(
         return await ReflectionAgent(model, memory).reflect(db, companion)
 
 
+#: 会被 `anniversary.deliver` 念出来的事件类型。
+#:
+#: 新增一种「到点了该说一声」的东西时，**要加进这里**——否则它会像纪念日和
+#: 情书当初那样，事件安安静静写进表里，没有任何人读，功能看起来做完了其实
+#: 一次都没生效过。
+DELIVERABLE_EVENTS = frozenset({ANNIVERSARY_EVENT, LETTER_EVENT})
+
+
 @procrastinate_app.periodic(cron="7 1 * * *")
 @procrastinate_app.task(name="anniversary.scan", queue="companion")
 async def scan_anniversaries_daily(timestamp: int) -> None:
-    """每天扫一遍纪念日，到点的写成待表达事件（计划文档 §2.2）。
+    """每天扫一遍纪念日和刚解锁的情书，到点的写成待表达事件（计划文档 §2.2）。
 
     凌晨 1:07 跑：那时候不会和用户抢，写下的事件等人回到站上自然会被念出来。
     不直接推送——事件要经过宠物的打扰预算，才不会绕开安静模式。
+    （容器时区见 compose 里的 TZ：不设的话这行 cron 实际跑在早上九点。）
     """
     del timestamp
     async with session_factory() as db:
         written = await scan_anniversaries(db)
+        letters = await announce_unlocked(db)
     if written:
         logger.info("今日纪念日提醒：%s", "；".join(written))
+    if letters:
+        logger.info("今日解锁情书：%s 封", len(letters))
 
 
 @procrastinate_app.periodic(cron="*/20 8-22 * * *")
 @procrastinate_app.task(name="anniversary.deliver", queue="companion")
 async def deliver_anniversaries(timestamp: int) -> None:
-    """把扫出来的纪念日提醒送到宠物嘴里（anniversaries.deliver_due 有详细说明）。
+    """把扫出来的到点提醒送到宠物嘴里（anniversaries.deliver_due 有详细说明）。
 
     与扫描分开、且**只在白天跑**：扫描凌晨 1:07 做完，那个点推送出去没人看得到，
     而送达即标记已处理，等于白白丢掉。8 点到 22 点每 20 分钟看一次，人回到站上
@@ -336,7 +349,7 @@ async def deliver_anniversaries(timestamp: int) -> None:
     """
     del timestamp
     async with session_factory() as db:
-        await deliver_due(db)
+        await deliver_due(db, types=DELIVERABLE_EVENTS)
 
 
 @procrastinate_app.periodic(cron="23 4 * * *")

@@ -33,6 +33,13 @@ export interface AmapOverlay {
     setMap?(map: AmapMap | null): void;
 }
 
+/**
+ * 高德没有官方 @types，成员是就地声明的——**只声明亲手验证过存在的**。
+ *
+ * 这里曾经加过 `setAnimation` / `setzIndex`，照着文档写的，结果运行时是
+ * `e.setAnimation is not a function`，整个页面白屏。手写的类型声明没有任何
+ * 编译期保护：TS 说有，不代表 SDK 真的有。要用新方法，先在浏览器里调一次。
+ */
 export interface AmapMarker extends AmapOverlay {
     setPosition(position: [number, number]): void;
     on(event: string, handler: () => void): void;

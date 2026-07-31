@@ -42,11 +42,16 @@ MEANINGFUL_TYPES = frozenset(
         "proactive.dismissed",       # 主动搭话被推开了（FloatingPet）
         "task.highRisk",             # 高风险操作完成（agents/conversation）
         "dailyQuestion.completed",   # 两人都答完了每日一问（api）
-        "wish.completed",            # 预留：一起做到了一件想做的事
-        "interaction.longSession",   # 预留：罕见的长时间陪伴
-        "user.sentiment",            # 预留：明确的情绪表达
+        "wish.completed",            # 一起做到了一件想做的事（plan/WishSection）
     }
 )
+
+#: 每一项后面的括号是**生产者**，不是说明文字。
+#:
+#: 这张表原来还挂着 `interaction.longSession` 和 `user.sentiment`，注释写着
+#: 「预留」。白名单里有、没有任何地方发，等于这两类记忆永远不会出现——而看
+#: 代码的人会以为它们在工作。要加新类型，先把发的那一端写好，再加进来；
+#: 括号里填不出生产者，就说明还不该加。
 
 #: **刻意不进记忆的事件**，写在这里是为了让「为什么没有它」有据可查——
 #: 否则下一个人只会看到白名单里没有，以为是漏了。
@@ -110,10 +115,6 @@ def _message_text(response) -> str:
         )
     return str(content)
 
-
-def is_meaningful(event: CompanionPetEvent) -> bool:
-    """事件够不够格进入反思。两道关卡都得过。"""
-    return event.type in MEANINGFUL_TYPES and event.importance >= IMPORTANCE_FLOOR
 
 
 async def pending_events(

@@ -10,6 +10,22 @@ from app.models import OutboxEvent, utcnow
 
 outbox_poll_lock = asyncio.Lock()
 
+#: 所有 SSE 响应共用的响应头。**每一条都是必需的，不要精简。**
+#:
+#: `no-transform` 尤其容易被当成冗余删掉，它恰恰是最关键的一条：前端同源访问
+#: 走的是 Next.js 的 rewrite 代理，而 Next 默认对 `text/*` 开 gzip。压缩层要攒
+#: 够一个块才吐，于是这条流在代理后面变成「连接是开的、readyState=1、一个事件
+#: 都不来」——症状不像是坏了，只像是没人说话。实测：直连 API 361ms 到达，走代理
+#: 等 60 秒也收不到。`compression` 中间件唯一认的关闭开关就是 `no-transform`。
+#:
+#: `X-Accel-Buffering` 管的是 nginx 那一层，与上面那条是两套独立的缓冲，
+#: 少给一条就会在对应的部署形态下重现同一个症状。
+SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
 
 def encode_sse(event: OutboxEvent) -> str:
     data = json.dumps(event.payload, ensure_ascii=False, separators=(",", ":"))

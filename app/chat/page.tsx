@@ -37,6 +37,15 @@ import styles from './page.module.css';
 
 const MAX_PENDING = 8;
 
+/**
+ * 光标前那个还没打完的 `@xxx`。
+ *
+ * 只认**紧挨光标**的那一段，且不含空格与第二个 @：写完一个 @宠物 之后继续
+ * 打字，候选就该消失，而不是一直挂在那儿。长度设上限是因为超过这个长度显然
+ * 已经不是在打名字了（比如一个邮箱地址）。
+ */
+const MENTION_AT_CARET = /@([^\s@]{0,24})$/;
+
 function isImage(attachment: Attachment): boolean {
     return attachment.contentType.startsWith('image/');
 }
@@ -91,8 +100,11 @@ export default function ChatPage() {
     const [error, setError] = useState<string | null>(null);
     const [attachmentCache, setAttachmentCache] = useState<Record<string, Attachment>>({});
     const [zoomed, setZoomed] = useState<LightboxImage | null>(null);
+    /** 光标前那段 `@` 后面的字；null 表示光标不在一个 @ 里，候选不该出现。 */
+    const [mentionQuery, setMentionQuery] = useState<string | null>(null);
     const threadRef = useRef<HTMLDivElement | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const composerRef = useRef<HTMLTextAreaElement | null>(null);
     const { pet } = usePet();
 
     const petEmoji = PET_ASSETS.find(asset => asset.id === pet?.assetId)?.emoji ?? '🐾';
@@ -204,6 +216,42 @@ export default function ChatPage() {
             setSending(false);
         }
     };
+
+    /**
+     * 候选是否该出现。名字是用户能随时改的，所以这里**只认当前的宠物名**，
+     * 外加两个通用叫法——后端 chat_assist.GENERIC_MENTIONS 认的就是这两个，
+     * 两边必须一致，否则这里提示能打的东西后端不认。
+     */
+    const mentionMatches =
+        mentionQuery !== null
+        && [petName, '宠物', 'pet'].some(alias =>
+            alias.toLowerCase().startsWith(mentionQuery.toLowerCase()))
+            ? [{ name: petName, emoji: petEmoji }]
+            : [];
+
+    /** 光标动了就重新判断——只在 onChange 里判断的话，用方向键移出去候选会赖着不走。 */
+    const syncMention = useCallback((element: HTMLTextAreaElement) => {
+        const upto = element.value.slice(0, element.selectionStart);
+        setMentionQuery(MENTION_AT_CARET.exec(upto)?.[1] ?? null);
+    }, []);
+
+    /** 选中候选：把光标前那截 `@半截名字` 换成完整的 `@名字 `。 */
+    const applyMention = useCallback(() => {
+        const element = composerRef.current;
+        if (!element) return;
+        const caret = element.selectionStart;
+        const start = element.value.slice(0, caret).lastIndexOf('@');
+        if (start < 0) return;
+        const inserted = `@${petName} `;
+        setDraft(element.value.slice(0, start) + inserted + element.value.slice(caret));
+        setMentionQuery(null);
+        // setDraft 之后 DOM 还是旧值，得等这一帧渲染完再放光标
+        requestAnimationFrame(() => {
+            element.focus();
+            const position = start + inserted.length;
+            element.setSelectionRange(position, position);
+        });
+    }, [petName]);
 
     const renderAttachments = (ids: string[]) => {
         const resolved = ids.map(id => attachmentCache[id]).filter(Boolean);
@@ -360,6 +408,30 @@ export default function ChatPage() {
                     void addFiles(event.dataTransfer.files);
                 }}
             >
+                {mentionMatches.length > 0 && (
+                    <div className={styles.mentionMenu} role="listbox" aria-label="可以叫的">
+                        {mentionMatches.map(candidate => (
+                            <button
+                                key={candidate.name}
+                                type="button"
+                                role="option"
+                                aria-selected="true"
+                                className={styles.mentionItem}
+                                // onMouseDown 而不是 onClick：textarea 的 blur 会先关掉
+                                // 这个菜单，等到 click 时按钮已经不在了。
+                                onMouseDown={event => {
+                                    event.preventDefault();
+                                    applyMention();
+                                }}
+                            >
+                                <span aria-hidden="true">{candidate.emoji}</span>
+                                <span className={styles.mentionName}>{candidate.name}</span>
+                                <span className={styles.mentionHint}>就着聊天记录帮个忙</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+
                 {pending.length > 0 && (
                     <div className={styles.pendingRow}>
                         {pending.map(item => (
@@ -408,8 +480,14 @@ export default function ChatPage() {
                         {uploading ? '⏳' : '＋'}
                     </button>
                     <textarea
+                        ref={composerRef}
                         value={draft}
-                        onChange={event => setDraft(event.target.value)}
+                        onChange={event => {
+                            setDraft(event.target.value);
+                            syncMention(event.target);
+                        }}
+                        onClick={event => syncMention(event.currentTarget)}
+                        onBlur={() => setMentionQuery(null)}
                         onPaste={event => {
                             const files = Array.from(event.clipboardData.files);
                             if (!files.length) return;
@@ -417,12 +495,32 @@ export default function ChatPage() {
                             void addFiles(files);
                         }}
                         onKeyDown={event => {
+                            // 候选开着的时候，回车是「选它」而不是「发出去」——
+                            // 否则每次 @ 都会把半截名字当成消息发走。
+                            if (mentionMatches.length > 0) {
+                                if (event.key === 'Enter' || event.key === 'Tab') {
+                                    event.preventDefault();
+                                    applyMention();
+                                    return;
+                                }
+                                if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    setMentionQuery(null);
+                                    return;
+                                }
+                            }
                             if (event.key === 'Enter' && !event.shiftKey) {
                                 event.preventDefault();
                                 void send();
+                                return;
+                            }
+                            // 方向键移动光标后 selectionStart 才更新，所以推到下一帧再看
+                            if (event.key.startsWith('Arrow') || event.key === 'Backspace') {
+                                const element = event.currentTarget;
+                                requestAnimationFrame(() => syncMention(element));
                             }
                         }}
-                        placeholder={dragging ? '松手就带上它' : '说点什么…'}
+                        placeholder={dragging ? '松手就带上它' : `说点什么…（打 @ 可以叫${petName}）`}
                         aria-label="消息内容"
                         rows={1}
                     />

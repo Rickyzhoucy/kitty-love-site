@@ -33,16 +33,6 @@ class SearchHit:
     snippet: str
     published_at: str | None = None
 
-    def as_dict(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "title": self.title,
-            "url": self.url,
-            "snippet": self.snippet,
-        }
-        if self.published_at:
-            payload["publishedAt"] = self.published_at
-        return payload
-
 
 class SearchProvider(Protocol):
     name: str
