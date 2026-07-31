@@ -15,6 +15,7 @@ import { recordPetEvent } from '@/lib/api/petCognition';
 import { uploadAttachment, type Attachment } from '@/lib/api/attachments';
 import { ApiError } from '@/lib/api/client';
 import { useChatNudge } from '../ChatMediationProvider';
+import DailyRitualPanel from '../DailyRitualPanel';
 import styles from './FloatingPet.module.css';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
 import type { PetInitiative } from './petBodyProtocol';
@@ -66,6 +67,7 @@ export default function FloatingPet() {
     const [menuType, setMenuType] = useState<MenuType>('none');
     const [speech, setSpeech] = useState<string | null>(null);
     const [chatOpen, setChatOpen] = useState(false);
+    const [ritualOpen, setRitualOpen] = useState(false);
     const [chatInput, setChatInput] = useState('');
     const [sending, setSending] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -397,6 +399,12 @@ export default function FloatingPet() {
                 </section>
             )}
 
+            {ritualOpen && (
+                <div className={styles.ritualPanel}>
+                    <DailyRitualPanel onClose={() => setRitualOpen(false)} />
+                </div>
+            )}
+
             {speech && (
                 <div className={styles.speech} role="status">
                     <span>{speech}</span>
@@ -433,6 +441,12 @@ export default function FloatingPet() {
                             <button type="button" className={styles.tile}
                                 onClick={() => { setChatOpen(true); setMenuType('none'); }}>
                                 <span aria-hidden="true">💬</span>说句话
+                            </button>
+                            {/* 一问 / 心情 / 情书。三个都是每天最多碰一次的小事，
+                                原本各占一个导航 tab，把真正常用的东西挤没了。 */}
+                            <button type="button" className={styles.tile}
+                                onClick={() => { setRitualOpen(true); setMenuType('none'); }}>
+                                <span aria-hidden="true">🗓️</span>今天
                             </button>
                             <Link href="/companion" className={styles.tile} onClick={() => setMenuType('none')}>
                                 <span aria-hidden="true">📖</span>对话本

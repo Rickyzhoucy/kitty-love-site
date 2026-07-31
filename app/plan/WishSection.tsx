@@ -1,7 +1,6 @@
-"use client";
+'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Plane, Plus, ShoppingBag, Trash2, Utensils } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -14,8 +13,9 @@ import { cn } from '@/lib/utils';
 /**
  * 心愿 = 想一起做但没有期限的事。
  *
- * 由旧「备忘」的三个分类（想去吃 / 想去玩 / 想买的）演化而来。与「计划」的
- * 区别不是重要程度，是**有没有期限**：计划会催你，心愿只是攒着，做到了留个念想。
+ * 与「计划」的区别不是重要程度，是**有没有期限**：计划会催你，心愿只是攒着，
+ * 做到了留个念想。所以它们同页不同栏——原本是两个页面，而「心愿」那个甚至
+ * 不在导航里，只能从计划页的一个链接进去，等于没人找得到。
  */
 
 const CATEGORIES: { id: WishCategory; label: string; icon: typeof Utensils; watermark: string }[] = [
@@ -34,7 +34,7 @@ function doneLabel(iso: string): string {
     });
 }
 
-export default function WishPage() {
+export default function WishSection() {
     const [wishes, setWishes] = useState<Wish[]>([]);
     const [text, setText] = useState('');
     const [category, setCategory] = useState<WishCategory>('to-eat');
@@ -97,24 +97,12 @@ export default function WishPage() {
     const doneCount = wishes.filter(item => item.completedAt).length;
 
     return (
-        <div className="mx-auto max-w-6xl px-4 py-6">
-            <header className="mb-8 pt-2 animate-fade-up">
-                <p className="m-0 text-[11px] font-semibold uppercase tracking-[0.4em] text-accent">
-                    Wish List
-                </p>
-                <h1 className="m-0 mt-3 font-display text-5xl md:text-7xl font-semibold leading-[1.05] tracking-wide">
-                    <span className="text-ink">想一起做的</span>
-                    <span className="text-stroke-accent">事</span>
-                </h1>
-                <p className="mb-0 mt-4 text-sm text-ink-muted md:text-base">
-                    {doneCount > 0
-                        ? `已经一起做到 ${doneCount} 件了。`
-                        : '没有期限，攒着慢慢来。'}
-                    <Link href="/plan" className="ml-1 text-accent underline underline-offset-2">
-                        有期限的去计划 →
-                    </Link>
-                </p>
-            </header>
+        <div>
+            <p className="mb-5 mt-0 text-sm text-ink-muted">
+                {doneCount > 0
+                    ? `已经一起做到 ${doneCount} 件了。`
+                    : '没有期限，攒着慢慢来。'}
+            </p>
 
             <Card className="mb-8 p-5 md:p-6">
                 <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="心愿分类">

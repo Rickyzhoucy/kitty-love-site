@@ -55,6 +55,18 @@ export interface Milestone {
     title: string;
     description: string;
     createdAt: string;
+    /** GCJ-02 纬度。与 lng 同时为 null 表示这件事没有地点。 */
+    lat: number | null;
+    /** GCJ-02 经度 */
+    lng: number | null;
+    photoIds: string[];
+}
+
+/** 有地点的故事条目。地图视图只画这些。 */
+export type PlacedMilestone = Milestone & { lat: number; lng: number };
+
+export function hasPlace(milestone: Milestone): milestone is PlacedMilestone {
+    return milestone.lat !== null && milestone.lng !== null;
 }
 
 export interface Photo {
@@ -120,10 +132,20 @@ export const messagesApi = {
     remove: (id: string) => api.delete<void>(`/messages/${encodeURIComponent(id)}`),
 };
 
+export interface MilestoneInput {
+    date: string;
+    title: string;
+    description: string;
+    lat?: number | null;
+    lng?: number | null;
+    photoIds?: string[];
+}
+
 export const milestonesApi = {
     list: () => api.get<Milestone[]>('/milestones'),
-    create: (data: { date: string; title: string; description: string }) =>
-        api.post<Milestone>('/milestones', data),
+    create: (data: MilestoneInput) => api.post<Milestone>('/milestones', data),
+    update: (id: string, data: Partial<MilestoneInput>) =>
+        api.patch<Milestone>(`/milestones/${encodeURIComponent(id)}`, data),
     remove: (id: string) => api.delete<void>(`/milestones/${encodeURIComponent(id)}`),
 };
 

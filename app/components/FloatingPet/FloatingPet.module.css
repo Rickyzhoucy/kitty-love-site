@@ -134,6 +134,16 @@
   backdrop-filter: blur(16px);
 }
 
+/* 每日仪式面板。定位与 .panel 同理：贴宠物左上方，并且**必须夹在视口内**
+   ——宠物本身就停在右边缘，面板直接右对齐会有一半在屏幕外。 */
+.ritualPanel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  /* 宠物在右下角，面板往左展开；max-width 保证窄屏上不越界 */
+  max-width: calc(100vw - 24px);
+}
+
 .speech {
   display: flex;
   width: min(300px, calc(100vw - 32px));

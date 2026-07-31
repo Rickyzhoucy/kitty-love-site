@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { MapPin } from '@/lib/api/mapPins';
 import {
     AMAP_KEY,
     loadAmap,
@@ -137,11 +136,20 @@ async function locate(
     });
 }
 
+/** 地图只需要这几样。用最小形状而不是绑定某个具体资源，故事条目、地点、
+ *  以后任何「有坐标的东西」都能直接画上去。 */
+export interface MapMarkerItem {
+    id: string;
+    title: string;
+    lat: number;
+    lng: number;
+}
+
 interface AmapCanvasProps {
-    pins: MapPin[];
+    pins: MapMarkerItem[];
     /** 点地图空白处：用于新增点。给的是 GCJ-02 坐标。 */
     onPickLocation?: (coords: { lat: number; lng: number }) => void;
-    onSelectPin?: (pin: MapPin) => void;
+    onSelectPin?: (pin: MapMarkerItem) => void;
     /**
      * 让地图飞到某个坐标（搜索选中、点列表里的某一项）。
      * 带 nonce 是为了「再选一次同一个地方」也能重新居中。

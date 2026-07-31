@@ -46,7 +46,7 @@ export default function DashboardOverview() {
     const cards = [
         { title: '留言总数', count: counts.messages, icon: MessageCircle, color: 'var(--color-accent-soft)', href: '/admin/messages' },
         { title: '计划', count: counts.plans, icon: StickyNote, color: 'var(--color-secondary-soft)', href: '/admin/plans' },
-        { title: '心愿', count: counts.wishes, icon: Heart, color: 'var(--color-accent-soft)', href: '/wish' },
+        { title: '心愿', count: counts.wishes, icon: Heart, color: 'var(--color-accent-soft)', href: '/plan' },
         { title: '照片', count: counts.photos, icon: ImageIcon, color: 'var(--color-sunken)', href: '/admin/photos' },
         { title: '里程碑', count: counts.milestones, icon: Star, color: 'var(--color-accent-soft)', href: '/admin/milestones' },
     ];

@@ -82,15 +82,24 @@ class PhotoRead(Entity, PhotoCreate):
 
 
 class MilestoneCreate(ApiModel):
+    """故事线上的一件事。地点可选——不是每件值得记的事都发生在某个地方。"""
+
     date: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(max_length=20_000)
+    #: GCJ-02（高德原生）。前后端都不做坐标转换。
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+    photo_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class MilestoneUpdate(ApiModel):
     date: str | None = Field(default=None, min_length=1, max_length=80)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=20_000)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+    photo_ids: list[str] | None = Field(default=None, max_length=20)
 
 
 class MilestoneRead(Entity, MilestoneCreate):
@@ -475,30 +484,6 @@ class FutureLetterRead(ApiModel):
     unlocked: bool
     body: str | None
     attachment_ids: list[str]
-
-
-class MapPinCreate(ApiModel):
-    """坐标是 GCJ-02（高德原生）。前后端都不做转换，见 models.MapPin。"""
-
-    title: str = Field(min_length=1, max_length=10_000)
-    lat: float = Field(ge=-90, le=90)
-    lng: float = Field(ge=-180, le=180)
-    note: str | None = Field(default=None, max_length=10_000)
-    date: str | None = Field(default=None, max_length=80)
-    photo_ids: list[str] = Field(default_factory=list, max_length=20)
-
-
-class MapPinUpdate(ApiModel):
-    title: str | None = Field(default=None, min_length=1, max_length=10_000)
-    lat: float | None = Field(default=None, ge=-90, le=90)
-    lng: float | None = Field(default=None, ge=-180, le=180)
-    note: str | None = Field(default=None, max_length=10_000)
-    date: str | None = Field(default=None, max_length=80)
-    photo_ids: list[str] | None = Field(default=None, max_length=20)
-
-
-class MapPinRead(Entity, MapPinCreate):
-    pass
 
 
 class PetActionRead(ApiModel):

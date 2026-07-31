@@ -12,7 +12,6 @@ from app.models import (
     DailyQuestion,
     EventTimer,
     FutureLetter,
-    MapPin,
     Message,
     Milestone,
     MoodEntry,
@@ -24,8 +23,6 @@ from app.moods import describe as describe_mood
 from app.pet_state import resolve_pet
 from app.photo_service import PhotoService
 from app.schemas import (
-    MapPinCreate,
-    MapPinUpdate,
     MessageCreate,
     MessageUpdate,
     MilestoneCreate,
@@ -48,7 +45,6 @@ RESOURCE_DEFINITIONS: dict[str, ResourceDefinition] = {
     "milestone": (Milestone, MilestoneCreate, MilestoneUpdate),
     "message": (Message, MessageCreate, MessageUpdate),
     "timer": (EventTimer, TimerCreate, TimerUpdate),
-    "mapPin": (MapPin, MapPinCreate, MapPinUpdate),
 }
 
 #: 只能读、不能由 Agent 写的资源。
@@ -172,8 +168,8 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         """查询站内资源。
 
         resource 可选：plan（计划）/ wish（心愿）/ photo（照片）/
-        milestone（里程碑）/ message（留言板）/ timer（纪念日倒计时）/
-        mapPin（恋爱地图上的地点）/ mood（心情打卡）/ letter（未来情书）/
+        milestone（故事线上的事，可能带地点坐标）/ message（留言板）/ timer（纪念日倒计时）/
+        mood（心情打卡）/ letter（未来情书）/
         dailyQuestion（每日一问）。
         """
         async with session_maker() as db:

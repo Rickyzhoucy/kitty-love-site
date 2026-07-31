@@ -8,30 +8,33 @@ import {
     StickyNote,
     Image as ImageIcon,
     Sparkles,
-    Mail,
-    Map as MapIcon,
-    MessageCircleHeart,
-    MessageCircleQuestion,
     MessagesSquare,
-    SmilePlus,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import ThemeToggle from './ui/ThemeToggle';
 import { useChatUnread } from './ChatMediationProvider';
 
+/**
+ * 六个入口。**这个数字本身是设计约束**——之前长到十一个，360px 窄屏上只能靠
+ * 横向滚动兜底，结果是每天都用的东西（故事、相册、聊天）被每周碰一次的东西
+ * 挤出了视野。
+ *
+ * 收掉的去了哪儿：
+ * - 地图 → 故事页的一个视图（本来就是同一批数据：发生过的事，有时间，
+ *   有时候还有地点）
+ * - 心愿 → 计划页的一栏（原本它连导航都没进，只能从计划页的链接进去）
+ * - 一问 / 心情 / 情书 → 宠物菜单里的「今天」面板（都是每天最多碰一次、
+ *   十几秒就完的小事，不值一个常驻入口）
+ * - 对话本 → 宠物菜单（那本来就是跟宠物聊天的记录）
+ */
 const navItems = [
     { href: '/', label: '首页', icon: Home },
-    { href: '/guestbook', label: '留言', icon: BookHeart },
-    { href: '/plan', label: '计划', icon: StickyNote },
-    { href: '/gallery', label: '相册', icon: ImageIcon },
     { href: '/timeline', label: '故事', icon: Sparkles },
-    { href: '/map', label: '地图', icon: MapIcon },
-    { href: '/daily-question', label: '一问', icon: MessageCircleQuestion },
-    { href: '/mood', label: '心情', icon: SmilePlus },
-    { href: '/letters', label: '情书', icon: Mail },
+    { href: '/gallery', label: '相册', icon: ImageIcon },
+    { href: '/plan', label: '计划', icon: StickyNote },
     { href: '/chat', label: '聊天', icon: MessagesSquare },
-    { href: '/companion', label: '对话本', icon: MessageCircleHeart },
+    { href: '/guestbook', label: '留言', icon: BookHeart },
 ];
 
 /**
@@ -54,8 +57,9 @@ export default function BottomNav() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                // 六个入口在 360px 窄屏上刚好挤得下；再多就靠横向滚动兜底，
-                // 而不是让胶囊溢出到屏幕外。
+                // 六个入口在 360px 窄屏上刚好挤得下。再多就会挤成横向滚动——
+                // 那不是兜底，那是把常用的东西藏起来。加新入口前先想想能不能
+                // 并进已有的页面。
                 className="flex max-w-[calc(100vw-1rem)] items-center gap-1 overflow-x-auto rounded-full border border-ink/5 bg-surface/75 px-2 py-1.5 shadow-lift backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
                 {navItems.map((item) => {

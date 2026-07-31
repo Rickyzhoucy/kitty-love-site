@@ -57,7 +57,6 @@ from app.models import (
     CompanionPersona,
     CompanionPetProfile,
     EventTimer,
-    MapPin,
     MemoryItem,
     Message,
     Milestone,
@@ -107,9 +106,6 @@ from app.schemas import (
     FutureLetterRead,
     LoginRequest,
     LoginResponse,
-    MapPinCreate,
-    MapPinRead,
-    MapPinUpdate,
     MemoryCreate,
     MemoryRead,
     MessageCreate,
@@ -263,8 +259,6 @@ for args in [
     ),
     ("messages", Message, "message", MessageCreate, MessageUpdate, MessageRead),
     ("timers", EventTimer, "timer", TimerCreate, TimerUpdate, TimerRead),
-    # 恋爱地图的点就是普通 CRUD，没有揭晓/锁这类规则，用同一个工厂即可
-    ("map-pins", MapPin, "mapPin", MapPinCreate, MapPinUpdate, MapPinRead),
 ]:
     router.include_router(crud_router(*args))
 

@@ -77,10 +77,23 @@ class Photo(StringIdMixin, CreatedAtMixin, AttributionMixin, Base):
 
 
 class Milestone(StringIdMixin, CreatedAtMixin, AttributionMixin, Base):
+    """故事线上的一件事。**地点是可选的**。
+
+    原本「故事」和「地图」是两张表两个页面，但它们本来就是同一件事的两种看法
+    ——发生过的事，有时间，有时候还有地点。分成两处的代价是：同一次旅行要记
+    两遍，而且两边都不完整。合并之后，有坐标的条目在地图视图里出现，没有的
+    只在时间轴上，两个视图看的是同一批数据。
+    """
+
     __tablename__ = "Milestone"
     date: Mapped[str] = mapped_column(String)
     title: Mapped[str] = mapped_column(String)
     description: Mapped[str] = mapped_column(Text)
+    #: GCJ-02（高德原生）。两个都为空表示这件事没有地点。
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: 与相册复用同一批 Attachment
+    photo_ids: Mapped[list[str]] = mapped_column("photoIds", JsonType, default=list)
 
 
 class Admin(StringIdMixin, CreatedAtMixin, Base):

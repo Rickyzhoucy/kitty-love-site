@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CalendarClock, Check, Heart, Plus, Trash2 } from 'lucide-react';
+import { CalendarClock, Check, Heart, Plus, Sparkles, Trash2 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
 import EmptyState from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
 import { plansApi, type Plan } from '@/lib/api/resources';
+import WishSection from './WishSection';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
 
@@ -41,7 +41,10 @@ const toneClass = {
     later: 'text-ink-muted',
 };
 
+type Section = 'plans' | 'wishes';
+
 export default function PlanPage() {
+    const [section, setSection] = useState<Section>('plans');
     const [plans, setPlans] = useState<Plan[]>([]);
     const [title, setTitle] = useState('');
     const [dueAt, setDueAt] = useState('');
@@ -181,12 +184,38 @@ export default function PlanPage() {
                     <span className="text-stroke-accent">计划</span>
                 </h1>
                 <p className="mb-0 mt-4 text-sm text-ink-muted md:text-base">
-                    要做的事都在这儿。
-                    <Link href="/wish" className="ml-1 text-accent underline underline-offset-2">
-                        想一起做的事在心愿里 →
-                    </Link>
+                    有期限的会催你，没期限的攒着慢慢来。
                 </p>
             </header>
+
+            {/* 计划和心愿的区别不是重要程度，是有没有期限。同页不同栏，
+                而不是两个页面——原来「心愿」压根不在导航里，等于没人找得到。 */}
+            <div className="mb-6 flex items-center gap-1 rounded-full bg-sunken/70 p-1" role="group" aria-label="分栏">
+                {([
+                    { id: 'plans' as const, label: '要做的事', icon: CalendarClock },
+                    { id: 'wishes' as const, label: '想一起做的', icon: Sparkles },
+                ]).map(item => {
+                    const Icon = item.icon;
+                    return (
+                        <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setSection(item.id)}
+                            aria-pressed={section === item.id}
+                            className={cn(
+                                'flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full px-3.5 py-2 text-sm transition-colors',
+                                section === item.id
+                                    ? 'bg-surface text-ink shadow-soft'
+                                    : 'text-ink-muted hover:text-ink'
+                            )}
+                        >
+                            <Icon size={15} /> {item.label}
+                        </button>
+                    );
+                })}
+            </div>
+
+            {section === 'wishes' ? <WishSection /> : (<>
 
             <Card className="mb-8 p-5 md:p-6">
                 <form onSubmit={add} className="flex flex-col gap-3 sm:flex-row">
@@ -265,6 +294,7 @@ export default function PlanPage() {
                     )}
                 </div>
             )}
+            </>)}
         </div>
     );
 }

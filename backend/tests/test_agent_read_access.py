@@ -46,9 +46,14 @@ async def _two_users(session_maker) -> tuple[str, str]:
 
 
 def test_every_site_feature_is_reachable():
-    """S5 那四个功能当初一个都不在工具里，宠物问什么都答不上来。"""
-    for resource in ("mapPin", "mood", "letter", "dailyQuestion"):
+    """S5 那四个功能当初一个都不在工具里，宠物问什么都答不上来。
+
+    `mapPin` 不在列表里是对的——那张表已经并进 `milestone`，地点成了故事条目
+    上的可选字段。宠物查 milestone 就能拿到坐标。
+    """
+    for resource in ("milestone", "mood", "letter", "dailyQuestion"):
         assert resource in LISTABLE_RESOURCES
+    assert "mapPin" not in LISTABLE_RESOURCES
 
 
 def test_locked_resources_have_no_write_path():
