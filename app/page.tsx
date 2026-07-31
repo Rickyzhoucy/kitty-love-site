@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
  * 换成一张画之后，这个色是画自身的纸底。图幅不是严格 1:1 时，contain 补出来
  * 的边靠它填平。**换画就改这一个值**（取新画四角的颜色）。
  */
-const PRINT_PAPER = '#f9f3e4';
+const PRINT_PAPER = '#fdf3d4';
 
 const QUICK_LINKS = [
   { href: '/guestbook', num: '01', label: '留言板', en: 'Guestbook', icon: BookHeart },
@@ -210,14 +210,18 @@ export default function Home() {
                 className="absolute inset-0 h-full w-full object-contain transition-transform duration-700 ease-spring group-hover:scale-[1.03]"
               />
 
-              {/* 原来这条提示是 1.6 秒后淡入的——那是在等 3D 模型加载完。
-                  现在图是秒出的，延迟淡入只会让「能点」这件事晚一步被看见，
-                  而且页面上其余元素一律 `initial={false}` 不做入场。所以就是
-                  一个普通 span。 */}
-              <span className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-ink/5 bg-surface/80 px-5 py-2 text-sm text-accent shadow-soft backdrop-blur-md">
-                💌 点一下，有一封信
-              </span>
             </motion.button>
+
+            {/* 提示放在画**外面**。原来它浮在画面底部，正好压在两个人的鞋上——
+                现在画才是这块的主角，不能让一个控件盖在上面。移到下面之后
+                它读起来像相片底下的一行说明，跟「这是一张洗出来的照片」这个
+                想法也对得上。
+
+                （另：这条提示曾经是 1.6 秒后淡入的，那是在等 3D 模型加载完。
+                现在图秒出，延迟只会让「能点」这件事晚一步被看见。） */}
+            <p className="pointer-events-none mt-4 mb-0 text-center text-sm text-ink-muted">
+              💌 点一下，有一封信
+            </p>
           </motion.div>
         </div>
       </section>
