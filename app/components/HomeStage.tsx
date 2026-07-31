@@ -14,19 +14,31 @@ import { cn } from '@/lib/utils';
  * 调不出来的，而首页这块**不需要交互**，它只是给人看的。（全站跟随的那只
  * 宠物仍然是 Rive，因为它要跟着状态走、睡、思考，那才需要状态机。）
  *
- * ## 循环是怎么接上的
+ * ## 房间是模型自己长出来的
  *
- * 视频模型默认不循环，最后一帧接不回第一帧，`loop` 播放每几秒会「跳」一下。
- * 生成时把**同一张图既当首帧又当尾帧**，模型被约束成从这张画出发再回到这张
- * 画。实测首尾帧平均差 1.50/255，只有 1.24% 的像素差超过 12——接缝看不出来。
- * 见 `scripts/generate-hero-video.py`。
+ * 背景不是我拼进去的。之前试过三轮文生图去做「一间屋子」，全废——模型总是
+ * 用另一套绘画语言回答（扁平矢量的红沙发、摄影式的散景），跟这四位的柔和
+ * 厚涂对不上。**图生视频没有这个问题**：它是在延续输入图，背景自然就是同一
+ * 种笔触。所以这一版是把四位的立绘当 `reference_image` 丢进去，让 H3 自己
+ * 长出窗、阳光、纱帘、木地板、地毯和绿植。
+ *
+ * ## 循环：先试过捆死动作，那是错的
+ *
+ * 第一版为了无缝循环，把同一张图同时当首帧和尾帧，并在提示词里写死「不走动、
+ * 不转身、不换姿势」。接缝确实极好（首尾差 1.24%），但代价是**除了呼吸什么
+ * 都不发生**——为一个技术指标牺牲了观感。
+ *
+ * 现在反过来：动作放开，循环交给转码。取尾部 2.4 秒淡入叠回开头，8 秒素材
+ * 变成 5.6 秒的循环。实测把接缝从 8.90% 压到 4.61%，而且是柔和过渡而不是硬
+ * 跳。淡化时长不是越长越好（0.7s→5.31%、1.2s→7.71%、1.8s→6.36%、2.4s→4.61%），
+ * 换素材要重新扫一遍。生成和转码见 `scripts/generate-hero-video.py`。
  *
  * ## 静态模式是真的静态
  *
  * 关掉动效时**不渲染 `<video>`**，而不是渲染出来再暂停。差别在于前者根本不去
- * 下载那 196KB；`prefers-reduced-motion` 的人和明确点了「静一静」的人，都不该
- * 为一个他们不会看的动画付流量。海报图 `us.webp` 本来就是同一张画的静帧，
- * 两种模式之间切换看起来是连续的。
+ * 下载那 581KB；`prefers-reduced-motion` 的人和明确点了暂停的人，都不该为一个
+ * 他们不会看的动画付流量。海报图 `us.webp` 就是这段视频的第 0 帧，所以两种
+ * 模式看到的是同一个房间，切换看起来是连续的。
  */
 
 const STORAGE_KEY = 'hero-motion';
@@ -77,7 +89,10 @@ export default function HomeStage({ onOpenLetter }: { onOpenLetter: () => void }
                 aria-label="点开今天的信"
                 className={cn(
                     'group relative block aspect-square w-full overflow-hidden rounded-[28px]',
-                    'border border-ink/5 bg-[#fdf3d4] shadow-lift transition-shadow duration-500 hover:shadow-modal',
+                    // 底色取自视频四角的平均色（木地板的暖棕）。素材是 1:1、
+                    // 容器也是 1:1，正常不会露出来；它兜的是视频加载前那一瞬、
+                    // 以及将来换成非正方形素材时 contain 补出来的边。
+                    'border border-ink/5 bg-[#b18962] shadow-lift transition-shadow duration-500 hover:shadow-modal',
                     'focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent'
                 )}
             >
@@ -94,14 +109,16 @@ export default function HomeStage({ onOpenLetter }: { onOpenLetter: () => void }
                         playsInline
                         poster="/hero/us.webp"
                     >
-                        <source src="/hero/us-idle.webm" type="video/webm" />
+                        {/* 只给 mp4。同一段片子 VP9 编出来 795KB、x264 只要
+                            581KB——这种柔和的厚涂插画没什么高频细节，VP9 占不到
+                            便宜。H.264 全平台都认，少一个源也少一处会出错的地方。 */}
                         <source src="/hero/us-idle.mp4" type="video/mp4" />
                     </video>
                 ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                         src="/hero/us.webp"
-                        alt="我们两个各抱着一只狗的插画"
+                        alt="我们两个和两只狗在洒满阳光的客厅里"
                         className="absolute inset-0 h-full w-full object-contain transition-transform duration-700 ease-spring group-hover:scale-[1.03]"
                     />
                 )}
