@@ -1,3 +1,6 @@
+from app.site_config import DEFAULTS as SITE_CONFIG_DEFAULTS
+
+
 async def test_profile_persona_conversation_and_pet_api(authenticated_client):
     profile = await authenticated_client.patch(
         "/api/v1/profile",
@@ -100,7 +103,11 @@ async def test_config_update_history_reset_and_rollback(authenticated_client):
         json=["letter_title"],
     )
     assert reset.status_code == 204
-    assert (await authenticated_client.get("/api/v1/config")).json() == {}
+    # 重置只删「存过的值」，**默认值照常返回**——`/config` 的契约是「完整配置」，
+    # 前端据此不再各自兜底（见 site_config 模块）。
+    after_reset = (await authenticated_client.get("/api/v1/config")).json()
+    assert "letter_title" not in after_reset
+    assert after_reset == SITE_CONFIG_DEFAULTS
 
     rollback = await authenticated_client.post(
         f"/api/v1/config/history/{entry['id']}/rollback"

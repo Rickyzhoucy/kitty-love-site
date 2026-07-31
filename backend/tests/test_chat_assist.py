@@ -5,6 +5,8 @@
 立场揉成一个人，在一段关系里张冠李戴比答不上来糟糕得多。
 """
 
+from datetime import date, timedelta
+
 import pytest
 from sqlalchemy import select
 
@@ -12,12 +14,16 @@ from app.auth import hash_password
 from app.chat_assist import (
     CONTEXT_MESSAGES,
     SYSTEM_PROMPT,
+    WEEKDAYS,
+    build_situation,
     build_transcript,
     mentions_pet,
     strip_mention,
 )
 from app.direct_messages import send_message
-from app.models import User
+from app.localtime import local_now, local_today
+from app.models import EventTimer, SiteConfig, User
+from app.site_config import DEFAULTS as SITE_CONFIG_DEFAULTS
 
 
 async def _two_users(session_maker) -> tuple[str, str]:
@@ -156,3 +162,99 @@ def test_prompt_forbids_making_things_up():
 
 def test_prompt_keeps_the_pet_from_speaking_as_either_person():
     assert "不要以他们的名义表态" in SYSTEM_PROMPT
+
+
+def test_prompt_tells_the_pet_it_may_look_things_up():
+    """**「不许编」和「不许查」是两件事。**
+
+    这条提示词原本写的是「只依据给你的聊天记录回答」——那是这条路径还没有
+    工具时定的。后来它拿到了站内只读工具和联网搜索，那句话就变成了在劝模型
+    别用自己手上的工具：用户问「搜一下 XX」，宠物回「我这边没有搜索功能呀」。
+
+    这条钉住修好之后的区分：事实可以去查，查不到才说不知道。
+    """
+    assert "只依据给你的聊天记录回答" not in SYSTEM_PROMPT
+    assert "去查" in SYSTEM_PROMPT
+    # 放开「可以查」不等于放开「可以编」——那条底线必须同时还在
+    assert "不要编" in SYSTEM_PROMPT
+
+
+# ---- 此刻的处境 ----
+
+
+async def test_situation_gives_the_pet_a_clock(session_maker):
+    """**宠物得知道今天几号。**
+
+    改之前它只拿到聊天记录，用户问「今天几号啦」，它只能回「我这边看不到
+    日期」——一只连今天几号都不知道的宠物，问它任何跟时间有关的事都是白问。
+    """
+    async with session_maker() as db:
+        situation = await build_situation(db, "Ricky", "宝贝")
+    today = local_now()
+    assert f"{today:%Y年%m月%d日}" in situation
+    assert f"星期{WEEKDAYS[today.weekday()]}" in situation
+
+
+async def test_situation_names_who_is_asking(session_maker):
+    """记录里有名字，但明确写一行能免掉张冠李戴。"""
+    async with session_maker() as db:
+        situation = await build_situation(db, "Ricky", "宝贝")
+    assert "Ricky" in situation
+    assert "宝贝" in situation
+
+
+async def test_situation_counts_the_days_together(session_maker):
+    """首页天天显示的那个数字，宠物没理由不知道。"""
+    async with session_maker() as db:
+        db.add(SiteConfig(key="main_timer_date", value="2026-01-01"))
+        await db.commit()
+        situation = await build_situation(db, "Ricky", "宝贝")
+    expected = (local_today() - date(2026, 1, 1)).days
+    assert f"在一起第 {expected} 天" in situation
+
+
+async def test_days_together_falls_back_to_the_same_default_as_the_home_page(
+    session_maker,
+):
+    """**宠物说的天数必须和首页显示的一致。**
+
+    起始日的默认值只有一份，在 `site_config.DEFAULTS`；首页和宠物读的都是它。
+    这条钉住「同一个来源」——各自兜底的话，首页写着第 243 天而宠物说不知道
+    （或者说了另一个数），那种不一致最伤信任。
+    """
+    async with session_maker() as db:
+        situation = await build_situation(db, "Ricky", "宝贝")
+    start = date.fromisoformat(SITE_CONFIG_DEFAULTS["main_timer_date"])
+    assert f"在一起第 {(local_today() - start).days} 天" in situation
+
+
+async def test_unparseable_start_date_says_nothing_rather_than_guessing(session_maker):
+    """**说错「在一起第几天」比说不知道糟得多。**
+
+    存了个读不懂的值时整行不出现，而不是退回默认日期算一个数——那会说出一个
+    与首页不符、而且看起来很确定的天数。
+    """
+    async with session_maker() as db:
+        db.add(SiteConfig(key="main_timer_date", value="等我想想"))
+        await db.commit()
+        situation = await build_situation(db, "Ricky", "宝贝")
+    assert "在一起第" not in situation
+
+
+async def test_situation_mentions_an_upcoming_anniversary(session_maker):
+    """与到点提醒是两回事：那是通知，这是背景知识，让它在别的话题里也知道
+    快到日子了。"""
+    async with session_maker() as db:
+        db.add(
+            EventTimer(
+                title="恋爱一周年",
+                date=(local_today() + timedelta(days=3)).isoformat(),
+                type="countdown",
+                recurrence="none",
+                remind_days_before=[3],
+            )
+        )
+        await db.commit()
+        situation = await build_situation(db, "Ricky", "宝贝")
+    assert "恋爱一周年" in situation
+    assert "还有 3 天" in situation

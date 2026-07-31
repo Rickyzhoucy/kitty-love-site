@@ -17,10 +17,11 @@ interface ConfigState {
     main_timer_date: string;
 }
 
-const DEFAULT_CONFIG: ConfigState = {
+/** 表单的显示兜底。**起始日不在这里**——它由服务端的 site_config.DEFAULTS 提供，
+ *  前端再兜一份就会和宠物说的天数对不上。 */
+const DEFAULT_CONFIG = {
     letter_title: '致我最爱的人',
     letter_content: '亲爱的…',
-    main_timer_date: '2025-11-30',
 };
 
 function ConfigCard({
@@ -97,7 +98,12 @@ function PetConfigCard() {
 }
 
 export default function SiteConfigPage() {
-    const [config, setConfig] = useState<ConfigState>(DEFAULT_CONFIG);
+    // 起始日在服务端拉回来之前先留空——写死一个值会在加载的那一瞬间
+    // 闪出一个可能不对的日期。
+    const [config, setConfig] = useState<ConfigState>({
+        ...DEFAULT_CONFIG,
+        main_timer_date: '',
+    });
     const [history, setHistory] = useState<SiteConfigHistory[]>([]);
     const [tab, setTab] = useState<'settings' | 'history'>('settings');
     const [saving, setSaving] = useState<string | null>(null);
@@ -108,7 +114,8 @@ export default function SiteConfigPage() {
         setConfig({
             letter_title: values.letter_title || DEFAULT_CONFIG.letter_title,
             letter_content: values.letter_content || DEFAULT_CONFIG.letter_content,
-            main_timer_date: values.main_timer_date || DEFAULT_CONFIG.main_timer_date,
+            // 起始日的默认值由服务端给（site_config.DEFAULTS），这里不再兜
+            main_timer_date: values.main_timer_date,
         });
         setHistory(entries);
     }, []);

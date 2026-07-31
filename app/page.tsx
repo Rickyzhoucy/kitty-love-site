@@ -71,8 +71,10 @@ export default function Home() {
       .then(data => {
         if (!data) return;
         setConfig(data);
-        // 在一起天数：与情书弹窗同一数据源
-        const diff = Date.now() - new Date(data.main_timer_date || '2025-11-30').getTime();
+        // 在一起天数：与情书弹窗同一数据源。**不在这里兜默认值**——
+        // 默认值是服务端给的（backend/app/site_config.py），前端再兜一个
+        // 就成了两份真相，而宠物读的是服务端那份，说出来的天数会和这里对不上。
+        const diff = Date.now() - new Date(data.main_timer_date).getTime();
         if (diff > 0) setDaysTogether(Math.floor(diff / 86400000));
       })
       .catch(e => console.error('Failed to fetch config', e));

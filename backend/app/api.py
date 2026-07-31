@@ -149,6 +149,8 @@ from app.schemas import (
     WishUpdate,
 )
 from app.services import CrudService
+from app.site_config import EDITABLE_KEYS as EDITABLE_SITE_CONFIG_KEYS
+from app.site_config import load as load_site_config
 from app.storage import ObjectStorage, get_storage
 
 logger = logging.getLogger(__name__)
@@ -419,11 +421,16 @@ async def logout(
 
 @router.get("/config", response_model=dict[str, str])
 async def read_config(db: Db, _: CurrentUser) -> dict[str, str]:
-    rows = await db.execute(select(SiteConfig.key, SiteConfig.value))
-    return dict(rows.all())
+    """完整配置——**默认值也在里面**，前端不需要自己兜底。
+
+    以前这里只返回存过的行，于是「在一起的起始日」这种从没被改过的项返回空，
+    前端只好各自写一个 `|| '2025-11-30'`。同一个默认值散在两个前端文件里，
+    服务端一无所知，宠物也就答不出「我们在一起多久了」。见 site_config 模块。
+    """
+    return await load_site_config(db)
 
 
-EDITABLE_CONFIG_KEYS = {"letter_title", "letter_content", "main_timer_date"}
+EDITABLE_CONFIG_KEYS = EDITABLE_SITE_CONFIG_KEYS
 
 
 @router.put("/config", response_model=dict[str, str])
