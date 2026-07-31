@@ -7,7 +7,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
+# Debian 软件源。默认走官方，**在中国大陆的机器上构建时传一个镜像站进来**：
+#
+#   docker compose build --build-arg APT_MIRROR=mirrors.tencentyun.com
+#
+# 不这么做的话，光是 `apt-get update` 拉那 8.8MB 的 Packages 索引就要等很久
+# ——deb.debian.org 从境内过去慢得离谱。留成构建参数而不是写死，是因为镜像
+# 站的可达性取决于构建机在哪：腾讯云内网那个域名出了腾讯云就解析不了。
+ARG APT_MIRROR=""
+
+RUN if [ -n "$APT_MIRROR" ]; then \
+        sed -i "s|deb.debian.org|$APT_MIRROR|g; s|security.debian.org|$APT_MIRROR|g" \
+            /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends git nodejs \
     && rm -rf /var/lib/apt/lists/*
 
