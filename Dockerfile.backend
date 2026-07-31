@@ -24,6 +24,23 @@ RUN if [ -n "$APT_MIRROR" ]; then \
     && apt-get install -y --no-install-recommends git nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Python 包索引。同上，默认官方，境内构建时传镜像站进来：
+#
+#   --build-arg PYPI_INDEX=http://mirrors.tencentyun.com/pypi/simple/
+#
+# 实测从这台机器请求 pypi.org 一次要 **15 秒**，而腾讯内网镜像是 0.33 秒——
+# 后端有上百个依赖，逐个吃这个延迟能把构建拖成半小时。
+#
+# 换索引不会破坏 `uv sync --frozen`：uv.lock 里记的是文件哈希，镜像站分发的
+# 是同一批文件，哈希对得上；对不上它会直接报错而不是装个别的东西。
+ARG PYPI_INDEX=""
+ENV UV_DEFAULT_INDEX=${PYPI_INDEX}
+
+# 单个包的下载超时。默认 30 秒，在跨境或高延迟链路上不够——实测有个 pydantic
+# 的 wheel 就是卡在这里让整个构建失败的，而它前后的包都下得好好的。这不是
+# 「网络不通」而是「偶发的慢」，重试比放弃更对，所以把窗口开大而不是缩小。
+ENV UV_HTTP_TIMEOUT=180
+
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 

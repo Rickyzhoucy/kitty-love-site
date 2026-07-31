@@ -36,6 +36,18 @@
       "name": "比熊",
       "style": "photorealistic",
       "manifest": "/pet-assets/bichon/v1/manifest.json"
+    },
+    {
+      "id": "shiba-q",
+      "name": "柴犬（插画）",
+      "style": "illustrated",
+      "manifest": "/pet-assets/shiba-q/v1/manifest.json"
+    },
+    {
+      "id": "bichon-q",
+      "name": "比熊（插画）",
+      "style": "illustrated",
+      "manifest": "/pet-assets/bichon-q/v1/manifest.json"
     }
   ]
 }

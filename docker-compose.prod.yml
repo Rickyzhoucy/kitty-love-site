@@ -21,6 +21,7 @@ x-apt-mirror: &apt-mirror
   build:
     args:
       APT_MIRROR: ${APT_MIRROR:-}
+      PYPI_INDEX: ${PYPI_INDEX:-}
 
 services:
   web:

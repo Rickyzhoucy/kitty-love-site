@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "petId": "shiba-q",
+  "version": "v1",
+  "canvas": {
+    "width": 512,
+    "height": 512,
+    "anchorX": 0.5,
+    "anchorY": 0.98
+  },
+  "defaultAction": "idle",
+  "actions": {
+    "idle": {
+      "fps": 3,
+      "loop": true,
+      "frames": [
+        "idle/01.webp",
+        "idle/02.webp",
+        "idle/03.webp",
+        "idle/04.webp"
+      ]
+    },
+    "walk": {
+      "fps": 8,
+      "loop": true,
+      "frames": [
+        "walk/01.webp",
+        "walk/02.webp",
+        "walk/03.webp",
+        "walk/04.webp"
+      ]
+    }
+  }
+}

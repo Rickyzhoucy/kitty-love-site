@@ -31,6 +31,27 @@ export const PET_ASSETS = [
         source: '/pet-assets/bichon/v2/bichon-canonical-v6.riv',
         sourceFacing: 'left',
     },
+    // 插画版的同两只狗。**是新增，不是替换**——上面那两只照片风的还在，
+    // 两种画风各留一份，选哪只是他们的事。
+    //
+    // 这两份素材不是手绑的骨骼，而是从 H3 生成的「原地踏步」视频里抽的帧
+    // （见 scripts/walk-video-to-frames.py）。走这条路是因为手绑一只狗要标
+    // 几十个关节多边形，而视频能直接给出画风一致的步态循环；代价是没有
+    // v6 那套的 29 个动作，只有 idle 和 walk，够这个体型看了。
+    {
+        id: 'shiba-q',
+        name: '柴犬（插画）',
+        emoji: '🐕',
+        renderer: 'frames',
+        sourceFacing: 'left',
+    },
+    {
+        id: 'bichon-q',
+        name: '比熊（插画）',
+        emoji: '🐩',
+        renderer: 'frames',
+        sourceFacing: 'left',
+    },
 ] as const;
 
 export type PetAssetId = typeof PET_ASSETS[number]['id'];
