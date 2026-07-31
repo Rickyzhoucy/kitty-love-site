@@ -9,6 +9,7 @@ import {
     type AmapMap,
     type AmapMarker,
     type AmapNamespace,
+    type AmapOverlay,
 } from './amapLoader';
 
 /**
@@ -21,6 +22,48 @@ import {
 const FALLBACK_CENTER: [number, number] = [116.397428, 39.90923];
 const CITY_ZOOM = 11;
 const PRECISE_ZOOM = 15;
+
+/** 「我在这儿」的黄点。默认 Marker 是蓝水滴，和已标的地方撞色，所以自己画。 */
+const HERE_FILL = '#f5a524';
+const HERE_STROKE = '#ffffff';
+
+/**
+ * 画一个「我在这儿」的黄点。
+ *
+ * 用 `CircleMarker`（半径按**像素**算）而不是 `Circle`（按米算）：这个点表达的是
+ * 「你在这儿」，缩放时该保持一样大；按米画的话缩到省级就变成一个盖住半个城市的
+ * 色块了。真实精度另有一圈半透明光晕表示，那个才该按米走。
+ */
+function drawHereDot(
+    AMap: AmapNamespace,
+    map: AmapMap,
+    position: [number, number],
+): AmapOverlay[] {
+    const halo = new AMap.CircleMarker({
+        center: position,
+        radius: 13,
+        fillColor: HERE_FILL,
+        fillOpacity: 0.22,
+        strokeOpacity: 0,
+        bubble: true,
+        zIndex: 90,
+    });
+    const dot = new AMap.CircleMarker({
+        center: position,
+        radius: 6,
+        fillColor: HERE_FILL,
+        fillOpacity: 1,
+        strokeColor: HERE_STROKE,
+        strokeWeight: 2.5,
+        strokeOpacity: 1,
+        // 点击穿透到地图，否则在自己头上加不了点
+        bubble: true,
+        zIndex: 91,
+    });
+    map.add(halo);
+    map.add(dot);
+    return [halo, dot];
+}
 
 /**
  * 定位到「我在哪」，两级降级。
@@ -36,6 +79,7 @@ async function locate(
     AMap: AmapNamespace,
     map: AmapMap,
     stillWanted: () => boolean,
+    onLocated: (overlays: AmapOverlay[]) => void,
 ): Promise<void> {
     await loadPlugins(AMap, ['AMap.Geolocation', 'AMap.CitySearch']);
     if (!stillWanted()) return;
@@ -62,6 +106,9 @@ async function locate(
     if (precise) {
         map.setCenter(precise);
         map.setZoom(PRECISE_ZOOM);
+        // 只有精确定位才画那个黄点。IP 定位给的是市中心，把它标成「你在这儿」
+        // 是在撒谎——你可能在城市另一头。宁可不画。
+        onLocated(drawHereDot(AMap, map, precise));
         return;
     }
 
@@ -113,8 +160,11 @@ export default function AmapCanvas({
     const containerRef = useRef<HTMLDivElement | null>(null);
     const mapRef = useRef<AmapMap | null>(null);
     const markersRef = useRef<AmapMarker[]>([]);
+    /** 「我在这儿」的黄点。与 markersRef 分开，免得重画点位时被一起清掉。 */
+    const hereRef = useRef<AmapOverlay[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [ready, setReady] = useState(false);
+    const [located, setLocated] = useState(false);
 
     // 回调放 ref 里：地图只初始化一次，不该因为父组件重渲染就重建
     const pickRef = useRef(onPickLocation);
@@ -143,7 +193,12 @@ export default function AmapCanvas({
                 mapRef.current = map;
                 setReady(true);
                 // 定位是异步的，回来时组件可能已经卸载了
-                void locate(AMap, map, () => !cancelled);
+                void locate(AMap, map, () => !cancelled, overlays => {
+                    // 单独存一份：下面重画点位时会清空 markersRef，混在一起
+                    // 的话「我在这儿」会跟着被抹掉。
+                    hereRef.current = overlays;
+                    setLocated(true);
+                });
             })
             .catch((reason: Error) => {
                 if (!cancelled) setError(reason.message);
@@ -154,6 +209,7 @@ export default function AmapCanvas({
             mapRef.current?.destroy();
             mapRef.current = null;
             markersRef.current = [];
+            hereRef.current = [];
         };
     }, []);
 
@@ -200,5 +256,21 @@ export default function AmapCanvas({
         );
     }
 
-    return <div ref={containerRef} className={className} aria-label="恋爱地图" />;
+    return (
+        <div className="relative">
+            <div ref={containerRef} className={className} aria-label="恋爱地图" />
+            {/* 图例只在真的画了黄点时才出现——没定位到就没有黄点，摆个说明反而
+                让人去找一个不存在的东西。 */}
+            {located && (
+                <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5 rounded-full bg-surface/85 px-2.5 py-1.5 text-[11px] text-ink-muted shadow-soft backdrop-blur-sm">
+                    <span
+                        aria-hidden
+                        className="h-2.5 w-2.5 rounded-full border-2 border-white"
+                        style={{ backgroundColor: HERE_FILL }}
+                    />
+                    你现在在这儿
+                </div>
+            )}
+        </div>
+    );
 }

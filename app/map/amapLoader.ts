@@ -28,15 +28,25 @@ export interface AmapLngLat {
     lat: number;
 }
 
-export interface AmapMarker {
+/** 能加到地图上的东西的公共部分。Marker 和 CircleMarker 都算。 */
+export interface AmapOverlay {
+    setMap?(map: AmapMap | null): void;
+}
+
+export interface AmapMarker extends AmapOverlay {
     setPosition(position: [number, number]): void;
     on(event: string, handler: () => void): void;
 }
 
+/** 矢量圆点，半径按像素算（不随缩放变大）。用来画「我在这儿」。 */
+export interface AmapCircleMarker extends AmapOverlay {
+    setCenter(center: [number, number]): void;
+}
+
 export interface AmapMap {
-    add(overlay: AmapMarker): void;
-    remove(overlay: AmapMarker): void;
-    setFitView(overlays?: AmapMarker[] | null): void;
+    add(overlay: AmapOverlay): void;
+    remove(overlay: AmapOverlay): void;
+    setFitView(overlays?: AmapOverlay[] | null): void;
     setCenter(position: [number, number]): void;
     setZoom(zoom: number): void;
     on(event: string, handler: (event: { lnglat: AmapLngLat }) => void): void;
@@ -52,6 +62,8 @@ export interface AmapCitySearchResult {
 export interface AmapGeolocationResult {
     position?: AmapLngLat;
     formattedAddress?: string;
+    /** 定位精度，米。用来画那圈范围光晕。 */
+    accuracy?: number;
 }
 
 export interface AmapPoi {
@@ -69,6 +81,8 @@ export interface AmapAutoCompleteResult {
 export interface AmapNamespace {
     Map: new (container: HTMLElement, options: Record<string, unknown>) => AmapMap;
     Marker: new (options: Record<string, unknown>) => AmapMarker;
+    /** 2.0 的核心矢量图层，不需要 plugin() 加载。 */
+    CircleMarker: new (options: Record<string, unknown>) => AmapCircleMarker;
     plugin(names: string[], onReady: () => void): void;
     CitySearch?: new () => {
         getLocalCity(
