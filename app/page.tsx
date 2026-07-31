@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import Link from 'next/link';
 import { ArrowUpRight, BookHeart, StickyNote, Image as ImageIcon, Sparkles, type LucideIcon } from 'lucide-react';
@@ -11,10 +11,19 @@ import RemindersList from './components/RemindersList';
 import { configApi, photosApi } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
-import dynamic from 'next/dynamic';
 
-// 3D Hello Kitty 体积较大（three.js），客户端按需加载
-const KittyScene = dynamic(() => import('./components/KittyScene'), { ssr: false });
+/**
+ * 首页那张画的纸色。
+ *
+ * 这里曾经是一只 3D Hello Kitty（three.js + 6.8MB 贴图 + 1.4MB HDR），
+ * 它有三个问题：开着 autoRotate，所以大半时间给访客看后脑勺；塑料手办的
+ * 材质和站里的奶油+玫瑰插画完全是两个世界；而且它跟全站跟随的那只宠物
+ * 抢角色——首页正中间该站的是**他们两个**，宠物有自己的岗位。
+ *
+ * 换成一张画之后，这个色是画自身的纸底。图幅不是严格 1:1 时，contain 补出来
+ * 的边靠它填平。**换画就改这一个值**（取新画四角的颜色）。
+ */
+const PRINT_PAPER = '#f9f3e4';
 
 const QUICK_LINKS = [
   { href: '/guestbook', num: '01', label: '留言板', en: 'Guestbook', icon: BookHeart },
@@ -61,6 +70,7 @@ function ThumbCluster({ icon: Icon, photos }: { icon: LucideIcon; photos?: strin
 }
 
 export default function Home() {
+  const reduceMotion = useReducedMotion();
   const [showLetter, setShowLetter] = useState(false);
   const [config, setConfig] = useState<Record<string, string>>({});
   const [daysTogether, setDaysTogether] = useState<number | null>(null);
@@ -97,7 +107,7 @@ export default function Home() {
   }, []);
   useResourceEvents(['photos'], () => void loadPhotoUrls());
 
-  const handleKittyClick = () => {
+  const handleOpenLetter = () => {
     confetti({
       particleCount: 120,
       spread: 80,
@@ -158,38 +168,56 @@ export default function Home() {
             )}
           </div>
 
-          {/* 右：Kitty 方形舞台 */}
+          {/* 右：我们四个的合照 */}
           <motion.div
-            aria-label="宠物 Kitty"
-            className="relative aspect-square w-full overflow-hidden rounded-lg border border-ink/5 bg-surface shadow-lift"
             initial={false}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.5, duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
           >
-            {/* 舞台极光 */}
-            <div aria-hidden className="pointer-events-none absolute inset-0">
-              <div className="animate-drift absolute -top-20 left-1/4 h-[300px] w-[300px] rounded-full bg-accent/15 blur-3xl" />
-              <div className="animate-drift absolute -bottom-24 right-1/5 h-[280px] w-[280px] rounded-full bg-secondary/20 blur-3xl [animation-delay:-6s]" />
-            </div>
-
-            <div className="absolute inset-0 cursor-pointer">
-              <KittyScene onKittyClick={handleKittyClick} modelUrl={config.home_model_url || undefined} />
-            </div>
-
-            {/* 舞台角标 */}
-            <div className="pointer-events-none absolute left-4 top-4 z-10 rounded-full border border-ink/5 bg-surface/75 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-[0.25em] text-accent shadow-soft backdrop-blur-md">
-              小管家 Kitty
-            </div>
-
-            {/* 舞台内提示 */}
-            <motion.div
-              className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-ink/5 bg-surface/75 px-5 py-2 text-sm text-accent shadow-soft backdrop-blur-md"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1.6 }}
+            <motion.button
+              type="button"
+              onClick={handleOpenLetter}
+              aria-label="点开今天的信"
+              className={cn(
+                'group relative block aspect-square w-full overflow-hidden rounded-[28px]',
+                'border border-ink/5 shadow-lift transition-shadow duration-500 hover:shadow-modal',
+                'focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent'
+              )}
+              // 底色跟画本身的奶油纸色对齐，图不是正方形时补出来的边看不见。
+              // 换画就调这一个值（取画四角的颜色）。
+              style={{ backgroundColor: PRINT_PAPER }}
+              // 极缓慢的上下浮动，代替原来 3D 那圈自转。幅度只有 6px——
+              // 让它有呼吸，而不是让它表演。
+              animate={reduceMotion ? undefined : { y: [0, -6, 0] }}
+              transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
             >
-              💌 点击 Kitty 有惊喜
-            </motion.div>
+              {/* **这里不能用 next/image。**
+                  `proxy.ts` 那道鉴权门会把没带 Cookie 的请求 307 到 /verify，而
+                  Next 的图片优化器是**服务端自己去 fetch 这个 URL** 的，它不带
+                  浏览器的 Cookie——拿回来的是登录页的 HTML，于是报
+                  「The requested resource isn't a valid image」，首页一个大裂图。
+                  （门里放行了 /_next、/pet-content、/uploads，唯独没有静态图片。）
+
+                  用普通 <img> 就是浏览器自己带着 Cookie 去取，门还拦得住，也不
+                  经过优化器。代价是没有自动压缩，所以这张图**入库前先转成合适
+                  尺寸的 WebP**，别直接丢一张 4K PNG 进来。 */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/hero/us.webp"
+                alt="我们两个各抱着一只狗的插画"
+                // contain 而不是 cover：画幅万一不是严格 1:1，宁可两边留白，
+                // 也不能把谁的脚或头裁掉。
+                className="absolute inset-0 h-full w-full object-contain transition-transform duration-700 ease-spring group-hover:scale-[1.03]"
+              />
+
+              {/* 原来这条提示是 1.6 秒后淡入的——那是在等 3D 模型加载完。
+                  现在图是秒出的，延迟淡入只会让「能点」这件事晚一步被看见，
+                  而且页面上其余元素一律 `initial={false}` 不做入场。所以就是
+                  一个普通 span。 */}
+              <span className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-ink/5 bg-surface/80 px-5 py-2 text-sm text-accent shadow-soft backdrop-blur-md">
+                💌 点一下，有一封信
+              </span>
+            </motion.button>
           </motion.div>
         </div>
       </section>

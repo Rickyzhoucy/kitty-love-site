@@ -14,8 +14,6 @@
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-toast": "^1.2.23",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.1",
     "@rive-app/react-canvas": "^4.30.0",
     "@tauri-apps/api": "^2.8.0",
     "canvas-confetti": "^1.9.4",
@@ -29,8 +27,7 @@
     "react-markdown": "^10.1.0",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.4.0",
-    "three": "^0.182.0"
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
@@ -38,7 +35,6 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/three": "^0.182.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "playwright": "^1.62.0",

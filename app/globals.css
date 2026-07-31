@@ -58,7 +58,6 @@
   --animate-fade-up: fade-up 0.7s var(--ease-spring) both;
   --animate-drift: drift 16s ease-in-out infinite alternate;
   --animate-marquee: marquee 24s linear infinite;
-  --animate-pulse-ring: pulse-ring 1.6s ease-out infinite;
 
   @keyframes fade-up {
     from {
@@ -86,17 +85,6 @@
     }
     to {
       transform: translateX(-50%);
-    }
-  }
-
-  @keyframes pulse-ring {
-    from {
-      transform: scale(0.6);
-      opacity: 0.8;
-    }
-    to {
-      transform: scale(1.6);
-      opacity: 0;
     }
   }
 }
