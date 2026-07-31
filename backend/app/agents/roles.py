@@ -38,6 +38,25 @@ READ_ONLY_TOOLS = frozenset({"site_resource_list", "list_skills"})
 #: 正是他们会问的，答不了才奇怪。
 ASSIST_TOOLS = READ_ONLY_TOOLS | frozenset({"web_search", "web_read"})
 
+#: 工作区工具：宠物自己的一块草稿纸（写脚本、跑分析、存下载的文件）。
+#:
+#: **只给 CONVERSATION 和 ASSIST，不给 COGNITION。** 前两者都是用户明确在跟它
+#: 说话；Cognition 是它自己每隔一会儿想一次事情，那一档要是能写文件、跑脚本，
+#: 就变成了一个没人看着的后台进程在持续消耗磁盘和 CPU。
+#:
+#: 写操作在这里是可以的：工作区是**沙箱内**一块隔离的、有配额的、会定期清理的
+#: 区域，跟站内数据（计划、心愿、信）完全无关——写坏了最多丢掉自己的草稿。
+WORKSPACE_TOOLS = frozenset(
+    {
+        "workspace_list",
+        "workspace_read",
+        "workspace_write",
+        "workspace_delete",
+        "workspace_run",
+        "workspace_download",
+    }
+)
+
 
 @dataclass(frozen=True)
 class RoleSpec:
@@ -81,7 +100,7 @@ ROLE_SPECS: dict[AgentRole, RoleSpec] = {
     # 想说话；但也不是无限，防止一方反复 @ 把额度刷光。
     AgentRole.ASSIST: RoleSpec(
         role=AgentRole.ASSIST,
-        tool_names=ASSIST_TOOLS,
+        tool_names=ASSIST_TOOLS | WORKSPACE_TOOLS,
         checkpoint_prefix="assist",
         daily_budget=120,
         # 比 Reflection 宽一点：那一档是一次纯文本推理，这一档可能先搜一次网、

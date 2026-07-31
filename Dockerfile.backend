@@ -19,6 +19,11 @@ RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
+# 宠物工作区的挂载点。**必须在镜像里先建好并 chown**：Docker 给全新的命名卷
+# 套用镜像里同名目录的属主，目录不存在时卷就是 root:root——而 skill-worker 跑在
+# 65534 下，那样它连自己的工作目录都写不进去（且失败发生在运行时，不是构建时）。
+RUN mkdir -p /workspace && chown 65534:65534 /workspace
+
 EXPOSE 8000
 
 # 只信任本机与私有网段的 X-Forwarded-For，防止客户端伪造 XFF 绕过登录限流

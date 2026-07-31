@@ -2,6 +2,7 @@ import json
 import logging
 from typing import Any
 
+import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -515,3 +516,31 @@ async def handle_chat_assist(
             )
         )
         await db.commit()
+
+
+@procrastinate_app.periodic(cron="41 3 * * *")
+@procrastinate_app.task(name="workspace.cleanup", queue="companion")
+async def cleanup_workspace(timestamp: int) -> None:
+    """清掉工作区里的过期文件。
+
+    工作区是草稿纸不是仓库：分析完的中间文件留着，只会让下一次分析读到过期
+    数据，而且悄无声息。保留期见 WORKSPACE_RETENTION_DAYS。
+
+    清理动作发在 skill-worker 上——那个卷只挂在它那儿，API 容器根本看不到。
+    """
+    del timestamp
+    settings = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.skill_worker_url.rstrip('/')}/workspace/cleanup",
+                headers={"X-Skill-Worker-Token": settings.skill_worker_token},
+            )
+            response.raise_for_status()
+            removed = response.json().get("removed", [])
+    except Exception:
+        # 清理失败不该让 worker 崩，下一次定时还会再来
+        logger.exception("工作区清理失败")
+        return
+    if removed:
+        logger.info("工作区清理了 %s 个过期文件", len(removed))

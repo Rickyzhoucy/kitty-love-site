@@ -90,6 +90,18 @@ class Settings(BaseSettings):
     skill_max_output_bytes: int = 1024 * 1024
     skill_script_timeout: float = 30.0
 
+    #: 宠物的工作目录。与 skill 包的缓存分开：那个是只读的、随时可重新materialize
+    #: 的派生物，这个是它自己写的东西，重启要还在。
+    workspace_dir: str = "/workspace"
+    #: 整个工作区的总上限。Docker 卷没有好用的配额，所以在应用层拦：
+    #: 写入前先算现有占用，超了直接拒绝。
+    workspace_max_bytes: int = Field(default=64 * 1024 * 1024, ge=1024 * 1024)
+    workspace_max_file_bytes: int = Field(default=8 * 1024 * 1024, ge=1024)
+    workspace_max_files: int = Field(default=200, ge=1, le=5_000)
+    #: 定期清理的保留天数。工作区是草稿纸不是仓库——分析完的中间文件留着只会
+    #: 让下一次分析读到过期数据。
+    workspace_retention_days: int = Field(default=14, ge=1, le=365)
+
     @model_validator(mode="after")
     def validate_embedding_dimensions(self) -> "Settings":
         if self.embedding_dimensions != 1024:

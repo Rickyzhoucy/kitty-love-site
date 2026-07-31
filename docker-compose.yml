@@ -165,9 +165,16 @@ services:
       SKILL_MAX_FILES: "500"
       SKILL_MAX_OUTPUT_BYTES: "1048576"
       SKILL_SCRIPT_TIMEOUT: ${SKILL_SCRIPT_TIMEOUT:-30}
+      WORKSPACE_DIR: /workspace
+      WORKSPACE_MAX_BYTES: ${WORKSPACE_MAX_BYTES:-67108864}
+      WORKSPACE_RETENTION_DAYS: ${WORKSPACE_RETENTION_DAYS:-14}
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
+    volumes:
+      # 宠物的工作目录。**不能用 tmpfs**：那是它自己写的东西，重启要还在。
+      # 总量在应用层拦（workspace.py），Docker 卷本身没有好用的配额。
+      - workspace-data:/workspace
     init: true
     cap_drop:
       - ALL
@@ -217,6 +224,7 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  workspace-data:
 
 networks:
   skill-internal:

@@ -47,6 +47,7 @@ from app.storage import ObjectStorage
 from app.tool_audit import build_tool_audit_middleware
 from app.web_search import build_search_provider
 from app.web_tools import build_web_tools
+from app.workspace_tools import build_workspace_tools
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +156,7 @@ def build_agent(
             *build_skill_tools(session_maker),
             *build_web_tools(build_search_provider()),
             *build_document_tools(session_maker),
+            *build_workspace_tools(get_settings()),
         ],
     )
     return create_agent(
