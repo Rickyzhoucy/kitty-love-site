@@ -25,9 +25,19 @@ x-apt-mirror: &apt-mirror
 
 services:
   web:
-    ports:
+    # **`!override` 不能省。** Compose 合并多个文件时，`ports` 是**追加**而不是
+    # 替换——不加这个标签，生效配置里会同时存在 `0.0.0.0:3000` 和
+    # `127.0.0.1:3000` 两条，同一个容器绑两次同一个端口，第二次直接
+    # 「address already in use」。而报错信息指向端口被占，会把人引去查别的进程，
+    # 其实系统层根本没人占（ss / lsof / docker-proxy 全查不到）。
+    ports: !override
       - "127.0.0.1:3000:3000"
     restart: always
+    # 旧站的上传文件。数据库里 `Photo.url` 存的是 `/uploads/xxx.jpg` 这种旧路径
+    # （新库刻意保留了这一列，见 models.py 里 legacy_url 的注释），文件不挂进来
+    # 的话那 29 张照片全是裂图。只读挂载——新上传走 MinIO，这批是历史遗留。
+    volumes:
+      - ${LEGACY_UPLOADS:-./legacy-uploads}:/app/public/uploads:ro
 
   postgres:
     restart: always
