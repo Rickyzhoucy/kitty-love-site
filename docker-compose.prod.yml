@@ -1,0 +1,22 @@
+# 生产覆盖层。`docker compose -f docker-compose.yml -f docker-compose.prod.yml …`
+#
+# 只做一件事：**把对外暴露的端口收回到回环。**
+#
+# 基础 compose 里 web 映射的是 `3000:3000`，绑在所有网卡上——那是为本地开发
+# 方便。生产环境前面站着 Caddy，公网只该经由 443 进来；直连 3000 会绕过 TLS，
+# 也绕过 Caddy 的访问日志。api 的 8000 同理（它本来就只绑回环，这里不动）。
+services:
+  web:
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: always
+  api:
+    restart: always
+  worker:
+    restart: always
+  skill-worker:
+    restart: always
+  postgres:
+    restart: always
+  minio:
+    restart: always
