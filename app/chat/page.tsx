@@ -46,6 +46,33 @@ const MAX_PENDING = 8;
  */
 const MENTION_AT_CARET = /@([^\s@]{0,24})$/;
 
+/**
+ * 谁都能用的通用叫法。**必须与后端 `chat_assist.GENERIC_MENTIONS` 一致**——
+ * 这边判断「要不要显示正在想」，那边判断「要不要真的去想」，两边分叉的结果是
+ * 转圈转到超时，或者答案凭空冒出来。
+ */
+const GENERIC_MENTIONS = ['@宠物', '@pet'];
+
+/**
+ * 这条消息有没有叫宠物。与后端 `mentions_pet` 同一套规则。
+ *
+ * 前端也判一次是为了**立刻**给出反馈：后端要十几秒才回，这段时间里用户需要
+ * 知道「它收到了」。判错的代价是对称的小事——多转一会儿圈，或者少转一会儿。
+ */
+function mentionsPet(body: string, petName: string): boolean {
+    const lowered = body.toLowerCase();
+    if (GENERIC_MENTIONS.some(alias => lowered.includes(alias))) return true;
+    if (!petName) return false;
+    const escaped = petName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`@\\s*${escaped}`, 'i').test(body);
+}
+
+/**
+ * 等宠物回话的上限。比后端 ASSIST 角色的 50s 超时再宽一点——那边超时会静默
+ * 放弃，这边得比它晚放手，否则会出现「圈停了、答案随后才到」。
+ */
+const ASSIST_WAIT_MS = 70_000;
+
 function isImage(attachment: Attachment): boolean {
     return attachment.contentType.startsWith('image/');
 }
@@ -102,6 +129,17 @@ export default function ChatPage() {
     const [zoomed, setZoomed] = useState<LightboxImage | null>(null);
     /** 光标前那段 `@` 后面的字；null 表示光标不在一个 @ 里，候选不该出现。 */
     const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+    /**
+     * 正在等宠物回话的那条消息。
+     *
+     * 记的是 messageId 而不是一个布尔量：插话落库时带着 `messageId`，所以
+     * 「这一次的回答到了没有」可以精确判断，不用靠时间猜。`timedOut` 是等
+     * 太久之后的降级——**不能就这么让圈消失**，那等于把「它收到了吗」这个
+     * 疑问原样还给用户，而这正是要修的东西。
+     */
+    const [awaiting, setAwaiting] = useState<
+        { messageId: string; timedOut: boolean } | null
+    >(null);
     const threadRef = useRef<HTMLDivElement | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -167,10 +205,12 @@ export default function ChatPage() {
 
     const stream = useMemo(() => buildStream(thread), [thread]);
 
+    // 「正在想」那块不在 stream 里，但它出现/消失同样会改变内容高度——
+    // 不跟着滚的话，它正好落在可视区外面，等于没做。
     useEffect(() => {
         const node = threadRef.current;
         if (node) node.scrollTop = node.scrollHeight;
-    }, [stream]);
+    }, [stream, awaiting]);
 
     const addFiles = useCallback(async (files: FileList | File[] | null) => {
         const incoming = Array.from(files ?? []);
@@ -206,7 +246,12 @@ export default function ChatPage() {
             }));
         }
         try {
-            await sendDirectMessage(body, attachments.map(item => item.id));
+            const sent = await sendDirectMessage(body, attachments.map(item => item.id));
+            // 叫了宠物就立刻挂上「正在想」。后端是排队后台答的，十几秒里
+            // 屏幕上不该什么都没有——那正是「我都不知道他收没收到」的来源。
+            if (mentionsPet(body, petName)) {
+                setAwaiting({ messageId: sent.id, timedOut: false });
+            }
             await load();
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : '没发出去');
@@ -216,6 +261,24 @@ export default function ChatPage() {
             setSending(false);
         }
     };
+
+    /** 这一次的回答到了没有。按 messageId 精确匹配，不靠时间猜。 */
+    const answered = Boolean(
+        awaiting
+        && thread?.interjections.some(item => item.messageId === awaiting.messageId),
+    );
+
+    // 等太久就换个说法，而不是让圈悄悄消失。后端超时是静默放弃的，
+    // 不标出来的话用户会一直等一句永远不来的话。
+    useEffect(() => {
+        if (!awaiting || awaiting.timedOut || answered) return;
+        const timer = setTimeout(
+            () => setAwaiting(current =>
+                current ? { ...current, timedOut: true } : null),
+            ASSIST_WAIT_MS,
+        );
+        return () => clearTimeout(timer);
+    }, [awaiting, answered]);
 
     /**
      * 候选是否该出现。名字是用户能随时改的，所以这里**只认当前的宠物名**，
@@ -384,6 +447,28 @@ export default function ChatPage() {
                         </div>
                     );
                 })}
+
+                {/* 「它收到了没有」——叫完宠物到它开口之间有十几秒，这段空白
+                    以前什么都没有。答案到了这块自然消失（被真的插话顶替）。 */}
+                {awaiting && !answered && (
+                    <div className={`${styles.interjection} ${styles.thinking}`}>
+                        <span className={styles.interjectionIcon} aria-hidden="true">
+                            {petEmoji}
+                        </span>
+                        <div className={styles.interjectionBody} role="status">
+                            {awaiting.timedOut ? (
+                                `${petName}这次没答上来，再叫一次试试。`
+                            ) : (
+                                <>
+                                    {petName}正在想
+                                    <span className={styles.thinkingDots} aria-hidden="true">
+                                        <i /><i /><i />
+                                    </span>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {error && <p className={styles.hint}>{error}</p>}

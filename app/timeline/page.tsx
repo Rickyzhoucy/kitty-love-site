@@ -249,8 +249,10 @@ export default function Timeline() {
             ) : milestones.length === 0 ? (
                 <EmptyState icon="⭐" title="还没有记录故事" hint="点击上方按钮添加吧" />
             ) : (
-                <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
-                    {/* 地图。窄屏吸顶、宽屏吸在右侧——两种情况下它都必须**留在视野里**，
+                <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)]">
+                    {/* 地图。**主角是时间轴，它是配角**——所以给窄的那一栏，高度也
+                        压到半屏出头：它的作用是「这条记在哪儿」的旁注，不是自己占一页。
+                        但仍然吸住：窄屏吸顶、宽屏吸在右侧，两种情况下都必须留在视野里，
                         否则左右分栏就退化回了「翻到另一页去看」。 */}
                     <div className="sticky top-0 z-10 order-1 -mx-4 px-4 pb-3 pt-1 lg:order-2 lg:top-4 lg:mx-0 lg:px-0 lg:pb-0 lg:pt-0">
                         <Card className="overflow-hidden p-0" data-no-pet-walk>
@@ -259,7 +261,7 @@ export default function Timeline() {
                                 onSelectPin={selectFromMap}
                                 focus={focus}
                                 selectedId={selectedId}
-                                className="h-[34vh] w-full lg:h-[calc(100vh-11rem)] lg:min-h-[420px]"
+                                className="h-[28vh] w-full lg:h-[46vh] lg:min-h-[300px]"
                             />
                         </Card>
                         {placed.length === 0 && (
@@ -269,9 +271,18 @@ export default function Timeline() {
                         )}
                     </div>
 
-                    {/* 故事列表。一列而不是原来左右交错的时间轴：交错版在半幅宽度里
-                        每张卡只剩一半可读宽度，而它换来的对称感在这儿没有用武之地。 */}
-                    <ol className="order-2 m-0 grid list-none gap-3 p-0 lg:order-1">
+                    {/* 时间轴。一条竖线串起所有节点——**这条线本身是内容**：
+                        它把一堆卡片变成「一路走过来」，那是这页存在的理由。
+                        （改成纯列表试过一版，看着像个待办清单。）
+
+                        单列而不是原来左右交错：交错版在分栏后只剩一半宽度，
+                        每张卡都被挤成窄条，换来的对称感在这儿没有用武之地。 */}
+                    <div className="relative order-2 lg:order-1">
+                        <div
+                            className="absolute bottom-0 left-4 top-0 w-0.5 rounded-full bg-gradient-to-b from-accent/10 via-accent/50 to-accent/10"
+                            aria-hidden
+                        />
+                        <ol className="m-0 grid list-none gap-4 p-0">
                         {milestones.map(item => {
                             const placedItem = hasPlace(item);
                             const active = item.id === selectedId;
@@ -313,7 +324,28 @@ export default function Timeline() {
                                             itemRefs.current.delete(item.id);
                                         }
                                     }}
+                                    // 刻意**不**挂滚动进入动画。那个效果靠
+                                    // `animation-timeline: view()`，而当页面短到
+                                    // 不能滚时时间轴是 inactive 的，条目就可能停在
+                                    // opacity 0 上——为一点入场动画换「内容看不见」
+                                    // 的风险，不划算。
+                                    className="relative pl-12"
                                 >
+                                    {/* 线上的节点。选中的那个填实，扫一眼就知道
+                                        地图上亮着的是哪一条。 */}
+                                    <span
+                                        aria-hidden
+                                        className={cn(
+                                            'absolute left-4 top-5 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border-2 border-accent shadow-soft transition-colors',
+                                            active ? 'bg-accent' : 'bg-surface'
+                                        )}
+                                    >
+                                        <Heart
+                                            size={13}
+                                            fill="currentColor"
+                                            className={active ? 'text-on-accent' : 'text-accent'}
+                                        />
+                                    </span>
                                     <Card
                                         className={cn(
                                             'transition-shadow duration-200',
@@ -338,7 +370,8 @@ export default function Timeline() {
                                 </li>
                             );
                         })}
-                    </ol>
+                        </ol>
+                    </div>
                 </div>
             )}
         </div>
