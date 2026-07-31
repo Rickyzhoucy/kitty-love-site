@@ -22,6 +22,7 @@ from app.models import (
     Conversation,
     ConversationSummary,
     MemoryItem,
+    User,
     UserProfile,
 )
 from app.queue import ProcrastinateJobQueue, procrastinate_app, register_job
@@ -414,4 +415,64 @@ async def process_attachment(payload: dict) -> None:
             else "unsupported"
         )
         attachment.parse_error = None
+        await db.commit()
+
+
+@register_job("chat.assist")
+async def answer_chat_mention(payload: dict) -> None:
+    """两个人在私聊里 @ 了宠物，后台答一句（chat_assist 模块开头有设计说明）。
+
+    **为什么走后台**：模型要十几秒，而这段时间原本是卡在「发消息」那个请求里的
+    ——用户敲完回车，自己的话要等宠物想完才出现在屏幕上。发消息必须是即时的，
+    所以这里只排队，答案回来后写成插话并发一条 SSE，两边的界面自然刷出来。
+    """
+    await handle_chat_assist(
+        payload,
+        build_chat_model(get_settings()),
+        session_factory,
+    )
+
+
+async def handle_chat_assist(
+    payload: dict,
+    model: Any,
+    maker: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.chat_assist import ASSIST_KIND, answer, prepare
+    from app.models import OutboxEvent
+    from app.pet_mediation import record_interjection
+
+    asker_id = str(payload["user_id"])
+    partner_id = str(payload["partner_id"])
+    message_id = str(payload["message_id"])
+    pet_name = str(payload.get("pet_name") or "")
+    body = str(payload.get("body") or "")
+
+    async with maker() as db:
+        asker = await db.get(User, asker_id)
+        if asker is None:
+            return
+        request = await prepare(db, asker, partner_id, pet_name, body)
+        reply = await answer(model, request, pet_name)
+        if not reply:
+            return
+        # 问题是在双人聊天里问的，答案两个人都该看到——插话按 audience 存，
+        # 所以两边各写一条。
+        for audience in (asker_id, partner_id):
+            await record_interjection(db, audience, ASSIST_KIND, reply, message_id)
+        # 复用既有的 chat.message 通道让两边刷新。不带正文：SSE 是广播给所有
+        # 连接的，内容只该由收件人自己去拉（与 send_direct_message 同一条规矩）。
+        db.add(
+            OutboxEvent(
+                topic="chat.message",
+                aggregate_type="petInterjection",
+                aggregate_id=message_id,
+                payload={
+                    "messageId": message_id,
+                    "senderId": asker_id,
+                    "recipientId": partner_id,
+                    "hasAttachments": False,
+                },
+            )
+        )
         await db.commit()

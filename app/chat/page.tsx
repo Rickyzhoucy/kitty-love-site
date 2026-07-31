@@ -269,7 +269,7 @@ export default function ChatPage() {
                     </h1>
                     {/* 刻意不显示「已读/未读」——那是压力来源。 */}
                     <p className={styles.headerHint}>
-                        {petName}会在这儿帮着传话
+                        {petName}会在这儿帮着传话 · 打 @{petName} 可以叫它
                     </p>
                 </div>
             </header>

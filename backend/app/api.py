@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 from typing import Annotated, Any
 
@@ -22,6 +23,7 @@ from app.auth import (
     create_session,
     verify_password,
 )
+from app.chat_assist import mentions_pet
 from app.cognition_queue import DAILY_PROACTIVE_BUDGET, CognitionType
 from app.config import Settings, get_settings
 from app.conversations import ConversationService
@@ -41,6 +43,8 @@ from app.direct_messages import (
 from app.events import stream_outbox
 from app.future_letters import (
     create as create_letter,
+)
+from app.future_letters import (
     list_letters,
     open_letter,
     redact,
@@ -69,7 +73,11 @@ from app.models import (
 )
 from app.moods import (
     history as mood_history,
+)
+from app.moods import (
     partner_today as mood_of_partner,
+)
+from app.moods import (
     upsert as upsert_mood,
 )
 from app.pet_cognition import PetCognitionService
@@ -145,6 +153,7 @@ from app.schemas import (
 from app.services import CrudService
 from app.storage import ObjectStorage, get_storage
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 Db = Annotated[AsyncSession, Depends(get_session)]
 Storage = Annotated[ObjectStorage, Depends(get_storage)]
@@ -941,6 +950,7 @@ async def send_direct_message(
     data: DirectMessageCreate,
     db: Db,
     user: CurrentUser,
+    request: Request,
 ):
     if not data.body.strip() and not data.attachment_ids:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "说点什么或者带个附件")
@@ -951,6 +961,31 @@ async def send_direct_message(
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
 
     message = await send_message(db, user.id, partner.id, data.body, attachments)
+
+    # @ 了宠物就让它就着最近的对话答一句。**只排队，不在这里等**：模型要十几秒，
+    # 而这段时间是卡在发消息这个请求里的——用户敲完回车，自己的话要等宠物想完
+    # 才出现在屏幕上。答案回来后由 chat.assist 任务写成插话并发 SSE 通知两边。
+    #
+    # 整段包在 try 里：叫一次没答上来是小事，它导致消息发不出去是大事。
+    try:
+        companion, _ = await resolve_pet(db, user.id)
+        queue = getattr(request.app.state, "job_queue", None)
+        if queue is not None and mentions_pet(data.body, companion.name):
+            await queue.enqueue(
+                "chat.assist",
+                {
+                    "user_id": user.id,
+                    "partner_id": partner.id,
+                    "message_id": message.id,
+                    "pet_name": companion.name,
+                    "body": data.body,
+                },
+                # 按消息去重：同一条消息重复投递（重试、双击）只答一次。
+                idempotency_key=message.id,
+            )
+    except Exception:
+        logger.exception("宠物应答没能排上队，消息照常发出")
+
     # 走既有的 SSE 通道通知对方。人不在站上时收不到——那是已知边界，
     # 真正的推送需要 Web Push，不在本次范围（计划文档 §3.6）。
     db.add(
