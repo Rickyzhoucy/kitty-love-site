@@ -9,6 +9,23 @@ import {
 } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import {
+    BookHeart,
+    CalendarHeart,
+    Drumstick,
+    Leaf,
+    MessageCircleHeart,
+    BellRing,
+    Moon,
+    PartyPopper,
+    PawPrint,
+    Pencil,
+    Footprints,
+    Palette,
+    Ruler,
+    Volleyball,
+    type LucideIcon,
+} from 'lucide-react';
 import { streamChat } from '@/lib/api/chat';
 import type { AgentTaskEvent } from '@/lib/api/events';
 import { recordPetEvent } from '@/lib/api/petCognition';
@@ -16,6 +33,7 @@ import { uploadAttachment, type Attachment } from '@/lib/api/attachments';
 import { ApiError } from '@/lib/api/client';
 import { useChatNudge } from '../ChatMediationProvider';
 import DailyRitualPanel from '../DailyRitualPanel';
+import SpeechBubble from './SpeechBubble';
 import styles from './FloatingPet.module.css';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
 import type { PetInitiative } from './petBodyProtocol';
@@ -45,13 +63,13 @@ const MENU_TITLES: Record<Exclude<MenuType, 'none' | 'main'>, string> = {
 
 type PetActionId = 'calm' | 'walk' | 'sleep' | 'play' | 'feed' | 'cheer';
 
-const PET_ACTIONS: { id: PetActionId; emoji: string; label: string }[] = [
-    { id: 'calm', emoji: '🍃', label: '安静待着' },
-    { id: 'walk', emoji: '🚶', label: '走两步' },
-    { id: 'sleep', emoji: '😴', label: '睡一会儿' },
-    { id: 'play', emoji: '🎾', label: '玩耍' },
-    { id: 'feed', emoji: '🍖', label: '吃东西' },
-    { id: 'cheer', emoji: '🎉', label: '开心一下' },
+const PET_ACTIONS: { id: PetActionId; icon: LucideIcon; label: string }[] = [
+    { id: 'calm', icon: Leaf, label: '安静待着' },
+    { id: 'walk', icon: Footprints, label: '走两步' },
+    { id: 'sleep', icon: Moon, label: '睡一会儿' },
+    { id: 'play', icon: Volleyball, label: '玩耍' },
+    { id: 'feed', icon: Drumstick, label: '吃东西' },
+    { id: 'cheer', icon: PartyPopper, label: '开心一下' },
 ];
 
 const INITIATIVE_OPTIONS: { id: PetInitiative; label: string; hint: string }[] = [
@@ -197,6 +215,10 @@ export default function FloatingPet() {
         const message = input || (pendingAttachments.length ? '请查看我发的附件' : '');
         if (!message || sending || uploading) return;
         setChatInput('');
+        // 说完就把输入面板收起来，让位给气泡。两块都是浮在宠物头上的卡片，
+        // 同时开着会叠在一起——而且这块面板本来就是个「发起」入口（几个快捷
+        // 短语 + 一个输入框），不是聊天记录，记录在对话本里。
+        setChatOpen(false);
         setSending(true);
         markInteraction('chat');
         activityBridge.beginThinking();
@@ -324,6 +346,15 @@ export default function FloatingPet() {
 
     if (shouldSkip) return null;
 
+    const petEmoji = PET_ASSETS.find(asset => asset.id === pet?.assetId)?.emoji ?? '🐾';
+    // 气泡贴着宠物所在的那一侧展开。`position.right` 是离右边缘的距离，所以它
+    // 大于半个视口宽就说明宠物在左半边，气泡该左对齐——否则会往屏幕外伸。
+    // SSR 时没有 window，默认按右边算（宠物的初始位置就在右下角）。
+    const bubbleSide: 'left' | 'right' =
+        typeof window !== 'undefined' && position.right > window.innerWidth / 2
+            ? 'left'
+            : 'right';
+
     return (
         <aside
             ref={bodyRef}
@@ -406,10 +437,13 @@ export default function FloatingPet() {
             )}
 
             {speech && (
-                <div className={styles.speech} role="status">
-                    <span>{speech}</span>
-                    <button type="button" onClick={() => setSpeech(null)} aria-label="关闭消息">×</button>
-                </div>
+                <SpeechBubble
+                    text={speech}
+                    petName={pet?.name ?? '它'}
+                    petEmoji={petEmoji}
+                    side={bubbleSide}
+                    onClose={() => setSpeech(null)}
+                />
             )}
 
             {menuType !== 'none' && (
@@ -440,36 +474,36 @@ export default function FloatingPet() {
                         <div className={styles.tileGrid}>
                             <button type="button" className={styles.tile}
                                 onClick={() => { setChatOpen(true); setMenuType('none'); }}>
-                                <span aria-hidden="true">💬</span>说句话
+                                <MessageCircleHeart size={19} className={styles.tileIcon} aria-hidden />说句话
                             </button>
                             {/* 一问 / 心情 / 情书。三个都是每天最多碰一次的小事，
                                 原本各占一个导航 tab，把真正常用的东西挤没了。 */}
                             <button type="button" className={styles.tile}
                                 onClick={() => { setRitualOpen(true); setMenuType('none'); }}>
-                                <span aria-hidden="true">🗓️</span>今天
+                                <CalendarHeart size={19} className={styles.tileIcon} aria-hidden />今天
                             </button>
                             <Link href="/companion" className={styles.tile} onClick={() => setMenuType('none')}>
-                                <span aria-hidden="true">📖</span>对话本
+                                <BookHeart size={19} className={styles.tileIcon} aria-hidden />对话本
                             </Link>
                             <button type="button" className={styles.tile}
                                 onClick={() => setMenuType('actions')}>
-                                <span aria-hidden="true">🐾</span>动作
+                                <PawPrint size={19} className={styles.tileIcon} aria-hidden />动作
                             </button>
                             <button type="button" className={styles.tile}
                                 onClick={() => setMenuType('appearance')}>
-                                <span aria-hidden="true">🎨</span>外观
+                                <Palette size={19} className={styles.tileIcon} aria-hidden />外观
                             </button>
                             <button type="button" className={styles.tile}
                                 onClick={() => setMenuType('size')}>
-                                <span aria-hidden="true">🔍</span>大小
+                                <Ruler size={19} className={styles.tileIcon} aria-hidden />大小
                             </button>
                             <button type="button" className={styles.tile}
                                 onClick={() => setMenuType('settings')}>
-                                <span aria-hidden="true">🌙</span>主动性
+                                <BellRing size={19} className={styles.tileIcon} aria-hidden />主动性
                             </button>
                             <button type="button" className={styles.tile}
                                 onClick={() => setMenuType('rename')}>
-                                <span aria-hidden="true">✏️</span>改名
+                                <Pencil size={19} className={styles.tileIcon} aria-hidden />改名
                             </button>
                         </div>
                     )}
@@ -485,7 +519,7 @@ export default function FloatingPet() {
                                     className={styles.tile}
                                     onClick={() => runAction(action.id)}
                                 >
-                                    <span aria-hidden="true">{action.emoji}</span>{action.label}
+                                    <action.icon size={19} className={styles.tileIcon} aria-hidden />{action.label}
                                 </button>
                             ))}
                         </div>
