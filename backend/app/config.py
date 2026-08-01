@@ -1,7 +1,19 @@
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+#: 用逗号分隔的列表型配置。
+#:
+#: **`NoDecode` 不能省。** pydantic-settings 默认拿 `list[str]` 当复合类型，
+#: 会先对环境变量做一次 JSON 解码，**在任何 validator 之前**。也就是说
+#: `WEBAUTHN_ORIGINS=https://love.rickyai.cn` 这种最自然的写法会直接抛
+#: `SettingsError`——而那是在 Settings 构造期，FastAPI 起不来，**整个站 502**，
+#: 不只是 passkey 用不了。要写成 `["https://love.rickyai.cn"]` 才行，可没人会
+#: 在 .env 里写 JSON。加上 `NoDecode` 把原始字符串交给下面的 validator，
+#: 逗号分隔和 JSON 两种写法就都收。
+CommaSeparated = Annotated[list[str], NoDecode]
 
 
 class Settings(BaseSettings):
@@ -60,11 +72,11 @@ class Settings(BaseSettings):
     webauthn_rp_name: str = "我们的小世界"
     #: 允许的来源。**要带协议和端口**，与浏览器发来的 Origin 逐字比较。
     #: 生产上是 https://love.rickyai.cn，本地是 http://localhost:3000。
-    webauthn_origins: list[str] = ["http://localhost:3000"]
+    webauthn_origins: CommaSeparated = ["http://localhost:3000"]
 
     outbox_poll_seconds: float = 1.0
     outbox_retention_days: int = Field(default=7, ge=1, le=90)
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: CommaSeparated = ["http://localhost:3000"]
 
     chat_model: str = "qwen3.6-flash"
     chat_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -125,6 +137,25 @@ class Settings(BaseSettings):
     #: 定期清理的保留天数。工作区是草稿纸不是仓库——分析完的中间文件留着只会
     #: 让下一次分析读到过期数据。
     workspace_retention_days: int = Field(default=14, ge=1, le=365)
+
+    @field_validator("webauthn_origins", "cors_origins", mode="before")
+    @classmethod
+    def split_comma_separated(cls, value: object) -> object:
+        """把 `a,b` 和 `["a","b"]` 都收下。
+
+        配合上面的 `NoDecode`：环境变量原样是字符串，这里自己拆。JSON 写法
+        仍然支持（旧的 .env 不会因为这次改动失效），但**逗号分隔才是主路**。
+        """
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            import json
+
+            return json.loads(text)
+        return [part.strip() for part in text.split(",") if part.strip()]
 
     @model_validator(mode="after")
     def validate_embedding_dimensions(self) -> "Settings":

@@ -92,6 +92,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-kitty}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-kitty_love_db}
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      # Passkey。**这两个必须跟着域名走。**
+      #
+      # RP ID 要和浏览器地址栏里的域名逐字一致，ORIGINS 要带协议（和非默认
+      # 端口）。配错**不会报错**，只会在按指纹时弹窗一闪而过、什么都不发生，
+      # 控制台也未必说清楚——所以默认值只对本地开发有效，生产必须在 .env 里
+      # 显式写上，见 backend/app/passkeys.py 顶部那段。
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-localhost}
+      WEBAUTHN_ORIGINS: ${WEBAUTHN_ORIGINS:-http://localhost:3000}
       MINIO_ENDPOINT: minio:9000
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
