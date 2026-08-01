@@ -114,9 +114,21 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_DIMENSIONS: "1024"
+      # 上下文预算。**这三个以前只写在 .env 里，从没传进容器**——改了不报错、
+      # 也不生效，而默认值恰好等于当时 .env 里的值，所以一直没人发现。
+      # 换模型之后再去调 .env 就会白调。
+      CHAT_CONTEXT_TOKENS: ${CHAT_CONTEXT_TOKENS:-256000}
+      CHAT_COMPACT_AT: ${CHAT_COMPACT_AT:-0.75}
+      CHAT_COMPACT_KEEP_MESSAGES: ${CHAT_COMPACT_KEEP_MESSAGES:-20}
       SKILL_BUCKET: skill-packages
       SKILL_WORKER_URL: http://skill-worker:8010
       SKILL_WORKER_TOKEN: ${SKILL_WORKER_TOKEN:?Set SKILL_WORKER_TOKEN in .env}
+      # 调用方据此算自己的 HTTP 超时（脚本超时 + 10 秒）。以前只传给了
+      # skill-worker 自己：worker 端按默认 30 秒算，40 秒就放弃，而 skill-worker
+      # 那头还在老老实实跑到 60 秒——落在中间的脚本，执行着执行着客户端先断了。
+      SKILL_SCRIPT_TIMEOUT: ${SKILL_SCRIPT_TIMEOUT:-30}
+      # 同源部署时用不上，但 Tauri 桌面端要靠它。留空即只允许本地开发那个源。
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
       # 联网搜索。不填 key 时 web_search 工具不会注册，其余功能不受影响。
       # 可选提供方：bocha（国内直连）/ tavily / brave
       WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-bocha}
@@ -156,10 +168,24 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
     pids_limit: 128
     mem_limit: 1g
     cpus: 2.0
     restart: unless-stopped
+    # **worker 也必须上 skill-internal。**
+    #
+    # 不写 networks 时只会落在 default 上，而 skill-worker 只在 skill-internal
+    # 上——于是 worker 里所有指向 `http://skill-worker:8010` 的调用都是
+    # 「Temporary failure in name resolution」。这不是假想：生产日志里每天
+    # 凌晨 3:41 的 workspace.cleanup 从上线起就没成功过一次（工作区因此只增
+    # 不减，直到撞上 64MB 上限把宠物的写入卡死），而且 worker 里跑的 ASSIST
+    # 角色带着全套 workspace 工具，@宠物 时只要它去碰工作区就同样失败。
+    # api 一直是对的（两个网络都在），所以这个问题只在后台任务里露头。
+    networks:
+      - default
+      - skill-internal
 
   skill-worker:
     build:
@@ -170,7 +196,10 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-development}
       MINIO_ENDPOINT: minio:9000
-      MINIO_PUBLIC_ENDPOINT: localhost:9000
+      # skill-worker 只用内网客户端取对象，从不签名，所以这个值实际用不到。
+      # 但别写死 localhost：一旦哪天它需要签一个 URL，配上 MINIO_PUBLIC_SECURE
+      # 就会签出 `https://localhost:9000/…` 这种谁也访问不到的地址。
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:9000}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
       MINIO_SECURE: "false"

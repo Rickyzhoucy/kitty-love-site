@@ -12,6 +12,7 @@ import RemindersList from './components/RemindersList';
 import Modal from './components/ui/Modal';
 import Button from './components/ui/Button';
 import { Input } from './components/ui/Input';
+import { useToast } from './components/ui/Toast';
 import { configApi, photosApi } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
@@ -69,6 +70,7 @@ export default function Home() {
   /** 正在编辑「在一起」的日子；null 表示没在编辑。 */
   const [editingAnniversary, setEditingAnniversary] = useState<string | null>(null);
   const [savingAnniversary, setSavingAnniversary] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     configApi.get()
@@ -153,22 +155,31 @@ export default function Home() {
                 小世界
               </motion.span>
             </h1>
-            {daysTogether !== null && (
+            {/* **入口不能挂在 daysTogether 上。**
+                这个天数来自站点配置 main_timer_date（宠物说的天数也读它），
+                而站内以前没有任何地方能改它——只能进数据库。现在点一下就能改。
+                但如果把按钮放进 `daysTogether !== null` 里，就会出现一个死结：
+                日期填成了未来（或者存进去一个解析不了的值），天数变成 null，
+                **这行连同唯一的编辑入口一起消失**，又只能回去动数据库了。
+                所以配置读回来之后就一直显示：算得出显示天数，算不出显示提示。 */}
+            {config.main_timer_date !== undefined && (
               <motion.p
                 className="mt-5 font-display text-lg md:text-2xl text-ink-muted mb-0"
                 initial={false}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 1, duration: 0.6 }}
               >
-                {/* 这个天数来自站点配置 main_timer_date（宠物说的天数也读它），
-                    以前**站内没有任何地方能改它**——只能进数据库。点一下就能改。 */}
                 <button
                   type="button"
                   onClick={() => setEditingAnniversary(config.main_timer_date || '')}
                   className="cursor-pointer border-0 bg-transparent p-0 font-display text-lg text-ink-muted transition-colors hover:text-accent md:text-2xl"
                   title="修改在一起的日子"
                 >
-                  — 在一起的第 <span className="text-accent font-semibold tabular-nums">{daysTogether}</span> 天 —
+                  {daysTogether !== null ? (
+                    <>— 在一起的第 <span className="text-accent font-semibold tabular-nums">{daysTogether}</span> 天 —</>
+                  ) : (
+                    <>— 还没设好在一起的日子 —</>
+                  )}
                 </button>
               </motion.p>
             )}
@@ -295,12 +306,19 @@ export default function Home() {
             if (editingAnniversary === null) return;
             setSavingAnniversary(true);
             try {
-              const saved = await configApi.update({ ...config, main_timer_date: editingAnniversary });
+              // **只回传这一个键，不要把整个 config 展开回去。**
+              // `/config` 返回的是白名单里的内容配置，但这张表历史上还躺着
+              // 旧后台写的行；整体回传时只要多出一个后端不认的键，整次保存
+              // 就 422，而报的是用户根本没碰过的配置项。
+              const saved = await configApi.update({ main_timer_date: editingAnniversary });
               setConfig(saved);
               setDaysTogether(daysSince(saved.main_timer_date));
               setEditingAnniversary(null);
+              toast('改好了');
             } catch (error) {
-              console.error('Failed to save anniversary', error);
+              // 以前这里只 console.error：保存失败时弹窗不关、也不说话，
+              // 用户完全看不出没存上。
+              toast(error instanceof Error ? error.message : '保存失败，请重试', 'error');
             } finally {
               setSavingAnniversary(false);
             }

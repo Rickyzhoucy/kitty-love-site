@@ -1,5 +1,9 @@
 .git
 .next*
+# macOS 的资源分叉文件。rsync 从 Mac 同步时会连它们一起带过来，
+# 而它们是二进制的、又躺在 tsc 扫得到的目录里。
+.DS_Store
+._*
 node_modules
 backend/.venv
 backend/.pytest_cache

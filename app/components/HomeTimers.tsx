@@ -12,6 +12,7 @@ import { useToast } from './ui/Toast';
 import { timersApi, type EventTimer } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
+import { toDateTimeLocalValue } from '@/lib/date';
 
 /** 首页计时器区块：文档流内，横向排列计时器卡片 */
 export default function HomeTimers() {
@@ -49,9 +50,11 @@ export default function HomeTimers() {
         setEditing(timer);
         setNewTimer({
             title: timer.title,
-            // datetime-local 只认 `YYYY-MM-DDTHH:mm`。老数据里可能是纯日期，
-            // 补上零点，否则输入框会因为格式不合直接显示成空的。
-            date: /^\d{4}-\d{2}-\d{2}$/.test(timer.date) ? `${timer.date}T00:00` : timer.date.slice(0, 16),
+            // datetime-local 只认 `YYYY-MM-DDTHH:mm`，而库里这一列是自由文本
+            // （纯日期、只有月日、甚至宠物建的「21:00」都可能）。统一转换，
+            // 转不出来的给空串，让人重新填一个——总比输入框莫名空白、
+            // 一保存把原值也冲掉要好。
+            date: toDateTimeLocalValue(timer.date),
             type: timer.type as 'countup' | 'countdown',
         });
         setShowAddTimer(true);
@@ -81,6 +84,9 @@ export default function HomeTimers() {
     };
 
     const handleDeleteTimer = async (id: string) => {
+        // 删除没有撤销，而这些是纪念日——问一句。
+        const target = timers.find(t => t.id === id);
+        if (!window.confirm(`删掉「${target?.title ?? '这个纪念日'}」？删了就找不回来了。`)) return;
         const previousTimers = [...timers];
         setTimers(timers.filter(t => t.id !== id));
         try {

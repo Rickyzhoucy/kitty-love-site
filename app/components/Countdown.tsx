@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Heart, Pencil, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { parseLocalDate } from '@/lib/date';
+import { isValidDate, parseLocalDate } from '@/lib/date';
 
 interface CountdownProps {
     startDate: string;
@@ -18,6 +18,9 @@ interface CountdownProps {
 export default function Countdown({ startDate, title, type = 'countup', onDelete, onEdit }: CountdownProps) {
     const [timeElapsed, setTimeElapsed] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
     const [isExpired, setIsExpired] = useState(false);
+    // `EventTimer.date` 是自由文本，宠物建的提醒可能只有「21:00」这种时间。
+    // 算不出日期就直说，别显示成「0 天」——那看着像个正常的已到期纪念日。
+    const badDate = !isValidDate(startDate);
 
     useEffect(() => {
         const calculateTimeElapsed = () => {
@@ -76,7 +79,7 @@ export default function Countdown({ startDate, title, type = 'countup', onDelete
                     {onEdit && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                            className="rounded p-0.5 text-ink-muted transition-colors hover:text-accent cursor-pointer focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                            className="rounded p-0.5 text-ink-muted transition-opacity transition-colors hover:text-accent cursor-pointer focus-visible:opacity-100 [@media(hover:hover)]:md:opacity-0 [@media(hover:hover)]:md:group-hover:opacity-100"
                             title="编辑"
                             aria-label={`编辑纪念日 ${title}`}
                         >
@@ -86,7 +89,7 @@ export default function Countdown({ startDate, title, type = 'countup', onDelete
                     {onDelete && (
                         <button
                             onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                            className="rounded p-0.5 text-ink-muted transition-colors hover:text-danger cursor-pointer focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                            className="rounded p-0.5 text-ink-muted transition-opacity transition-colors hover:text-danger cursor-pointer focus-visible:opacity-100 [@media(hover:hover)]:md:opacity-0 [@media(hover:hover)]:md:group-hover:opacity-100"
                             title="删除"
                             aria-label={`删除纪念日 ${title}`}
                         >
@@ -96,22 +99,42 @@ export default function Countdown({ startDate, title, type = 'countup', onDelete
                 </span>
             </div>
 
-            <div className={cn('relative mt-3 flex items-baseline gap-2', isExpired && 'opacity-50')}>
-                <span className="font-display text-6xl font-semibold leading-none text-accent tabular-nums">
-                    {timeElapsed.days}
-                </span>
-                <span className="text-sm tracking-widest text-ink-muted">天</span>
-            </div>
+            {badDate ? (
+                <div className="relative mt-3">
+                    <p className="m-0 font-display text-2xl font-semibold leading-tight text-ink-muted">
+                        日期没填对
+                    </p>
+                    <p className="m-0 mt-1 font-mono text-xs text-ink-muted/70">「{startDate}」</p>
+                    {onEdit && (
+                        <button
+                            type="button"
+                            onClick={onEdit}
+                            className="mt-2 cursor-pointer border-0 bg-transparent p-0 text-xs text-accent underline"
+                        >
+                            改一下
+                        </button>
+                    )}
+                </div>
+            ) : (
+                <div className={cn('relative mt-3 flex items-baseline gap-2', isExpired && 'opacity-50')}>
+                    <span className="font-display text-6xl font-semibold leading-none text-accent tabular-nums">
+                        {timeElapsed.days}
+                    </span>
+                    <span className="text-sm tracking-widest text-ink-muted">天</span>
+                </div>
+            )}
 
             {/* **这不是时刻，是「零头」**——整天之外还剩多少时分秒。
                 不写单位的话它长得和墙上的钟一模一样，会被拿去和当前时间比，
                 然后觉得「对不上」。加两个字就没这个歧义了。 */}
-            <div className={cn('relative mt-2 flex items-baseline gap-1.5', isExpired && 'opacity-50')}>
-                <span className="font-mono text-sm tabular-nums text-ink-muted">
-                    {pad(timeElapsed.hours)}:{pad(timeElapsed.minutes)}:{pad(timeElapsed.seconds)}
-                </span>
-                <span className="text-[10px] tracking-wider text-ink-muted/70">时分秒</span>
-            </div>
+            {!badDate && (
+                <div className={cn('relative mt-2 flex items-baseline gap-1.5', isExpired && 'opacity-50')}>
+                    <span className="font-mono text-sm tabular-nums text-ink-muted">
+                        {pad(timeElapsed.hours)}:{pad(timeElapsed.minutes)}:{pad(timeElapsed.seconds)}
+                    </span>
+                    <span className="text-[10px] tracking-wider text-ink-muted/70">时分秒</span>
+                </div>
+            )}
         </motion.div>
     );
 }
