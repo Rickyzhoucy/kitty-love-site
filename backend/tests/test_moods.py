@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from app.auth import hash_password
 from app.models import MoodEntry, User
+from app.localtime import local_today
 from app.moods import describe, entry_for, history, partner_today, upsert
 
 
@@ -29,7 +30,14 @@ async def _two_users(session_maker) -> tuple[str, str]:
 
 
 def _today() -> str:
-    return datetime.now(UTC).date().isoformat()
+    """**必须和被测代码用同一个时区。**
+
+    原来这里写的是 `datetime.now(UTC).date()`，而 `app.moods` 按 `local_today()`
+    （SITE_TIMEZONE，东八区）归档。两者每天有 8 小时是不同的日期——UTC 16:00
+    之后东八区已经是第二天了。于是这两个用例**只在北京时间 0—8 点之间失败**，
+    白天跑一万次都是绿的，晚上跑就红，看起来像随机 flake。
+    """
+    return local_today().isoformat()
 
 
 # ---- 一人一天一条 ----

@@ -19,6 +19,8 @@ export default function HomeTimers() {
     const [showAddTimer, setShowAddTimer] = useState(false);
     const [addingTimer, setAddingTimer] = useState(false);
     const [newTimer, setNewTimer] = useState({ title: '', date: '', type: 'countup' as 'countup' | 'countdown' });
+    /** 正在编辑的那条；null 表示这次是「新建」。同一个表单两用。 */
+    const [editing, setEditing] = useState<EventTimer | null>(null);
     const { toast } = useToast();
 
     const loadTimers = useCallback(async () => {
@@ -35,17 +37,44 @@ export default function HomeTimers() {
     }, [loadTimers]);
     useResourceEvents(['timers'], () => void loadTimers());
 
-    const handleAddTimer = async (e: React.FormEvent) => {
+    /** 点「添加」：空表单。 */
+    const openCreate = () => {
+        setEditing(null);
+        setNewTimer({ title: '', date: '', type: 'countup' });
+        setShowAddTimer(true);
+    };
+
+    /** 点卡片上的铅笔：把现有值填进同一个表单。 */
+    const openEdit = (timer: EventTimer) => {
+        setEditing(timer);
+        setNewTimer({
+            title: timer.title,
+            // datetime-local 只认 `YYYY-MM-DDTHH:mm`。老数据里可能是纯日期，
+            // 补上零点，否则输入框会因为格式不合直接显示成空的。
+            date: /^\d{4}-\d{2}-\d{2}$/.test(timer.date) ? `${timer.date}T00:00` : timer.date.slice(0, 16),
+            type: timer.type as 'countup' | 'countdown',
+        });
+        setShowAddTimer(true);
+    };
+
+    const handleSubmitTimer = async (e: React.FormEvent) => {
         e.preventDefault();
         setAddingTimer(true);
         try {
-            const added = await timersApi.create(newTimer);
-            setTimers([...timers, added]);
+            if (editing) {
+                const saved = await timersApi.update(editing.id, newTimer);
+                setTimers(timers.map(t => (t.id === editing.id ? saved : t)));
+                toast('已更新');
+            } else {
+                const added = await timersApi.create(newTimer);
+                setTimers([...timers, added]);
+                toast('纪念日添加成功 🎉');
+            }
             setNewTimer({ title: '', date: '', type: 'countup' });
+            setEditing(null);
             setShowAddTimer(false);
-            toast('纪念日添加成功 🎉');
         } catch (err) {
-            toast(err instanceof Error ? err.message : '添加失败', 'error');
+            toast(err instanceof Error ? err.message : (editing ? '保存失败' : '添加失败'), 'error');
         } finally {
             setAddingTimer(false);
         }
@@ -72,7 +101,7 @@ export default function HomeTimers() {
                     </span>
                     <span className="font-display text-2xl font-semibold tracking-wide text-ink">纪念日</span>
                 </h2>
-                <Button size="sm" variant="secondary" onClick={() => setShowAddTimer(true)} aria-label="添加新计时器">
+                <Button size="sm" variant="secondary" onClick={openCreate} aria-label="添加新计时器">
                     <Plus size={16} />
                     添加
                 </Button>
@@ -90,6 +119,7 @@ export default function HomeTimers() {
                                 startDate={t.date}
                                 title={t.title}
                                 type={t.type as 'countup' | 'countdown'}
+                                onEdit={() => openEdit(t)}
                                 onDelete={() => handleDeleteTimer(t.id)}
                             />
                         ))}
@@ -97,8 +127,15 @@ export default function HomeTimers() {
                 </div>
             )}
 
-            <Modal open={showAddTimer} onOpenChange={setShowAddTimer} title="添加新纪念日">
-                <form onSubmit={handleAddTimer} className="flex flex-col gap-4">
+            <Modal
+                open={showAddTimer}
+                onOpenChange={open => {
+                    setShowAddTimer(open);
+                    if (!open) setEditing(null);
+                }}
+                title={editing ? '编辑纪念日' : '添加新纪念日'}
+            >
+                <form onSubmit={handleSubmitTimer} className="flex flex-col gap-4">
                     <div>
                         <label htmlFor="timer-title" className="block mb-1.5 text-sm text-ink-muted">标题</label>
                         <Input
@@ -141,7 +178,9 @@ export default function HomeTimers() {
                         </div>
                     </div>
                     <Button type="submit" disabled={addingTimer} className="w-full">
-                        {addingTimer ? '添加中...' : '确认添加'}
+                        {addingTimer
+                            ? (editing ? '保存中...' : '添加中...')
+                            : (editing ? '保存' : '确认添加')}
                     </Button>
                 </form>
             </Modal>

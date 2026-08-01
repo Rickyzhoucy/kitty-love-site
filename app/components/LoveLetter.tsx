@@ -8,6 +8,8 @@ interface LoveLetterProps {
     isOpen: boolean;
     onClose: () => void;
     config: Record<string, string>;
+    /** 「在一起」那条正计时。没有纪念日时为 null，此时不显示计时块。 */
+    anniversary?: { date: string } | null;
 }
 
 function legacyHtmlToText(value: string): string {
@@ -22,7 +24,7 @@ function legacyHtmlToText(value: string): string {
         .trim();
 }
 
-export default function LoveLetter({ isOpen, onClose, config }: LoveLetterProps) {
+export default function LoveLetter({ isOpen, onClose, config, anniversary = null }: LoveLetterProps) {
     const letterTitle = config.letter_title || '致我最爱的人';
 
     return (
@@ -62,13 +64,21 @@ export default function LoveLetter({ isOpen, onClose, config }: LoveLetterProps)
                 )}
             </div>
 
-            <div className="mt-5 pt-5 border-t border-sunken flex justify-center">
-                <Countdown
-                    startDate={config.main_timer_date || '2025-11-30'}
-                    title="我们在一起已经"
-                    type="countup"
-                />
-            </div>
+            {/* 「在一起」这件事只有一个来源：纪念日列表里那条正计时。
+                以前这里读的是 config.main_timer_date，而首页卡片读的是
+                EventTimer 表——**同一件事两个数据源**，值还不一样（config
+                那个没设，落到硬编码的 '2025-11-30'，纯日期又被按 UTC 解析），
+                于是两处的天数和时分秒都对不上。现在由调用方把那条计时器传
+                进来，没有就不显示，而不是编一个日期出来。 */}
+            {anniversary && (
+                <div className="mt-5 pt-5 border-t border-sunken flex justify-center">
+                    <Countdown
+                        startDate={anniversary.date}
+                        title="我们在一起已经"
+                        type="countup"
+                    />
+                </div>
+            )}
         </Modal>
     );
 }

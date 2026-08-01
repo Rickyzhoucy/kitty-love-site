@@ -4,6 +4,8 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from app.pet_state import PetAssetId
+
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(
@@ -282,14 +284,9 @@ class MemoryRead(Entity, MemoryCreate):
 
 class PetUpdate(ApiModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    asset_id: Literal[
-        "kitty",
-        "momo",
-        "hello-kitty",
-        "snoopy",
-        "shiba",
-        "bichon",
-    ] | None = None
+    # 名单只有一份，在 app.pet_state 里。以前这里手抄了一遍，结果加了两只
+    # 插画版的狗之后两边对不上：前端能选，接口 422。
+    asset_id: PetAssetId | None = None
 
 
 class PetRead(Entity):

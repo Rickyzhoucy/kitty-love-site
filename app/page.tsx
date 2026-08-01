@@ -9,9 +9,13 @@ import HomeStage from './components/HomeStage';
 import LoveLetter from './components/LoveLetter';
 import HomeTimers from './components/HomeTimers';
 import RemindersList from './components/RemindersList';
+import Modal from './components/ui/Modal';
+import Button from './components/ui/Button';
+import { Input } from './components/ui/Input';
 import { configApi, photosApi } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
+import { daysSince } from '@/lib/date';
 
 const QUICK_LINKS = [
   { href: '/guestbook', num: '01', label: '留言板', en: 'Guestbook', icon: BookHeart },
@@ -62,6 +66,9 @@ export default function Home() {
   const [config, setConfig] = useState<Record<string, string>>({});
   const [daysTogether, setDaysTogether] = useState<number | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  /** 正在编辑「在一起」的日子；null 表示没在编辑。 */
+  const [editingAnniversary, setEditingAnniversary] = useState<string | null>(null);
+  const [savingAnniversary, setSavingAnniversary] = useState(false);
 
   useEffect(() => {
     configApi.get()
@@ -71,8 +78,11 @@ export default function Home() {
         // 在一起天数：与情书弹窗同一数据源。**不在这里兜默认值**——
         // 默认值是服务端给的（backend/app/site_config.py），前端再兜一个
         // 就成了两份真相，而宠物读的是服务端那份，说出来的天数会和这里对不上。
-        const diff = Date.now() - new Date(data.main_timer_date).getTime();
-        if (diff > 0) setDaysTogether(Math.floor(diff / 86400000));
+        //
+        // 用 daysSince 而不是 `new Date(...)`：main_timer_date 是纯日期，
+        // 直接 new Date 会按 UTC 零点算，东八区凭空多出 8 小时，
+        // 每天 0—8 点之间比纪念日卡片少一天。见 lib/date.ts。
+        setDaysTogether(daysSince(data.main_timer_date));
       })
       .catch(e => console.error('Failed to fetch config', e));
   }, []);
@@ -150,7 +160,16 @@ export default function Home() {
                 animate={{ opacity: 1 }}
                 transition={{ delay: 1, duration: 0.6 }}
               >
-                — 在一起的第 <span className="text-accent font-semibold tabular-nums">{daysTogether}</span> 天 —
+                {/* 这个天数来自站点配置 main_timer_date（宠物说的天数也读它），
+                    以前**站内没有任何地方能改它**——只能进数据库。点一下就能改。 */}
+                <button
+                  type="button"
+                  onClick={() => setEditingAnniversary(config.main_timer_date || '')}
+                  className="cursor-pointer border-0 bg-transparent p-0 font-display text-lg text-ink-muted transition-colors hover:text-accent md:text-2xl"
+                  title="修改在一起的日子"
+                >
+                  — 在一起的第 <span className="text-accent font-semibold tabular-nums">{daysTogether}</span> 天 —
+                </button>
               </motion.p>
             )}
           </div>
@@ -264,7 +283,59 @@ export default function Home() {
         </div>
       </motion.section>
 
-      <LoveLetter isOpen={showLetter} onClose={() => setShowLetter(false)} config={config} />
+      <Modal
+        open={editingAnniversary !== null}
+        onOpenChange={open => !open && setEditingAnniversary(null)}
+        title="在一起的日子"
+      >
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={async e => {
+            e.preventDefault();
+            if (editingAnniversary === null) return;
+            setSavingAnniversary(true);
+            try {
+              const saved = await configApi.update({ ...config, main_timer_date: editingAnniversary });
+              setConfig(saved);
+              setDaysTogether(daysSince(saved.main_timer_date));
+              setEditingAnniversary(null);
+            } catch (error) {
+              console.error('Failed to save anniversary', error);
+            } finally {
+              setSavingAnniversary(false);
+            }
+          }}
+        >
+          <div>
+            <label htmlFor="main-anniversary" className="mb-1.5 block text-sm text-ink-muted">
+              从哪天算起
+            </label>
+            <Input
+              id="main-anniversary"
+              required
+              type="date"
+              value={(editingAnniversary ?? '').slice(0, 10)}
+              onChange={e => setEditingAnniversary(e.target.value)}
+            />
+            <p className="mb-0 mt-2 text-xs leading-relaxed text-ink-muted">
+              首页这个天数、情书里的计时、还有 Kitty 说的天数，都按这个日子算。
+              <strong className="text-ink">下面「纪念日」里的卡片是另外一份</strong>
+              ——那些是单独的纪念日，改这里不会动它们。
+            </p>
+          </div>
+          <Button type="submit" disabled={savingAnniversary} className="w-full">
+            {savingAnniversary ? '保存中...' : '保存'}
+          </Button>
+        </form>
+      </Modal>
+
+      {/* 情书里那个计时和上面「在一起的第 N 天」用同一个日期，不再各读各的。 */}
+      <LoveLetter
+        isOpen={showLetter}
+        onClose={() => setShowLetter(false)}
+        config={config}
+        anniversary={config.main_timer_date ? { date: config.main_timer_date } : null}
+      />
     </div>
   );
 }

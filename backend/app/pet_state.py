@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal, get_args
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,15 +32,39 @@ MAX_OFFLINE_SECONDS = 12 * 60 * 60
 
 DEFAULT_ASSET = "kitty"
 
-ALLOWED_ASSETS = frozenset(
-    {"kitty", "momo", "hello-kitty", "snoopy", "shiba", "bichon"}
-)
+#: 可选的宠物造型。**这里是全后端唯一的名单**，`schemas.PetUpdate` 也从
+#: 这里取（见下面的 ALLOWED_ASSETS），前端的名单在
+#: `app/components/FloatingPet/petConfig.ts`。
+#:
+#: 加素材时**三处要一起改**：这个 Literal、下面的 SPECIES_BY_ASSET、
+#: 以及前端那份。漏了任何一处的表现都不一样，而且都不好查：
+#:
+#: - 漏了这个 Literal → 接口 422，前端只说「更换造型失败，请重试」；
+#: - 漏了 SPECIES_BY_ASSET → 静默按猫处理，一只狗会喵喵叫；
+#: - **只补 Literal 而漏了这里** → 改是改成功了，但下一次读取时
+#:   `get_or_create_profile` 发现 id 不在名单里，**悄悄把造型改回 kitty**
+#:   ——用户看到的是「换成功了，刷新一下又变回去了」。
+PetAssetId = Literal[
+    "kitty",
+    "momo",
+    "hello-kitty",
+    "snoopy",
+    "shiba",
+    "bichon",
+    "shiba-q",
+    "bichon-q",
+]
+
+ALLOWED_ASSETS = frozenset(get_args(PetAssetId))
 
 #: 资源 id → 物种。与迁移 0013 的表保持一致。
 SPECIES_BY_ASSET = {
     "shiba": "dog",
     "bichon": "dog",
     "snoopy": "dog",
+    # 插画版的同两只狗，物种当然还是狗。
+    "shiba-q": "dog",
+    "bichon-q": "dog",
     "kitty": "cat",
     "hello-kitty": "cat",
     "momo": "cat",

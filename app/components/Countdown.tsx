@@ -2,23 +2,26 @@
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Heart } from 'lucide-react';
+import { Heart, Pencil, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { parseLocalDate } from '@/lib/date';
 
 interface CountdownProps {
     startDate: string;
     title: string;
     type?: 'countup' | 'countdown';
     onDelete?: () => void;
+    onEdit?: () => void;
 }
 
-export default function Countdown({ startDate, title, type = 'countup', onDelete }: CountdownProps) {
+
+export default function Countdown({ startDate, title, type = 'countup', onDelete, onEdit }: CountdownProps) {
     const [timeElapsed, setTimeElapsed] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
     const [isExpired, setIsExpired] = useState(false);
 
     useEffect(() => {
         const calculateTimeElapsed = () => {
-            const date = new Date(startDate);
+            const date = parseLocalDate(startDate);
             const now = new Date();
             const difference = type === 'countup'
                 ? now.getTime() - date.getTime()
@@ -63,19 +66,34 @@ export default function Countdown({ startDate, title, type = 'countup', onDelete
                 {timeElapsed.days}
             </span>
 
+            {/* 改和删对所有卡片都给，不只是过期的那些。
+                之前 delete 挂在 `isExpired` 上——纪念日基本都没过期，等于
+                建好之后既改不了也删不了，只能去数据库里动手。 */}
             <div className="relative flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.25em] text-ink-muted">
                 <Heart size={11} className="text-accent" fill="currentColor" />
                 <span className={cn('truncate', isExpired && 'line-through')}>{title}</span>
-                {onDelete && isExpired && (
-                    <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        className="ml-auto text-ink-muted hover:text-danger transition-colors cursor-pointer"
-                        title="删除计时器"
-                        aria-label={`删除计时器 ${title}`}
-                    >
-                        ✕
-                    </button>
-                )}
+                <span className="ml-auto flex shrink-0 items-center gap-1">
+                    {onEdit && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                            className="rounded p-0.5 text-ink-muted transition-colors hover:text-accent cursor-pointer focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                            title="编辑"
+                            aria-label={`编辑纪念日 ${title}`}
+                        >
+                            <Pencil size={12} />
+                        </button>
+                    )}
+                    {onDelete && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                            className="rounded p-0.5 text-ink-muted transition-colors hover:text-danger cursor-pointer focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                            title="删除"
+                            aria-label={`删除纪念日 ${title}`}
+                        >
+                            <X size={12} />
+                        </button>
+                    )}
+                </span>
             </div>
 
             <div className={cn('relative mt-3 flex items-baseline gap-2', isExpired && 'opacity-50')}>
@@ -85,8 +103,14 @@ export default function Countdown({ startDate, title, type = 'countup', onDelete
                 <span className="text-sm tracking-widest text-ink-muted">天</span>
             </div>
 
-            <div className={cn('relative mt-2 font-mono text-sm tabular-nums text-ink-muted', isExpired && 'opacity-50')}>
-                {pad(timeElapsed.hours)}:{pad(timeElapsed.minutes)}:{pad(timeElapsed.seconds)}
+            {/* **这不是时刻，是「零头」**——整天之外还剩多少时分秒。
+                不写单位的话它长得和墙上的钟一模一样，会被拿去和当前时间比，
+                然后觉得「对不上」。加两个字就没这个歧义了。 */}
+            <div className={cn('relative mt-2 flex items-baseline gap-1.5', isExpired && 'opacity-50')}>
+                <span className="font-mono text-sm tabular-nums text-ink-muted">
+                    {pad(timeElapsed.hours)}:{pad(timeElapsed.minutes)}:{pad(timeElapsed.seconds)}
+                </span>
+                <span className="text-[10px] tracking-wider text-ink-muted/70">时分秒</span>
             </div>
         </motion.div>
     );
