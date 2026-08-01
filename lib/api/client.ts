@@ -106,9 +106,15 @@ async function request<T>(method: string, path: string, options: RequestOptions 
 
     if (response.status === 401 && typeof window !== 'undefined') {
         const pathname = window.location.pathname;
-        const isLoginPage = pathname.startsWith('/verify') || pathname === '/admin' || pathname === '/admin/';
+        const isAdmin = pathname.startsWith('/admin');
+        const isLoginPage = pathname.startsWith('/verify') || pathname.replace(/\/$/, '') === '/admin';
         if (!isLoginPage) {
-            window.location.assign(`/verify?redirect=${encodeURIComponent(pathname)}`);
+            // 后台和主站是两套账号，掉线了要各回各的登录页。
+            // 后台 401 跳 /verify 的话，人登进主站也还是进不去后台，
+            // 只会以为「密码不对」。
+            window.location.assign(
+                isAdmin ? '/admin' : `/verify?redirect=${encodeURIComponent(pathname)}`,
+            );
         }
     }
 

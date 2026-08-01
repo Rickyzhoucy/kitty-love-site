@@ -19,6 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from app.localtime import to_local
+from app.runtime_config import live
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ DEBOUNCE_SECONDS: dict[CognitionType, float] = {
     CognitionType.RELATIONSHIP_REFLECTION: 900.0,
     CognitionType.IMPORTANT_EVENT: 30.0,
 }
-DEFAULT_DEBOUNCE_SECONDS = 5.0
+# 没列在上面的类型走 `pet.debounce_seconds`（后台可改）。
 
 #: **不得触发模型的场景**（架构文档 §5.1）。
 #: 这不是文档注释，是 `is_forbidden_trigger` 的数据源——把这张表写进代码里，
@@ -110,7 +111,7 @@ class BudgetState:
     #:
     #: **这个字段修的是一个真的会让宠物哑掉的 bug。** 原本有个 `reset_daily()`
     #: 方法，但整个代码库里没有一处调用它——队列是进程内的，计数于是从进程启动
-    #: 起只增不减。跑够 `DAILY_CALL_BUDGET` 次之后，`submit()` 就永远返回
+    #: 起只增不减。跑够 `daily_call_budget()` 次之后，`submit()` 就永远返回
     #: `DAILY_BUDGET`：宠物不是今天不说话了，是**在这个进程重启前再也不说话了**。
     #:
     #: 改成随时间自己翻篇，而不是再补一个「谁来按时调 reset」的定时任务——
@@ -118,12 +119,26 @@ class BudgetState:
     day_ordinal: int = 0
 
 
-#: 每日模型调用上限（所有类型合计）。
-DAILY_CALL_BUDGET = 200
-#: 每日主动打扰上限。
-DAILY_PROACTIVE_BUDGET = 12
-#: 两次主动打扰的最小间隔（秒）。
-MIN_PROACTIVE_GAP_SECONDS = 600.0
+# 预算与节奏都在后台可改（见 app/runtime_config.py 的 pet.* 那一组）。
+#
+# **读的是快照而不是常量**：这段代码跑在没有数据库会话的同步路径上，拿不到
+# `await`。快照由任何一次配置加载顺带填上，进程刚起来时回落到环境变量默认值。
+# 代价是后台改完最多滞后十秒生效——对一个两人小站够了。
+
+
+def daily_call_budget() -> int:
+    """每日模型调用上限（所有类型合计）。这是花钱的总闸门。"""
+    return int(live("pet.daily_call_budget"))
+
+
+def daily_proactive_budget() -> int:
+    """每日主动打扰上限。填 0 就是完全不主动说话。"""
+    return int(live("pet.daily_proactive_budget"))
+
+
+def min_proactive_gap_seconds() -> float:
+    """两次主动打扰的最小间隔（秒）。"""
+    return float(live("pet.min_proactive_gap_seconds"))
 
 
 def proactive_gap_seconds(budget: BudgetState) -> float:
@@ -132,14 +147,14 @@ def proactive_gap_seconds(budget: BudgetState) -> float:
     用户连着推开三次，间隔就该翻倍，而不是继续按原节奏敲门。这是 §10 里
     `userDismissalRate` 唯一有意义的用法——只统计不作用等于没统计。
     """
-    return MIN_PROACTIVE_GAP_SECONDS * (1.0 + 3.0 * budget.user_dismissal_rate)
+    return min_proactive_gap_seconds() * (1.0 + 3.0 * budget.user_dismissal_rate)
 
 
 def allow_proactive(budget: BudgetState, now: float) -> bool:
     """能不能主动打扰。任意一条不满足就不行。"""
     if budget.initiative_off or budget.quiet_mode:
         return False
-    if budget.daily_proactive_count >= DAILY_PROACTIVE_BUDGET:
+    if budget.daily_proactive_count >= daily_proactive_budget():
         return False
     return now - budget.last_proactive_at >= proactive_gap_seconds(budget)
 
@@ -183,7 +198,7 @@ class CognitionQueue:
             return RejectReason.FORBIDDEN
         if request.expires_at and request.expires_at <= now:
             return RejectReason.EXPIRED
-        if self.budget.daily_call_count >= DAILY_CALL_BUDGET:
+        if self.budget.daily_call_count >= daily_call_budget():
             return RejectReason.DAILY_BUDGET
         if request.type is CognitionType.PROACTIVE_THOUGHT and not allow_proactive(
             self.budget, now
@@ -192,7 +207,9 @@ class CognitionQueue:
 
         key = request.dedupe_key
         if key:
-            debounce = DEBOUNCE_SECONDS.get(request.type, DEFAULT_DEBOUNCE_SECONDS)
+            debounce = DEBOUNCE_SECONDS.get(
+                request.type, float(live("pet.debounce_seconds"))
+            )
             if now - self._last_seen.get(key, float("-inf")) < debounce:
                 return RejectReason.DEBOUNCED
             existing = self._by_key.get(key)

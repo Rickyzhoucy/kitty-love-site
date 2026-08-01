@@ -97,10 +97,44 @@ class Milestone(StringIdMixin, CreatedAtMixin, AttributionMixin, Base):
 
 
 class Admin(StringIdMixin, CreatedAtMixin, Base):
+    """后台管理员。**与主站的 `User` 是两套账号。**
+
+    这张表是 Prisma 时代留下的，一直空着、也没有任何代码引用。现在把它启用为
+    后台的独立账号——形状正合适，而且新建一张只会让「有两张都像管理员的表」
+    这件事更糊涂。`password` 列里存的是 argon2 摘要，与主站同一套原语。
+
+    隔离的理由和做法见 `app/admin_auth.py` 的模块文档。
+    """
+
     __tablename__ = "Admin"
     username: Mapped[str] = mapped_column(String, unique=True)
     password: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String, default="pending")
+
+
+class AdminSession(StringIdMixin, CreatedAtMixin, Base):
+    """后台会话。结构与 `UserSession` 一致，但**刻意是另一张表**。
+
+    共用一张表就得靠一个 `kind` 字段区分，而那种设计里一次写错的查询就能让
+    主站会话被当成后台会话使用。分开之后，「后台权限」在类型层面就拿不到。
+    """
+
+    __tablename__ = "AdminSession"
+    admin_id: Mapped[str] = mapped_column(
+        "adminId", ForeignKey("Admin.id", ondelete="CASCADE")
+    )
+    token_hash: Mapped[bytes] = mapped_column("tokenHash", LargeBinary(32), unique=True)
+    expires_at: Mapped[datetime] = mapped_column("expiresAt", DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column("lastSeenAt", DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        "revokedAt", DateTime(timezone=True), nullable=True
+    )
+    device_name: Mapped[str | None] = mapped_column(
+        "deviceName", String(120), nullable=True
+    )
+    __table_args__ = (
+        Index("AdminSession_adminId_expiresAt_idx", "adminId", "expiresAt"),
+    )
 
 
 class SecurityQuestion(StringIdMixin, CreatedAtMixin, Base):

@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Pause, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { api } from '@/lib/api/client';
 
 /**
  * 首页那块「我们四个」。
@@ -32,6 +33,11 @@ import { cn } from '@/lib/utils';
  * 变成 5.6 秒的循环。实测把接缝从 8.90% 压到 4.61%，而且是柔和过渡而不是硬
  * 跳。淡化时长不是越长越好（0.7s→5.31%、1.2s→7.71%、1.8s→6.36%、2.4s→4.61%），
  * 换素材要重新扫一遍。生成和转码见 `scripts/generate-hero-video.py`。
+ *
+ * ## 素材可以在后台换掉
+ *
+ * 默认用的是镜像里自带的 `public/hero/*`。后台传过新的之后，`/site/hero` 会
+ * 返回一个接口地址，这里优先用它——**换首页那张图不再需要重新部署**。
  *
  * ## 静态模式是真的静态
  *
@@ -73,8 +79,27 @@ function serverMotion(): boolean {
     return false;
 }
 
+/** 镜像里自带的那份。后台没传过素材时用它。 */
+const BUILTIN = { video: '/hero/us-idle.mp4', poster: '/hero/us.webp' };
+
 export default function HomeStage({ onOpenLetter }: { onOpenLetter: () => void }) {
     const motion = useSyncExternalStore(subscribe, readMotion, serverMotion);
+    const [sources, setSources] = useState(BUILTIN);
+
+    useEffect(() => {
+        let cancelled = false;
+        api.get<{ video: string | null; poster: string | null }>('/site/hero')
+            .then(custom => {
+                if (cancelled) return;
+                setSources({
+                    video: custom.video ?? BUILTIN.video,
+                    poster: custom.poster ?? BUILTIN.poster,
+                });
+            })
+            // 拿不到就用自带的。首页不该因为一个装饰性接口挂了而开天窗。
+            .catch(() => undefined);
+        return () => { cancelled = true; };
+    }, []);
 
     const toggle = useCallback(() => {
         window.localStorage.setItem(STORAGE_KEY, motion ? 'off' : 'on');
@@ -99,7 +124,7 @@ export default function HomeStage({ onOpenLetter }: { onOpenLetter: () => void }
                 {motion ? (
                     <video
                         // 每次开关都重新挂载，避免复用上一次的播放位置。
-                        key="stage-video"
+                        key={sources.video}
                         className="absolute inset-0 h-full w-full object-contain transition-transform duration-700 ease-spring group-hover:scale-[1.03]"
                         // 三个属性缺一不可：移动端只有同时 muted + playsInline
                         // 才允许自动播放，否则 iOS 会把它顶成全屏播放器。
@@ -107,17 +132,17 @@ export default function HomeStage({ onOpenLetter }: { onOpenLetter: () => void }
                         muted
                         loop
                         playsInline
-                        poster="/hero/us.webp"
+                        poster={sources.poster}
                     >
                         {/* 只给 mp4。同一段片子 VP9 编出来 795KB、x264 只要
                             581KB——这种柔和的厚涂插画没什么高频细节，VP9 占不到
                             便宜。H.264 全平台都认，少一个源也少一处会出错的地方。 */}
-                        <source src="/hero/us-idle.mp4" type="video/mp4" />
+                        <source src={sources.video} type="video/mp4" />
                     </video>
                 ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                        src="/hero/us.webp"
+                        src={sources.poster}
                         alt="我们两个和两只狗在洒满阳光的客厅里"
                         className="absolute inset-0 h-full w-full object-contain transition-transform duration-700 ease-spring group-hover:scale-[1.03]"
                     />

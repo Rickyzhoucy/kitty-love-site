@@ -23,7 +23,15 @@ class Settings(BaseSettings):
     minio_public_endpoint: str = "localhost:9000"
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "development-only"
+    #: 后端连 MinIO 用不用 TLS。容器之间走内网明文，这里通常是 false。
     minio_secure: bool = False
+    #: **浏览器**连 MinIO 用不用 TLS。与上面那个刻意分开：
+    #:
+    #: 预签名 URL 是给浏览器用的，它的 host 和协议必须是浏览器能访问到的。
+    #: 生产上后端走 `minio:9000` 明文、浏览器走 `https://域名` 由 Caddy 反代，
+    #: 两者不可能是同一个值。合成一个字段的后果是：要么内网连接被强上 TLS
+    #: 而 MinIO 没开，要么签出来的链接是 http 而站点是 https（浏览器拦混合内容）。
+    minio_public_secure: bool = False
     minio_region: str = "us-east-1"
     minio_user_bucket: str = "user-uploads"
     minio_derived_bucket: str = "derived-assets"

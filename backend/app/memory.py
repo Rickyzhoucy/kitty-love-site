@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.embeddings import EmbeddingProvider
+from app.runtime_config import live
 from app.models import (
     Companion,
     EmbeddingProfile,
@@ -35,17 +36,21 @@ from app.schemas import MemoryCreate
 #:
 #: 0.55 取在「同义最低 0.64」和「不同最高 0.33」之间。宁可漏合并——多一条近义
 #: 记忆只是冗余，错误合并会让一件真事**永远进不了库**。
-NEAR_DUPLICATE_THRESHOLD = 0.55
+#:
+#: 下面四个是**默认值**，实际取值在后台可改（`memory.*` 那一组）。它们留在
+#: 这里而不是搬进注册表，是因为上面这段实测属于算法旁边；注册表里放的是同样
+#: 的字面量，`test_memory_defaults_match_registry` 盯着两边不许漂移。
+DEFAULT_NEAR_DUPLICATE_THRESHOLD = 0.55
 
 #: 每次只跟最近这些条比。全表比对在条目多起来之后是平方级开销，而措辞重复
 #: 几乎总是发生在相邻的几次反思之间。
-NEAR_DUPLICATE_SCAN = 60
+DEFAULT_NEAR_DUPLICATE_SCAN = 60
 
 #: 检索排序的时间半衰期（天）。
-RECENCY_HALF_LIFE_DAYS = 180.0
+DEFAULT_RECENCY_HALF_LIFE_DAYS = 180.0
 
 #: 衰减下限。「第一次见面」是两年前的事，不该因为年头久就检索不到。
-MIN_RECENCY_WEIGHT = 0.35
+DEFAULT_MIN_RECENCY_WEIGHT = 0.35
 
 
 class MemoryService:
@@ -202,12 +207,12 @@ class MemoryService:
                     MemoryItem.content_hash != content_hash,
                 )
                 .order_by(MemoryItem.created_at.desc())
-                .limit(NEAR_DUPLICATE_SCAN)
+                .limit(int(live("memory.near_duplicate_scan")))
             )
         )
         for candidate in candidates:
             score = self._bigram_similarity(data.content, candidate.content)
-            if score >= NEAR_DUPLICATE_THRESHOLD:
+            if score >= float(live("memory.near_duplicate_threshold")):
                 return candidate
         return None
 
@@ -403,13 +408,16 @@ class MemoryService:
         if occurred.tzinfo is None:
             occurred = occurred.replace(tzinfo=UTC)
         age_days = max(0.0, (utcnow() - occurred).total_seconds() / 86_400)
-        recency = max(MIN_RECENCY_WEIGHT, 0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS))
+        recency = max(
+            float(live("memory.min_recency_weight")),
+            0.5 ** (age_days / float(live("memory.recency_half_life_days"))),
+        )
         weight = 1.0 + (item.importance or 50) / 200
         return recency * weight
 
     @staticmethod
     def _bigram_similarity(left: str, right: str) -> float:
-        """按二元组算 Jaccard 相似度。近义去重专用，理由见 NEAR_DUPLICATE_THRESHOLD。
+        """按二元组算 Jaccard 相似度。近义去重专用，理由见 DEFAULT_NEAR_DUPLICATE_THRESHOLD 上面那段实测。
 
         与下面的 `_trigram_similarity` 并存而不是替换它：那个是检索侧的词法打分，
         改动会连带影响排序行为，而这里要的是另一件事（判同）。

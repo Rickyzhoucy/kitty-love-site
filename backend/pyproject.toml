@@ -12,6 +12,9 @@ dependencies = [
   "langchain-openai>=1.0.0",
   "langgraph-checkpoint-postgres>=3.0.0",
   "httpx>=0.28.1",
+  # 后台里改的 API Key 要加密落库（见 app/runtime_config.py）。
+  # 不手搓：这块要的是认证加密，自己拼 HMAC-CTR 容易在细节上出事。
+  "cryptography>=45.0.0",
   "minio>=7.2.15",
   "openpyxl>=3.1.5",
   "pillow>=11.3.0",

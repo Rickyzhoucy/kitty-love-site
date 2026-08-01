@@ -10,8 +10,8 @@ import pytest
 from sqlalchemy import select
 
 from app.memory import (
-    MIN_RECENCY_WEIGHT,
-    NEAR_DUPLICATE_THRESHOLD,
+    DEFAULT_MIN_RECENCY_WEIGHT,
+    DEFAULT_NEAR_DUPLICATE_THRESHOLD,
     MemoryService,
 )
 from app.models import Companion, MemoryItem, User
@@ -131,7 +131,7 @@ async def test_same_words_different_kind_stay_separate(session_maker):
     ],
 )
 def test_threshold_catches_rewording(left, right):
-    assert MemoryService._bigram_similarity(left, right) >= NEAR_DUPLICATE_THRESHOLD
+    assert MemoryService._bigram_similarity(left, right) >= DEFAULT_NEAR_DUPLICATE_THRESHOLD
 
 
 @pytest.mark.parametrize(
@@ -149,7 +149,7 @@ def test_threshold_rejects_different_facts(left, right):
     漏合并只是多一条冗余记忆；把「看电影」和「吃火锅」合成一条，会让后者
     永远进不了库。所以阈值往保守取。
     """
-    assert MemoryService._bigram_similarity(left, right) < NEAR_DUPLICATE_THRESHOLD
+    assert MemoryService._bigram_similarity(left, right) < DEFAULT_NEAR_DUPLICATE_THRESHOLD
 
 
 def test_trigram_cannot_do_this_job_on_chinese():
@@ -189,7 +189,7 @@ def test_recent_memories_outrank_old_ones_at_equal_relevance():
 def test_old_memories_never_decay_to_nothing():
     """「第一次见面」是两年前的事，不该因为年头久就检索不到。"""
     ancient = MemoryService._freshness(_item(3_650, importance=50))
-    assert ancient >= MIN_RECENCY_WEIGHT
+    assert ancient >= DEFAULT_MIN_RECENCY_WEIGHT
 
 
 def test_importance_only_nudges_the_ranking():
@@ -213,3 +213,23 @@ def test_missing_timestamps_do_not_crash_ranking():
         importance=50, content_hash="h",
     )
     assert MemoryService._freshness(item) == 1.0
+
+
+def test_memory_defaults_match_registry():
+    """算法旁边的默认值，和后台注册表里的默认值，必须是同一个数。
+
+    这两处**故意分开**：相似度阈值上面那段实测属于算法旁边，而后台要的是
+    一个能渲染成表单的声明。分开的代价就是可能漂移——所以用这条测试钉住。
+    改其中一处而不改另一处，这里会红。
+    """
+    from app import memory
+    from app.runtime_config import BY_KEY
+
+    pairs = {
+        "memory.near_duplicate_threshold": memory.DEFAULT_NEAR_DUPLICATE_THRESHOLD,
+        "memory.near_duplicate_scan": memory.DEFAULT_NEAR_DUPLICATE_SCAN,
+        "memory.recency_half_life_days": memory.DEFAULT_RECENCY_HALF_LIFE_DAYS,
+        "memory.min_recency_weight": memory.DEFAULT_MIN_RECENCY_WEIGHT,
+    }
+    for key, expected in pairs.items():
+        assert BY_KEY[key].fallback == expected, f"{key} 与 memory.py 里的默认值不一致"

@@ -22,8 +22,8 @@ from app.direct_messages import (
 from app.localtime import site_zone
 from app.models import DirectMessage, PetInterjection, User
 from app.pet_mediation import (
-    NUDGE_SCHEDULE_MINUTES,
-    STANDIN_AFTER_MINUTES,
+    nudge_schedule_minutes,
+    standin_after_minutes,
     STANDIN_TEMPLATES,
     decide_nudge,
     decide_standin,
@@ -133,10 +133,10 @@ def _now() -> datetime:
     return datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
 
 
-@pytest.mark.parametrize("step", range(len(NUDGE_SCHEDULE_MINUTES)))
+@pytest.mark.parametrize("step", range(len(nudge_schedule_minutes())))
 def test_nudges_follow_the_configured_schedule(step):
     now = _now()
-    since = now - timedelta(minutes=NUDGE_SCHEDULE_MINUTES[step])
+    since = now - timedelta(minutes=nudge_schedule_minutes()[step])
     decision = decide_nudge(since, step, now)
     assert decision.should_nudge is True
     assert decision.body
@@ -148,7 +148,7 @@ def test_nudging_stops_after_three_times():
     不停的话，提醒就变成骚扰了。
     """
     now = _now()
-    decision = decide_nudge(now - timedelta(hours=5), len(NUDGE_SCHEDULE_MINUTES), now)
+    decision = decide_nudge(now - timedelta(hours=5), len(nudge_schedule_minutes()), now)
     assert decision.should_nudge is False
     assert "不再主动提" in decision.reason
 
@@ -216,7 +216,7 @@ def test_no_unread_means_nothing_to_say():
 def test_standin_needs_both_time_and_a_waiting_sender():
     """只是没看还不够——对方可能发完就去忙了，替他制造一次互动反而是打扰。"""
     now = _now()
-    long_ago = now - timedelta(minutes=STANDIN_AFTER_MINUTES + 5)
+    long_ago = now - timedelta(minutes=standin_after_minutes() + 5)
 
     should, *_ = decide_standin(long_ago, True, False, now)
     assert should is True

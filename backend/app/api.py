@@ -25,7 +25,7 @@ from app.auth import (
     verify_password,
 )
 from app.chat_assist import mentions_pet
-from app.cognition_queue import DAILY_PROACTIVE_BUDGET, CognitionType
+from app.cognition_queue import CognitionType, daily_proactive_budget
 from app.config import Settings, get_settings
 from app.conversations import ConversationService
 from app.daily_questions import both_answered, ensure_today, get_answer, submit_answer
@@ -151,6 +151,7 @@ from app.schemas import (
 from app.services import CrudService
 from app.site_config import EDITABLE_KEYS as EDITABLE_SITE_CONFIG_KEYS
 from app.site_config import load as load_site_config
+from app import runtime_config
 from app.storage import ObjectStorage, get_storage
 
 logger = logging.getLogger(__name__)
@@ -865,7 +866,7 @@ async def run_pet_cognition(
                 )
             ),
             active_task=data.active_task,
-            proactive_budget_left=DAILY_PROACTIVE_BUDGET,
+            proactive_budget_left=daily_proactive_budget(),
             partner_mood=partner_mood,
             # 近期纪念日。查一次表就有，宠物却因此能在纪念日前一周说人话，
             # 而不是只会「你很久没理我了」。
@@ -1447,4 +1448,51 @@ async def events(
         ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
+    )
+
+
+# ── 首页素材 ──────────────────────────────────────────────────────────────
+#
+# 素材本来是 `public/hero/*` 里的静态文件，烤在镜像里，换一张要重新部署。
+# 后台上传之后存进对象存储，这两个接口负责把它交给浏览器。
+
+HERO_SLOTS = ("video", "poster")
+
+
+@router.get("/site/hero")
+async def read_hero(db: Db, _: CurrentUser) -> dict[str, str | None]:
+    """首页该用哪份素材。没配过就返回 null，前端回落到镜像自带的那份。"""
+    values = await runtime_config.load_all(db)
+    return {
+        slot: (f"/api/v1/site/hero/{slot}/content" if values[f"site.hero_{slot}_attachment"] else None)
+        for slot in HERO_SLOTS
+    }
+
+
+@router.get("/site/hero/{slot}/content")
+async def read_hero_content(
+    slot: str,
+    db: Db,
+    storage: Storage,
+    settings: Annotated[Settings, Depends(get_settings)],
+    _: CurrentUser,
+) -> Response:
+    """把素材本体发出去。
+
+    **不用预签名重定向。** 预签名 URL 的 host 必须是浏览器能直接访问到的
+    MinIO 地址，而生产上 MinIO 只绑回环、外面只有 Caddy 的 443。走后端转发一次
+    虽然多花点带宽，但不需要把对象存储暴露到公网，也不需要额外的域名和证书。
+    素材本身只有几百 KB，两个人用，代价可以忽略。
+    """
+    if slot not in HERO_SLOTS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这个槽位")
+    key = (await runtime_config.load_all(db, settings))[f"site.hero_{slot}_attachment"]
+    if not key:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有自定义素材")
+    payload = await storage.get_bytes(settings.minio_derived_bucket, str(key))
+    media_type = "video/mp4" if slot == "video" else "image/webp"
+    return Response(
+        content=payload,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=300"},
     )

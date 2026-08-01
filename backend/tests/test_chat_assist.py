@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.auth import hash_password
 from app.chat_assist import (
-    CONTEXT_MESSAGES,
+    context_messages,
     SYSTEM_PROMPT,
     WEEKDAYS,
     build_situation,
@@ -111,7 +111,7 @@ async def test_transcript_is_capped(session_maker):
     """只给最近的一段。整段历史既贵又会淹掉刚才在说的事。"""
     me, partner_id = await _two_users(session_maker)
     async with session_maker() as db:
-        for index in range(CONTEXT_MESSAGES + 8):
+        for index in range(context_messages() + 8):
             await send_message(db, me, partner_id, f"第{index}条", [])
         await db.commit()
 
@@ -120,10 +120,10 @@ async def test_transcript_is_capped(session_maker):
         messages = await list_thread(db, me, partner_id)
 
     transcript = build_transcript(messages, {me: "Ricky", partner_id: "宝贝"})
-    assert len(transcript.splitlines()) == CONTEXT_MESSAGES
+    assert len(transcript.splitlines()) == context_messages()
     # 保留的是**最近**的，不是最早的
     assert "第0条" not in transcript
-    assert f"第{CONTEXT_MESSAGES + 7}条" in transcript
+    assert f"第{context_messages() + 7}条" in transcript
 
 
 async def test_attachment_only_message_still_appears(session_maker):

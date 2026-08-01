@@ -19,11 +19,13 @@ class ObjectStorage:
             secret_key=self.settings.minio_secret_key,
             secure=self.settings.minio_secure,
         )
+        # 签名用的客户端指向**浏览器能访问到的**地址，协议也单独一个开关。
+        # 见 config 里 minio_public_secure 的注释。
         self.presign_client = Minio(
             self.settings.minio_public_endpoint,
             access_key=self.settings.minio_access_key,
             secret_key=self.settings.minio_secret_key,
-            secure=self.settings.minio_secure,
+            secure=self.settings.minio_public_secure,
             region=self.settings.minio_region,
         )
 

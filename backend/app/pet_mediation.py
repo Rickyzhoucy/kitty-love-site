@@ -33,19 +33,47 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.localtime import to_local
+from app.runtime_config import live
 from app.models import DirectMessage, PetInterjection, utcnow
 
 logger = logging.getLogger(__name__)
 
-#: 催你看消息的时间点（分钟）。**递减而非递增**——三次之后不再主动提，
-#: 只保持身体姿态。递增会让它从提醒变成骚扰。
-NUDGE_SCHEDULE_MINUTES = (0, 10, 30)
+# 下面三项都在后台可改（app/runtime_config.py 的 pet.* 分组）。读快照而不是
+# 常量的理由见 cognition_queue 里同样的注释：这些跑在同步路径上。
 
-#: 超过这个时长且对方还在等，宠物才在**对方**那侧说话。
-STANDIN_AFTER_MINUTES = 30
 
-#: 深夜静默时段（本地小时）。纪念日当天可以突破安静模式，唠叨不行。
-QUIET_HOURS = (time(23, 0), time(8, 0))
+def nudge_schedule_minutes() -> tuple[int, ...]:
+    """催你看消息的时间点（分钟）。
+
+    **递减而非递增**——催完这几次就不再主动提，只保持身体姿态。递增会让它
+    从提醒变成骚扰。后台留空表示一次都不催。
+    """
+    raw = str(live("pet.nudge_schedule_minutes"))
+    points = []
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if chunk:
+            try:
+                points.append(int(chunk))
+            except ValueError:
+                logger.warning("催看节奏里有非数字：%r，已跳过", chunk)
+    return tuple(points)
+
+
+def standin_after_minutes() -> int:
+    """超过这个时长且对方还在等，宠物才在**对方**那侧说话。"""
+    return int(live("pet.standin_after_minutes"))
+
+
+def quiet_hours() -> tuple[time, time]:
+    """深夜静默时段（站点本地时间）。纪念日当天可以突破，唠叨不行。"""
+    def parse(value: object) -> time:
+        if isinstance(value, time):
+            return value
+        hour, _, minute = str(value).partition(":")
+        return time(int(hour), int(minute or 0))
+
+    return parse(live("pet.quiet_start")), parse(live("pet.quiet_end"))
 
 InterjectionKind = str
 
@@ -84,7 +112,7 @@ def in_quiet_hours(now: datetime) -> bool:
     是 `utcnow()`（容器跑在 UTC），23:00–08:00 就变成了本地的 07:00–16:00
     ——宠物白天一天不说话、后半夜反倒活跃，症状完全反过来。见 localtime 模块。
     """
-    start, end = QUIET_HOURS
+    start, end = quiet_hours()
     current = to_local(now).time()
     return current >= start or current < end
 
@@ -107,11 +135,12 @@ def decide_nudge(
         return NudgeDecision(False, already_nudged, "", f"initiative={initiative}")
     if in_quiet_hours(now):
         return NudgeDecision(False, already_nudged, "", "深夜静默")
-    if already_nudged >= len(NUDGE_SCHEDULE_MINUTES):
-        return NudgeDecision(False, already_nudged, "", "已经提过三次，不再主动提")
+    schedule = nudge_schedule_minutes()
+    if already_nudged >= len(schedule):
+        return NudgeDecision(False, already_nudged, "", "催过了，不再主动提")
 
     waited = (now - unread_since).total_seconds() / 60
-    threshold = NUDGE_SCHEDULE_MINUTES[already_nudged]
+    threshold = schedule[already_nudged]
     if waited < threshold:
         return NudgeDecision(
             False, already_nudged, "", f"未读 {waited:.0f} 分钟，还没到 {threshold}"
@@ -144,8 +173,9 @@ def decide_standin(
     if not sender_kept_writing:
         return False, "", "", "对方没有继续等"
     waited = (now - unread_since).total_seconds() / 60
-    if waited < STANDIN_AFTER_MINUTES:
-        return False, "", "", f"未读 {waited:.0f} 分钟，还没到 {STANDIN_AFTER_MINUTES}"
+    threshold = standin_after_minutes()
+    if waited < threshold:
+        return False, "", "", f"未读 {waited:.0f} 分钟，还没到 {threshold}"
 
     kind, body = STANDIN_TEMPLATES[0]
     return True, kind, body, f"未读 {waited:.0f} 分钟且对方在等"

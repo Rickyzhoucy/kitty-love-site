@@ -2,12 +2,21 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Lock, User, KeyRound, AlertCircle, LogIn } from 'lucide-react';
+import { ShieldCheck, User, KeyRound, AlertCircle, LogIn } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { authApi } from '@/lib/api/auth';
+import { adminApi } from '@/lib/api/admin';
 
+/**
+ * 后台登录。**用的是后台自己的账号，不是主站那对。**
+ *
+ * 改这一版之前，这个页面上写着「与主站使用同一个账号」，走的也确实是主站的
+ * `authApi.login`——那意味着任何能登进主站看照片的人，也能改模型配置、翻全部
+ * 记忆、看会话列表。两件事的风险等级差得远。
+ *
+ * 后台账号用 `python -m app.cli create-admin <用户名> --password <密码>` 建。
+ */
 export default function AdminLogin() {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
@@ -25,8 +34,8 @@ export default function AdminLogin() {
         setLoading(true);
         setError('');
         try {
-            await authApi.login(username.trim(), password);
-            router.replace('/admin/dashboard');
+            await adminApi.login(username.trim(), password);
+            router.replace('/admin/overview');
             router.refresh();
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : '登录失败，请重试');
@@ -40,10 +49,10 @@ export default function AdminLogin() {
             <Card className="w-full max-w-sm p-6">
                 <div className="mb-6 text-center">
                     <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-accent-soft">
-                        <Lock size={26} className="text-accent" />
+                        <ShieldCheck size={26} className="text-accent" />
                     </div>
-                    <h1 className="text-xl font-bold text-ink m-0">生活空间登录</h1>
-                    <p className="mt-1 text-sm text-ink-muted mb-0">与主站使用同一个账号</p>
+                    <h1 className="text-xl font-bold text-ink m-0">后台</h1>
+                    <p className="mt-1 text-sm text-ink-muted mb-0">独立账号，与主站不通用</p>
                 </div>
 
                 <form onSubmit={handleLogin} className="flex flex-col gap-3">
@@ -85,6 +94,14 @@ export default function AdminLogin() {
                         {loading ? '登录中…' : '登录'}
                     </Button>
                 </form>
+
+                <p className="mb-0 mt-5 text-center text-xs leading-relaxed text-ink-muted">
+                    还没有后台账号？在服务器上跑
+                    <br />
+                    <code className="mt-1 inline-block rounded bg-sunken px-1.5 py-0.5">
+                        app.cli create-admin 用户名 --password …
+                    </code>
+                </p>
             </Card>
         </div>
     );

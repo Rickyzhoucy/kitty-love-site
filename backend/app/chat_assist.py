@@ -36,13 +36,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.anniversaries import parse_date, upcoming
 from app.direct_messages import list_thread
 from app.localtime import local_now, local_today
+from app.runtime_config import live
 from app.models import DirectMessage, EventTimer, User
 from app.site_config import get as site_config_get
 
 logger = logging.getLogger(__name__)
 
-#: 喂给模型的上下文长度。够回答「刚才说的那个」，又不至于把整段历史都送进去。
-CONTEXT_MESSAGES = 14
+def context_messages() -> int:
+    """喂给模型的上下文长度。够回答「刚才说的那个」，又不至于把整段历史都送进去。
+
+    后台可改（`pet.assist_context_messages`）。太少它接不上话，太多每次都在
+    烧 token。
+    """
+    return int(live("pet.assist_context_messages"))
 
 #: 谁都能用的通用叫法，省得非要打对宠物的名字。
 GENERIC_MENTIONS = ("@宠物", "@pet")
@@ -111,7 +117,7 @@ def build_transcript(
     **必须带名字**：不区分谁说的话，模型会把两个人的立场揉成一个人，回答出来
     的东西张冠李戴——在一段关系里，这比答不上来糟糕得多。
     """
-    recent = messages[-CONTEXT_MESSAGES:]
+    recent = messages[-context_messages():]
     lines = []
     for message in recent:
         speaker = names.get(message.sender_id, "某人")

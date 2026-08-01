@@ -35,9 +35,22 @@ EDITABLE_KEYS = frozenset({"letter_title", "letter_content", "main_timer_date"})
 assert set(DEFAULTS) <= EDITABLE_KEYS, "有默认值的配置项必须是可编辑的"
 
 
+#: 后台系统配置在同一张表里的键前缀。**这里必须排除掉它。**
+#:
+#: `SiteConfig` 现在住着两类东西：主站的内容配置（情书、纪念日起点）和后台的
+#: 系统配置（模型、预算，**以及加密后的 API Key**）。`/config` 是主站接口，
+#: 任何登录用户都能读——不过滤的话，加密后的密钥会随着首页请求一起发到浏览器。
+#: 密文当然不等于明文，但把它摆到每个人的网络面板里没有任何好处。
+RUNTIME_PREFIX = "cfg."
+
+
 async def load(db: AsyncSession) -> dict[str, str]:
-    """完整配置：存过的值盖在默认值上面。"""
-    rows = await db.execute(select(SiteConfig.key, SiteConfig.value))
+    """完整配置：存过的值盖在默认值上面。**不含后台的系统配置。**"""
+    rows = await db.execute(
+        select(SiteConfig.key, SiteConfig.value).where(
+            ~SiteConfig.key.startswith(RUNTIME_PREFIX)
+        )
+    )
     return {**DEFAULTS, **dict(rows.all())}
 
 

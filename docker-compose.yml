@@ -97,6 +97,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
       MINIO_SECURE: "false"
+      MINIO_PUBLIC_SECURE: ${MINIO_PUBLIC_SECURE:-false}
       MINIO_USER_BUCKET: user-uploads
       CHAT_MODEL: ${CHAT_MODEL:-qwen3.6-flash}
       CHAT_BASE_URL: ${CHAT_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
@@ -165,6 +166,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
       MINIO_SECURE: "false"
+      MINIO_PUBLIC_SECURE: ${MINIO_PUBLIC_SECURE:-false}
       SKILL_BUCKET: skill-packages
       SKILL_WORKER_CACHE_DIR: /tmp/kitty-skill-worker-cache
       SKILL_WORKER_TOKEN: ${SKILL_WORKER_TOKEN:?Set SKILL_WORKER_TOKEN in .env}

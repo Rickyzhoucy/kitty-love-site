@@ -74,6 +74,28 @@ async def seed_users() -> None:
     print(f"seed-users: 新建 {created if created else '（无，都已存在）'}")
 
 
+async def create_admin(username: str, password: str) -> None:
+    """建一个后台管理员。**与主站账号是两套东西**（见 app/admin_auth.py）。
+
+    幂等：同名已存在就只重设密码——这条命令同时也是「后台密码忘了」的出路，
+    而那时候你不希望它报一句「已存在」就退出。
+    """
+    from app.admin_auth import set_admin_password
+    from app.models import Admin
+
+    async with session_factory() as db:
+        admin = await db.scalar(select(Admin).where(Admin.username == username))
+        if admin is None:
+            admin = Admin(username=username, password="", status="active")
+            db.add(admin)
+            action = "已创建"
+        else:
+            action = "已重设密码"
+        set_admin_password(admin, password)
+        await db.commit()
+    print(f"后台账号 {username} {action}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Kitty Love backend administration")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -82,11 +104,18 @@ def main() -> None:
     create.add_argument("display_name")
     create.add_argument("--password", required=True)
     subparsers.add_parser("seed-users", help="补齐两个开发用账号（幂等）")
+    admin = subparsers.add_parser(
+        "create-admin", help="建后台管理员，或重设它的密码（幂等）"
+    )
+    admin.add_argument("username")
+    admin.add_argument("--password", required=True)
     args = parser.parse_args()
     if args.command == "create-user":
         asyncio.run(create_user(args.username, args.display_name, args.password))
     elif args.command == "seed-users":
         asyncio.run(seed_users())
+    elif args.command == "create-admin":
+        asyncio.run(create_admin(args.username, args.password))
 
 
 if __name__ == "__main__":

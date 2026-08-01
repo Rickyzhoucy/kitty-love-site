@@ -6,8 +6,8 @@ import pytest
 
 from app.agents.cognition import CognitionAgent, CognitionInput, parse_proposal
 from app.cognition_queue import (
-    DAILY_CALL_BUDGET,
-    DAILY_PROACTIVE_BUDGET,
+    daily_call_budget,
+    daily_proactive_budget,
     BudgetState,
     CognitionQueue,
     CognitionRequest,
@@ -177,7 +177,7 @@ def _ordinal_at(moment: float) -> int:
 
 def test_daily_proactive_budget_is_enforced():
     budget = BudgetState(
-        daily_proactive_count=DAILY_PROACTIVE_BUDGET,
+        daily_proactive_count=daily_proactive_budget(),
         # 必须标成**当天**用掉的。不标的话 `day_ordinal` 是 0，提交时
         # 会被判定为跨天而清零——那正是下一条用例要的行为。
         day_ordinal=_ordinal_at(1e9),
@@ -193,14 +193,14 @@ def test_daily_budget_rolls_over_to_the_next_day():
     """**「每日」必须真的按天翻篇。**
 
     队列是进程内的，而原先没有任何地方调那个 `reset_daily()`——计数从进程
-    启动起只增不减。跑满 `DAILY_CALL_BUDGET` 之后宠物不是「今天不说话了」，
+    启动起只增不减。跑满 `daily_call_budget()` 之后宠物不是「今天不说话了」，
     是在这个进程重启前**再也不说话了**。这条用例守住那个坑。
     """
     day_one = 1e9
     day_two = day_one + 86_400
     budget = BudgetState(
-        daily_call_count=DAILY_CALL_BUDGET,
-        daily_proactive_count=DAILY_PROACTIVE_BUDGET,
+        daily_call_count=daily_call_budget(),
+        daily_proactive_count=daily_proactive_budget(),
         day_ordinal=_ordinal_at(day_one),
     )
     queue = CognitionQueue(budget)
