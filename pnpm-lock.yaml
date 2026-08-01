@@ -20,6 +20,9 @@ importers:
       '@rive-app/react-canvas':
         specifier: ^4.30.0
         version: 4.30.0(react@19.2.3)
+      '@simplewebauthn/browser':
+        specifier: ^13.3.0
+        version: 13.3.0
       '@tauri-apps/api':
         specifier: ^2.8.0
         version: 2.11.1
@@ -760,6 +763,9 @@ packages:
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
+
+  '@simplewebauthn/browser@13.3.0':
+    resolution: {integrity: sha512-BE/UWv6FOToAdVk0EokzkqQQDOWtNydYlY6+OrmiZ5SCNmb41VehttboTetUM3T/fr6EAFYVXjz4My2wg230rQ==}
 
   '@swc/helpers@0.5.15':
     resolution: {integrity: sha512-JQ5TuMi45Owi4/BIMAJBoSQoOJu12oOk/gADqlcUL9JEdHB8vyjUSsxqeNXnmXHjYKMi2WcYtezGEEhqUI/E2g==}
@@ -3319,6 +3325,8 @@ snapshots:
       react: 19.2.3
 
   '@rtsao/scc@1.1.0': {}
+
+  '@simplewebauthn/browser@13.3.0': {}
 
   '@swc/helpers@0.5.15':
     dependencies:

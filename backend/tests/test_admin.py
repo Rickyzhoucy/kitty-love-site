@@ -212,3 +212,87 @@ async def test_every_registry_entry_has_a_label_and_group():
             assert setting.minimum is not None and setting.maximum is not None, (
                 f"{setting.key} 是数值型但没有上下限——越界值会直接写进库"
             )
+
+
+# ── Passkey ───────────────────────────────────────────────────────────────
+
+async def test_passkey_challenge_is_single_use(session_maker):
+    """挑战值用一次就作废。**这是防重放的前提**——能重复使用的挑战等于没有。"""
+    from app.config import Settings
+    from app import passkeys
+
+    settings = Settings(session_secret="x" * 40)
+    async with session_maker() as db:
+        payload = await passkeys.begin_authentication(db, settings, "user")
+        await db.commit()
+        challenge_id = payload["challengeId"]
+
+    async with session_maker() as db:
+        # 第一次取：取到了（这里用不合法的凭据，所以会在校验那步失败，
+        # 但挑战本身已经被消费掉了）。
+        with pytest.raises(passkeys.PasskeyError):
+            await passkeys.finish_authentication(
+                db, settings, "user", challenge_id, {"rawId": "AAAA"}
+            )
+        await db.commit()
+
+    async with session_maker() as db:
+        # 第二次取：连挑战都找不到了。
+        with pytest.raises(passkeys.PasskeyError, match="已经失效"):
+            await passkeys.finish_authentication(
+                db, settings, "user", challenge_id, {"rawId": "AAAA"}
+            )
+
+
+async def test_passkey_challenge_is_bound_to_its_audience(session_maker):
+    """主站签发的挑战不能拿去后台用，反过来也一样。
+
+    两套账号体系的隔离必须贯穿到挑战这一层——只在 Cookie 和会话表上隔离，
+    而挑战通用的话，就留了一条把主站凭据兑换成后台会话的路。
+    """
+    from app.config import Settings
+    from app import passkeys
+
+    settings = Settings(session_secret="x" * 40)
+    async with session_maker() as db:
+        payload = await passkeys.begin_authentication(db, settings, "user")
+        await db.commit()
+
+    async with session_maker() as db:
+        with pytest.raises(passkeys.PasskeyError, match="已经失效"):
+            await passkeys.finish_authentication(
+                db, settings, "admin", payload["challengeId"], {"rawId": "AAAA"}
+            )
+
+
+async def test_passkey_endpoints_need_a_session(client, admin_client):
+    """注册接口要登录态；登录接口不要（还没登录呢）。"""
+    assert (await client.post("/api/v1/auth/passkey/register/begin")).status_code == 401
+    assert (await admin_client.post(
+        "/api/v1/admin/auth/passkey/register/begin"
+    )).status_code == 401
+
+    # 登录用的挑战是公开的，任何人都能要一个——拿到也没用，
+    # 没有对应的私钥就过不了校验。
+    assert (await client.post("/api/v1/auth/passkey/login/begin")).status_code == 200
+    assert (await admin_client.post(
+        "/api/v1/admin/auth/passkey/login/begin"
+    )).status_code == 200
+
+
+async def test_registration_options_use_discoverable_credentials(session_maker):
+    """必须是可发现凭据，否则登录时要先输用户名——那就不是「一键」了。"""
+    import json
+    from app.config import Settings
+    from app import passkeys
+
+    settings = Settings(session_secret="x" * 40)
+    async with session_maker() as db:
+        payload = await passkeys.begin_registration(
+            db, settings, "user", "u1", "ricky", "Ricky"
+        )
+    options = json.loads(payload["options"])
+    assert options["authenticatorSelection"]["residentKey"] == "required"
+    assert options["authenticatorSelection"]["userVerification"] == "required"
+    # 用户句柄带受众前缀，否则设备端会把主站和后台的钥匙显示成同一个账号。
+    assert options["user"]["name"].endswith("（主站）")

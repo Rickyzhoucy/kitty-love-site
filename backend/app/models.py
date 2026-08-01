@@ -5,6 +5,7 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    CheckConstraint,
     JSON,
     Boolean,
     DateTime,
@@ -254,6 +255,71 @@ class UserSession(StringIdMixin, CreatedAtMixin, Base):
     )
     device_name: Mapped[str | None] = mapped_column("deviceName", String(120), nullable=True)
     __table_args__ = (Index("UserSession_userId_expiresAt_idx", "userId", "expiresAt"),)
+
+
+class WebAuthnCredential(StringIdMixin, CreatedAtMixin, Base):
+    """一把 passkey。**同一张表同时服务主站用户和后台管理员。**
+
+    两个可空外键 + 一条「恰好有一个非空」的约束，而不是一个 `subjectType` 字段：
+    这样外键完整性还在（删账号会连带删掉它的 passkey），而且「把主站的凭据当成
+    后台凭据用」这种错在数据库层面就写不进去。
+
+    `signCount` 是防克隆用的——同步型 passkey（iCloud 钥匙串那种）多数恒为 0，
+    所以**不能因为它没增长就拒绝登录**，只在它倒退时告警。
+    """
+
+    __tablename__ = "WebAuthnCredential"
+    user_id: Mapped[str | None] = mapped_column(
+        "userId", ForeignKey("User.id", ondelete="CASCADE"), nullable=True
+    )
+    admin_id: Mapped[str | None] = mapped_column(
+        "adminId", ForeignKey("Admin.id", ondelete="CASCADE"), nullable=True
+    )
+    credential_id: Mapped[bytes] = mapped_column(
+        "credentialId", LargeBinary(256), unique=True
+    )
+    public_key: Mapped[bytes] = mapped_column("publicKey", LargeBinary(512))
+    sign_count: Mapped[int] = mapped_column("signCount", Integer, default=0)
+    transports: Mapped[list[str]] = mapped_column(JsonType, default=list)
+    #: 给人看的名字，比如「Ricky 的 iPhone」。设备本身不告诉我们它叫什么，
+    #: 所以这是注册时由前端根据 UA 猜一个、用户可改。
+    label: Mapped[str] = mapped_column(String(80), default="")
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        "lastUsedAt", DateTime(timezone=True), nullable=True
+    )
+    __table_args__ = (
+        CheckConstraint(
+            '("userId" IS NULL) <> ("adminId" IS NULL)',
+            name="WebAuthnCredential_exactly_one_owner",
+        ),
+        Index("WebAuthnCredential_userId_idx", "userId"),
+        Index("WebAuthnCredential_adminId_idx", "adminId"),
+    )
+
+
+class WebAuthnChallenge(StringIdMixin, CreatedAtMixin, Base):
+    """一次性的挑战值。
+
+    **必须服务端保存。** challenge 的作用是防重放，如果让客户端自己回传一个它
+    自己生成的值，那就等于没有。存表而不是存 Cookie：登录时用户还没有会话，
+    而且 Cookie 在跨站场景下的行为比一张表复杂得多。
+
+    用完即删，另有过期时间兜住「开了对话框又不做」的情况。
+    """
+
+    __tablename__ = "WebAuthnChallenge"
+    challenge: Mapped[bytes] = mapped_column(LargeBinary(64))
+    #: "register" 或 "login"——注册用的挑战不能拿去登录，反之亦然。
+    purpose: Mapped[str] = mapped_column(String(20))
+    #: "user" 或 "admin"。**两套账号体系的挑战不能混用。**
+    audience: Mapped[str] = mapped_column(String(20))
+    #: 注册时是「给谁注册」，登录时为空（用可发现凭据，登录前不知道是谁）。
+    subject_id: Mapped[str | None] = mapped_column(
+        "subjectId", String(32), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        "expiresAt", DateTime(timezone=True)
+    )
 
 
 class Companion(StringIdMixin, CreatedAtMixin, Base):

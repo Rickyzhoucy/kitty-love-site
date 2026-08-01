@@ -22,6 +22,7 @@ from app.auth import (
     CurrentSession,
     CurrentUser,
     create_session,
+    set_session_cookie,
     verify_password,
 )
 from app.chat_assist import mentions_pet
@@ -93,6 +94,7 @@ from app.pet_state import (
 )
 from app.photo_service import ALLOWED_PHOTO_TYPES, PhotoService
 from app.schemas import (
+    ApiModel,
     AttachmentRead,
     ChatMessageRead,
     ChatStreamRequest,
@@ -151,7 +153,7 @@ from app.schemas import (
 from app.services import CrudService
 from app.site_config import EDITABLE_KEYS as EDITABLE_SITE_CONFIG_KEYS
 from app.site_config import load as load_site_config
-from app import runtime_config
+from app import passkeys, runtime_config
 from app.storage import ObjectStorage, get_storage
 
 logger = logging.getLogger(__name__)
@@ -337,15 +339,7 @@ async def login(
     record, token = await create_session(db, user, data.device_name, settings)
     await db.commit()
     if data.client in {"browser", "desktop"}:
-        response.set_cookie(
-            SESSION_COOKIE_NAME,
-            token,
-            httponly=True,
-            secure=settings.session_cookie_secure,
-            samesite="lax",
-            max_age=settings.session_ttl_days * 86400,
-            path="/",
-        )
+        set_session_cookie(response, token, settings)
     return LoginResponse(
         user=SessionUser.model_validate(user),
         token=token if data.client in {"device", "desktop"} else None,
@@ -1496,3 +1490,97 @@ async def read_hero_content(
         media_type=media_type,
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+# ── Passkey（主站）──────────────────────────────────────────────────────
+#
+# 密码登录保留，这是加法。理由和大陆各平台的实际情况见 app/passkeys.py。
+
+class PasskeyFinish(ApiModel):
+    challenge_id: str
+    credential: dict[str, Any]
+    label: str = ""
+
+
+@router.post("/auth/passkey/register/begin")
+async def passkey_register_begin(
+    db: Db, user: CurrentUser, settings: Annotated[Settings, Depends(get_settings)]
+) -> dict[str, Any]:
+    payload = await passkeys.begin_registration(
+        db, settings, "user", user.id, user.username, user.display_name
+    )
+    await db.commit()
+    return payload
+
+
+@router.post("/auth/passkey/register/finish")
+async def passkey_register_finish(
+    data: PasskeyFinish,
+    db: Db,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    try:
+        item = await passkeys.finish_registration(
+            db, settings, "user", user.id, data.challenge_id, data.credential, data.label
+        )
+    except passkeys.PasskeyError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await db.commit()
+    return {"id": item.id, "label": item.label}
+
+
+@router.post("/auth/passkey/login/begin")
+async def passkey_login_begin(
+    db: Db, settings: Annotated[Settings, Depends(get_settings)]
+) -> dict[str, Any]:
+    payload = await passkeys.begin_authentication(db, settings, "user")
+    await db.commit()
+    return payload
+
+
+@router.post("/auth/passkey/login/finish", response_model=LoginResponse)
+async def passkey_login_finish(
+    data: PasskeyFinish,
+    request: Request,
+    response: Response,
+    db: Db,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> LoginResponse:
+    try:
+        stored = await passkeys.finish_authentication(
+            db, settings, "user", data.challenge_id, data.credential
+        )
+    except passkeys.PasskeyError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    user = await db.get(User, stored.user_id)
+    if user is None or not user.enabled:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号不可用")
+    record, token = await create_session(
+        db, user, request.headers.get("user-agent", "")[:120] or None, settings
+    )
+    await db.commit()
+    set_session_cookie(response, token, settings)
+    # 与密码登录同一个返回体：前端只有一条处理登录成功的路径。
+    return LoginResponse(user=user, expires_at=record.expires_at)
+
+
+@router.get("/auth/passkey")
+async def passkey_list(db: Db, user: CurrentUser) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": item.id,
+            "label": item.label,
+            "createdAt": item.created_at,
+            "lastUsedAt": item.last_used_at,
+        }
+        for item in await passkeys.list_credentials(db, "user", user.id)
+    ]
+
+
+@router.delete("/auth/passkey/{credential_pk}", status_code=status.HTTP_204_NO_CONTENT)
+async def passkey_delete(credential_pk: str, db: Db, user: CurrentUser) -> None:
+    if not await passkeys.delete_credential(db, "user", user.id, credential_pk):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这把钥匙")
+    await db.commit()

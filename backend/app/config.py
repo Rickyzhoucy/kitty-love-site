@@ -50,6 +50,18 @@ class Settings(BaseSettings):
     #: 容器跑在 UTC，改这个不需要动容器；详见 app/localtime.py。
     site_timezone: str = "Asia/Shanghai"
 
+    # ── Passkey（WebAuthn）─────────────────────────────────────────────
+    #
+    # **RP ID 必须和浏览器地址栏里的域名一致**（或是它的父域）。配错的表现是
+    # 弹窗一闪而过、什么都没发生，控制台也未必说清楚——所以它是显式配置，不猜。
+    # 本地开发用 localhost（WebAuthn 把 localhost 当安全上下文，不需要 https）。
+    webauthn_rp_id: str = "localhost"
+    #: 设备端的账号选择器里显示的名字。
+    webauthn_rp_name: str = "我们的小世界"
+    #: 允许的来源。**要带协议和端口**，与浏览器发来的 Origin 逐字比较。
+    #: 生产上是 https://love.rickyai.cn，本地是 http://localhost:3000。
+    webauthn_origins: list[str] = ["http://localhost:3000"]
+
     outbox_poll_seconds: float = 1.0
     outbox_retention_days: int = Field(default=7, ge=1, le=90)
     cors_origins: list[str] = ["http://localhost:3000"]

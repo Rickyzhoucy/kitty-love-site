@@ -15,6 +15,7 @@
     "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-toast": "^1.2.23",
     "@rive-app/react-canvas": "^4.30.0",
+    "@simplewebauthn/browser": "^13.3.0",
     "@tauri-apps/api": "^2.8.0",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",

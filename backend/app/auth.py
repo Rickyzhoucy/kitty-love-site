@@ -101,3 +101,21 @@ async def get_current_user(
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 CurrentSession = Annotated[UserSession, Depends(get_current_session)]
+
+
+def set_session_cookie(response, token: str, settings: Settings) -> None:
+    """种主站会话 Cookie。
+
+    **抽出来共用**：密码登录和 passkey 登录都要种这个 Cookie，两处各写一遍的话
+    迟早漂移——一处改了 `secure` 另一处没改，症状是「某条路径登录后在 https 下
+    莫名掉线」。
+    """
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite="lax",
+        max_age=settings.session_ttl_days * 86400,
+        path="/",
+    )

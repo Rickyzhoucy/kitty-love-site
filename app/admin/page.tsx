@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ShieldCheck, User, KeyRound, AlertCircle, LogIn } from 'lucide-react';
+import { ShieldCheck, User, KeyRound, AlertCircle, LogIn, Fingerprint } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { adminApi } from '@/lib/api/admin';
+import { explain, isAvailable, loginWithPasskey } from '@/lib/passkey';
 
 /**
  * 后台登录。**用的是后台自己的账号，不是主站那对。**
@@ -22,7 +23,30 @@ export default function AdminLogin() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [passkeyReady, setPasskeyReady] = useState(false);
     const router = useRouter();
+
+    // 真的问一句浏览器，而不是靠 UA 猜。不支持时整个按钮不显示——
+    // 摆一个按下去必然失败的按钮比没有更糟。
+    useEffect(() => {
+        let cancelled = false;
+        void isAvailable().then(ok => { if (!cancelled) setPasskeyReady(ok); });
+        return () => { cancelled = true; };
+    }, []);
+
+    const signInWithPasskey = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            await loginWithPasskey('/admin/auth/passkey');
+            router.replace('/admin/overview');
+            router.refresh();
+        } catch (reason) {
+            setError(explain(reason));
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleLogin = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -94,6 +118,25 @@ export default function AdminLogin() {
                         {loading ? '登录中…' : '登录'}
                     </Button>
                 </form>
+
+                {passkeyReady && (
+                    <>
+                        <div className="my-4 flex items-center gap-3">
+                            <span className="h-px flex-1 bg-ink/10" />
+                            <span className="text-xs text-ink-muted">或者</span>
+                            <span className="h-px flex-1 bg-ink/10" />
+                        </div>
+                        <button
+                            type="button"
+                            onClick={signInWithPasskey}
+                            disabled={loading}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/30 px-4 py-2.5 text-sm text-accent transition-colors hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        >
+                            <Fingerprint size={17} />
+                            用这台设备登录
+                        </button>
+                    </>
+                )}
 
                 <p className="mb-0 mt-5 text-center text-xs leading-relaxed text-ink-muted">
                     还没有后台账号？在服务器上跑

@@ -6,6 +6,7 @@ import Card from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { adminApi, type AccountRow } from '@/lib/api/admin';
+import PasskeyManager from '../../../components/PasskeyManager';
 import { cn } from '@/lib/utils';
 
 /**
@@ -221,6 +222,10 @@ export default function AccountsPage() {
                     <Button onClick={changeMine} disabled={!current || !next}>
                         修改
                     </Button>
+                </div>
+
+                <div className="mt-5 border-t border-ink/5 pt-5">
+                    <PasskeyManager base="/admin/auth/passkey" />
                 </div>
             </Card>
         </div>

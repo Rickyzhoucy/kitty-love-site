@@ -245,6 +245,10 @@ REGISTRY: tuple[Setting, ...] = (
         _s("site.hero_video_attachment", "首页视频", "str", fallback="",
            help="留空表示用镜像里自带的那份。通过「首页素材」页上传。"),
         _s("site.hero_poster_attachment", "首页静态图", "str", fallback=""),
+        _s("site.webauthn_rp_id", "Passkey 域名（RP ID）", "str",
+           env_attr="webauthn_rp_id", restart_required=True,
+           help="**必须和地址栏里的域名一致**（或是它的父域）。配错的表现是"
+                "弹窗一闪而过、什么都没发生。本地开发填 localhost。"),
     ),
 )
 

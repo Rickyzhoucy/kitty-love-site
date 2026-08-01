@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, Suspense } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Heart, Lock, LogIn, User, KeyRound, AlertCircle } from 'lucide-react';
+import { Heart, Lock, LogIn, User, KeyRound, AlertCircle, Fingerprint } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { authApi } from '@/lib/api/auth';
+import { explain, isAvailable, loginWithPasskey } from '@/lib/passkey';
 
 function safeRedirect(value: string | null): string {
     return value?.startsWith('/') && !value.startsWith('//') ? value : '/';
@@ -21,6 +22,29 @@ function VerifyContent() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [passkeyReady, setPasskeyReady] = useState(false);
+
+    // 真的问一句浏览器支不支持，不靠 UA 猜。不支持就整个按钮不显示——
+    // 摆一个按下去必然失败的按钮比没有更糟。
+    useEffect(() => {
+        let cancelled = false;
+        void isAvailable().then(ok => { if (!cancelled) setPasskeyReady(ok); });
+        return () => { cancelled = true; };
+    }, []);
+
+    const signInWithPasskey = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            await loginWithPasskey('/auth/passkey');
+            router.replace(redirectPath);
+            router.refresh();
+        } catch (reason) {
+            setError(explain(reason));
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -100,6 +124,28 @@ function VerifyContent() {
                             {loading ? '登录中…' : '登录'}
                         </Button>
                     </form>
+
+                    {passkeyReady && (
+                        <>
+                            <div className="my-4 flex items-center gap-3">
+                                <span className="h-px flex-1 bg-ink/10" />
+                                <span className="text-xs text-ink-muted">或者</span>
+                                <span className="h-px flex-1 bg-ink/10" />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={signInWithPasskey}
+                                disabled={loading}
+                                className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/30 px-4 py-2.5 text-sm text-accent transition-colors hover:bg-accent-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                            >
+                                <Fingerprint size={17} />
+                                用这台设备登录
+                            </button>
+                            <p className="mb-0 mt-2 text-center text-[11px] text-ink-muted">
+                                还没设置？登录后去 <code className="rounded bg-sunken px-1">/settings</code> 加一把。
+                            </p>
+                        </>
+                    )}
 
                     <div className="mt-6 flex items-center justify-center gap-2 text-xs text-ink-muted">
                         <Heart size={12} className="text-accent" fill="currentColor" />

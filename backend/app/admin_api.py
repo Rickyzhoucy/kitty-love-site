@@ -57,7 +57,7 @@ from app.models import (
     UserSession,
     utcnow,
 )
-from app import runtime_config
+from app import passkeys, runtime_config
 from app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -690,3 +690,92 @@ async def dashboard(db: Db, settings: Config, admin: CurrentAdmin) -> dict[str, 
         "chatModel": values["chat.model"],
         "embeddingModel": values["embedding.model"],
     }
+
+
+# ── Passkey（后台）──────────────────────────────────────────────────────
+#
+# 与主站同一套逻辑，但 audience 是 "admin"——**主站的 passkey 登不了后台**，
+# 反过来也一样。这与 Cookie 和会话表的隔离是同一条思路。
+
+class AdminPasskeyFinish(BaseModel):
+    challenge_id: str
+    credential: dict[str, Any]
+    label: str = ""
+
+
+@router.post("/auth/passkey/register/begin")
+async def admin_passkey_register_begin(
+    db: Db, settings: Config, admin: CurrentAdmin
+) -> dict[str, Any]:
+    payload = await passkeys.begin_registration(
+        db, settings, "admin", admin.id, admin.username, admin.username
+    )
+    await db.commit()
+    return payload
+
+
+@router.post("/auth/passkey/register/finish")
+async def admin_passkey_register_finish(
+    data: AdminPasskeyFinish, db: Db, settings: Config, admin: CurrentAdmin
+) -> dict[str, Any]:
+    try:
+        item = await passkeys.finish_registration(
+            db, settings, "admin", admin.id, data.challenge_id, data.credential, data.label
+        )
+    except passkeys.PasskeyError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    await db.commit()
+    return {"id": item.id, "label": item.label}
+
+
+@router.post("/auth/passkey/login/begin")
+async def admin_passkey_login_begin(db: Db, settings: Config) -> dict[str, Any]:
+    payload = await passkeys.begin_authentication(db, settings, "admin")
+    await db.commit()
+    return payload
+
+
+@router.post("/auth/passkey/login/finish", response_model=AdminMe)
+async def admin_passkey_login_finish(
+    data: AdminPasskeyFinish,
+    request: Request,
+    response: Response,
+    db: Db,
+    settings: Config,
+) -> Admin:
+    try:
+        stored = await passkeys.finish_authentication(
+            db, settings, "admin", data.challenge_id, data.credential
+        )
+    except passkeys.PasskeyError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    admin = await db.get(Admin, stored.admin_id)
+    if admin is None or admin.status == "disabled":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号不可用")
+    _, token = await create_admin_session(
+        db, admin, request.headers.get("user-agent", "")[:120] or None, settings
+    )
+    await db.commit()
+    set_admin_cookie(response, token, settings)
+    return admin
+
+
+@router.get("/auth/passkey")
+async def admin_passkey_list(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": item.id,
+            "label": item.label,
+            "createdAt": item.created_at,
+            "lastUsedAt": item.last_used_at,
+        }
+        for item in await passkeys.list_credentials(db, "admin", admin.id)
+    ]
+
+
+@router.delete("/auth/passkey/{credential_pk}", status_code=status.HTTP_204_NO_CONTENT)
+async def admin_passkey_delete(credential_pk: str, db: Db, admin: CurrentAdmin) -> None:
+    if not await passkeys.delete_credential(db, "admin", admin.id, credential_pk):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这把钥匙")
+    await db.commit()
