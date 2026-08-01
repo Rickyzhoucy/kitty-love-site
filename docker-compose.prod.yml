@@ -22,6 +22,10 @@ x-apt-mirror: &apt-mirror
     args:
       APT_MIRROR: ${APT_MIRROR:-}
       PYPI_INDEX: ${PYPI_INDEX:-}
+      # 锁文件里那 1490 条写死的 files.pythonhosted.org 也要改指镜像站，
+      # 否则 `uv sync --frozen` 依然直连 Fastly（见 Dockerfile.backend 里
+      # 那段注释——构建会挂在一条不动的连接上，看着像死机）。
+      PYPI_PACKAGE_BASE: ${PYPI_PACKAGE_BASE:-}
 
 services:
   web:

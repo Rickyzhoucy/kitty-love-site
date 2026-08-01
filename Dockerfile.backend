@@ -42,10 +42,54 @@ ENV UV_DEFAULT_INDEX=${PYPI_INDEX}
 ENV UV_HTTP_TIMEOUT=180
 
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+
+# **只设 UV_DEFAULT_INDEX 是不够的。**
+#
+# `uv sync --frozen` 不走索引查询——uv.lock 里记着 1490 条写死的
+# `https://files.pythonhosted.org/packages/...`，它就照着这些 URL 抓。
+# 也就是说上面那个 PYPI_INDEX 对 `--frozen` 几乎不起作用（原来的注释说反了）。
+# 后果在境内很难看：实测构建会挂在一条通往 Fastly 的连接上——socket 建着、
+# 收发队列都是 0、20 分钟不动，日志停在最后一个包上，看起来像死机而不是网络问题。
+#
+# 腾讯镜像站按**同样的 /packages/... 路径**分发同一批文件（实测 0.28s vs 1.5s），
+# 所以这里直接把锁文件里的域名换掉。**这不会降低安全性**：uv 仍然逐个校验
+# uv.lock 里的 sha256，换来的文件对不上就直接报错，不会装成别的东西。
+#
+# 只在传了 PYPI_INDEX 时才改，本机开发的构建原样走官方源。
+ARG PYPI_PACKAGE_BASE=""
+RUN if [ -n "$PYPI_PACKAGE_BASE" ]; then \
+      sed -i "s|https://files\.pythonhosted\.org/|${PYPI_PACKAGE_BASE}/|g" uv.lock \
+      && echo "uv.lock 已改指镜像站：$PYPI_PACKAGE_BASE"; \
+    fi
+
+# **依赖里有一个 git 依赖（skills-ref），托管在 github.com 上。**
+#
+# 从这台境内机器实测五次 `git ls-remote`：OK OK FAIL FAIL OK。也就是说它
+# 大约四成会失败，报的是 `GnuTLS recv error (-110)`，整个构建随之挂掉——
+# 而失败与否纯看运气，同一份代码重跑一次可能就过了。
+#
+# 这里不走第三方 GitHub 代理：那等于把依赖的来源交给一个不受控的中间人，
+# 为了构建方便引入供应链风险不划算。改为**重试**，并让卡住的连接尽快放弃：
+# lowSpeedLimit/Time = 30 秒内低于 1KB/s 就断开，否则一次卡死能拖十几分钟。
+RUN git config --global http.lowSpeedLimit 1000 \
+    && git config --global http.lowSpeedTime 30
+
+# 重试 5 次，间隔递增。PyPI 那部分现在走镜像站，很快，所以重试的代价基本
+# 只是再试一次 git。
+RUN for i in 1 2 3 4 5; do \
+      uv sync --frozen --no-dev --no-install-project && break; \
+      echo "uv sync 第 $i 次失败（多半是 github 抽风），等 $((i*10)) 秒再试"; \
+      [ "$i" = 5 ] && exit 1; \
+      sleep $((i*10)); \
+    done
 
 COPY backend/ ./
-RUN uv sync --frozen --no-dev
+RUN for i in 1 2 3; do \
+      uv sync --frozen --no-dev && break; \
+      echo "uv sync（含项目本身）第 $i 次失败，等 $((i*10)) 秒再试"; \
+      [ "$i" = 3 ] && exit 1; \
+      sleep $((i*10)); \
+    done
 
 ENV PATH="/app/.venv/bin:$PATH"
 
