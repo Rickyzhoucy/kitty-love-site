@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { KeyRound, LogOut, ShieldCheck } from 'lucide-react';
+import { KeyRound, LogOut, ShieldCheck, UserPlus } from 'lucide-react';
 import Card from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
  */
 export default function AccountsPage() {
     const [accounts, setAccounts] = useState<AccountRow[]>([]);
+    const [maxUsers, setMaxUsers] = useState(2);
+    const [draft, setDraft] = useState({ username: '', displayName: '', password: '' });
     const [resetting, setResetting] = useState<Record<string, string>>({});
     const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
@@ -24,7 +26,9 @@ export default function AccountsPage() {
     const [next, setNext] = useState('');
 
     const load = useCallback(async () => {
-        setAccounts(await adminApi.accounts());
+        const payload = await adminApi.accounts();
+        setAccounts(payload.accounts);
+        setMaxUsers(payload.maxUsers);
     }, []);
 
     // 带取消标记，而不是直接 `void load()`：组件卸下之后再 setState 是无效更新，
@@ -32,8 +36,10 @@ export default function AccountsPage() {
     useEffect(() => {
         let cancelled = false;
         void (async () => {
-            const rows = await adminApi.accounts().catch(() => null);
-            if (!cancelled && rows) setAccounts(rows);
+            const payload = await adminApi.accounts().catch(() => null);
+            if (cancelled || !payload) return;
+            setAccounts(payload.accounts);
+            setMaxUsers(payload.maxUsers);
         })();
         return () => { cancelled = true; };
     }, []);
@@ -48,6 +54,19 @@ export default function AccountsPage() {
         setResetting(state => ({ ...state, [row.id]: '' }));
         setNote({ kind: 'ok', text: `已重置 ${row.username} 的密码，并踢掉了全部会话` });
         await load();
+    };
+
+    const createAccount = async () => {
+        try {
+            await adminApi.createAccount(
+                draft.username.trim(), draft.displayName.trim() || draft.username.trim(), draft.password,
+            );
+            setDraft({ username: '', displayName: '', password: '' });
+            setNote({ kind: 'ok', text: `已建好 ${draft.username}` });
+            await load();
+        } catch (error) {
+            setNote({ kind: 'error', text: error instanceof Error ? error.message : '创建失败' });
+        }
     };
 
     const changeMine = async () => {
@@ -128,6 +147,50 @@ export default function AccountsPage() {
                         </div>
                     ))}
                 </div>
+
+                {accounts.length < maxUsers ? (
+                    <div className="mt-4 border-t border-ink/5 pt-4">
+                        <p className="m-0 mb-2 flex items-center gap-1.5 text-sm text-ink">
+                            <UserPlus size={15} className="text-accent" />
+                            再建一个（还剩 {maxUsers - accounts.length} 个位置）
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Input
+                                className="min-w-[8rem] flex-1"
+                                placeholder="用户名"
+                                value={draft.username}
+                                onChange={event => setDraft(d => ({ ...d, username: event.target.value }))}
+                            />
+                            <Input
+                                className="min-w-[8rem] flex-1"
+                                placeholder="显示名"
+                                value={draft.displayName}
+                                onChange={event => setDraft(d => ({ ...d, displayName: event.target.value }))}
+                            />
+                            <Input
+                                type="password"
+                                className="min-w-[10rem] flex-1"
+                                placeholder="密码（至少 8 位）"
+                                autoComplete="new-password"
+                                value={draft.password}
+                                onChange={event => setDraft(d => ({ ...d, password: event.target.value }))}
+                            />
+                            <Button
+                                onClick={createAccount}
+                                disabled={!draft.username.trim() || draft.password.length < 8}
+                            >
+                                <UserPlus size={15} />
+                                创建
+                            </Button>
+                        </div>
+                    </div>
+                ) : (
+                    <p className="mb-0 mt-4 border-t border-ink/5 pt-4 text-xs text-ink-muted">
+                        已经有 {maxUsers} 个账号了。<strong className="text-ink">这个上限不是配置项</strong>
+                        ——「对方」在这个站里的定义就是「另一个账号」，聊天、每日一问、@宠物
+                        全都建立在「恰好两个人」之上。要换人的话，先把旧的那个停用。
+                    </p>
+                )}
             </Card>
 
             <Card className="p-5">

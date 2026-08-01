@@ -465,7 +465,7 @@ async def update_persona(
 # ── 主站账号 ──────────────────────────────────────────────────────────────
 
 @router.get("/accounts")
-async def list_accounts(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
+async def list_accounts(db: Db, admin: CurrentAdmin) -> dict[str, Any]:
     users = list(await db.scalars(select(User).order_by(User.created_at)))
     now = utcnow()
     active = dict(
@@ -475,17 +475,64 @@ async def list_accounts(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
             .group_by(UserSession.user_id)
         )).all()
     )
-    return [
-        {
-            "id": u.id,
-            "username": u.username,
-            "displayName": u.display_name,
-            "enabled": u.enabled,
-            "activeSessions": active.get(u.id, 0),
-            "createdAt": u.created_at,
-        }
-        for u in users
-    ]
+    from app.cli import MAX_USERS
+
+    return {
+        # 上限一起给出来，前端才知道「还能不能再建一个」。
+        # 硬编码在 cli.MAX_USERS，不是配置项——理由见 create_account。
+        "maxUsers": MAX_USERS,
+        "accounts": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "displayName": u.display_name,
+                "enabled": u.enabled,
+                "activeSessions": active.get(u.id, 0),
+                "createdAt": u.created_at,
+            }
+            for u in users
+        ],
+    }
+
+
+class AccountCreate(BaseModel):
+    username: str = Field(min_length=2, max_length=40)
+    display_name: str = Field(min_length=1, max_length=60)
+    password: str = Field(min_length=8)
+
+
+@router.post("/accounts", status_code=status.HTTP_201_CREATED)
+async def create_account(
+    data: AccountCreate, db: Db, admin: CurrentAdmin
+) -> dict[str, Any]:
+    """新建主站账号。
+
+    **上限两个，而且这不是配置项。** 「对方」在这个站里的定义就是「另一个
+    enabled 用户」（见 docs/couple-site-feature-plan.md §0.3）——聊天、每日一问、
+    @宠物 全都建立在「恰好两个人」之上。放开这个限制不是加一行配置的事，是要
+    重新想清楚那些功能对三个人意味着什么。
+
+    与 `app.cli create-user` 同一条规则，上限也从那里引进来，免得两处各写一个数。
+    """
+    from app.cli import MAX_USERS
+
+    if await db.scalar(select(User.id).where(User.username == data.username)):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"用户名 {data.username} 已被占用")
+    count = await db.scalar(select(func.count(User.id))) or 0
+    if count >= MAX_USERS:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"这个站最多 {MAX_USERS} 个账号。要换人的话，先停用旧的那个。",
+        )
+    user = User(
+        username=data.username,
+        display_name=data.display_name,
+        password_hash=hash_password(data.password),
+    )
+    db.add(user)
+    await db.commit()
+    logger.info("后台 %s 新建了主站账号 %s", admin.username, data.username)
+    return {"id": user.id, "username": user.username, "displayName": user.display_name}
 
 
 class AccountPassword(BaseModel):

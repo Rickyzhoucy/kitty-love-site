@@ -160,7 +160,11 @@ export const adminApi = {
     updatePersona: (id: string, prompt: string) =>
         api.patch<{ id: string; version: number }>(`${base}/personas/${id}`, { prompt }),
 
-    accounts: () => api.get<AccountRow[]>(`${base}/accounts`),
+    accounts: () => api.get<{ maxUsers: number; accounts: AccountRow[] }>(`${base}/accounts`),
+    createAccount: (username: string, displayName: string, password: string) =>
+        api.post<{ id: string; username: string; displayName: string }>(`${base}/accounts`, {
+            username, display_name: displayName, password,
+        }),
     resetAccountPassword: (id: string, newPassword: string) =>
         api.post<void>(`${base}/accounts/${id}/password`, { new_password: newPassword }),
     toggleAccount: (id: string, enabled: boolean) =>
