@@ -35,6 +35,7 @@ import { useChatNudge } from '../ChatMediationProvider';
 import DailyRitualPanel from '../DailyRitualPanel';
 import SpeechBubble from './SpeechBubble';
 import styles from './FloatingPet.module.css';
+import { DESKTOP_PET_ROUTE, openMainWindow } from '@/lib/desktopPet';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
 import type { PetInitiative } from './petBodyProtocol';
 import { usePet } from './usePet';
@@ -81,6 +82,14 @@ const INITIATIVE_OPTIONS: { id: PetInitiative; label: string; hint: string }[] =
 export default function FloatingPet() {
     const pathname = usePathname();
     const shouldSkip = pathname?.startsWith('/admin') || pathname?.startsWith('/verify');
+    /**
+     * 这一份是不是跑在**独立的宠物窗口**里（见 lib/desktopPet.ts）。
+     *
+     * 桌面宠物窗口是一块铺在桌面上的透明矩形，交互规则和网页里不一样：
+     * 网页里「点哪儿它走哪儿」很讨喜，但在桌面上你点的是图标、是别的应用，
+     * 宠物没理由因此挪窝。所以那边把点击走动关掉，走动改由菜单触发。
+     */
+    const isPetWindow = pathname === DESKTOP_PET_ROUTE;
     const { pet, loading, rename, setAssetId, refetch } = usePet(shouldSkip);
     const [menuType, setMenuType] = useState<MenuType>('none');
     const [speech, setSpeech] = useState<string | null>(null);
@@ -197,6 +206,7 @@ export default function FloatingPet() {
         onOpenMenu: handleOpenMenu,
         onInteraction: handleMove,
         sizeToken: size,
+        clickToWalk: !isPetWindow,
     });
 
     useEffect(() => {
@@ -307,6 +317,24 @@ export default function FloatingPet() {
         }
     };
 
+    /**
+     * 托盘菜单发过来的动作。
+     *
+     * 桌面版的宠物窗口是无边框的，没地方放按钮，所以「走两步」这类动作要能从
+     * 托盘触发。Rust 侧只发一个信号（见 DesktopPetBridge），**动作本身仍然
+     * 走这边同一套** —— 步态、朝向、避障没有第二份实现。
+     */
+    useEffect(() => {
+        if (shouldSkip) return;
+        const handle = (event: Event) => {
+            const detail = (event as CustomEvent<{ action: string; duration: number }>).detail;
+            if (!detail) return;
+            activityBridge.playPetAction(detail as Parameters<typeof activityBridge.playPetAction>[0]);
+        };
+        window.addEventListener('kitty-pet-action', handle);
+        return () => window.removeEventListener('kitty-pet-action', handle);
+    }, [activityBridge, shouldSkip]);
+
     /** 菜单里的动作。刻意不关闭菜单——连着喂两次、玩一会儿是常见操作。 */
     const runAction = (id: PetActionId) => {
         switch (id) {
@@ -359,14 +387,24 @@ export default function FloatingPet() {
         <aside
             ref={bodyRef}
             className={`${styles.container} ${moving ? styles.moving : ''} ${dragging ? styles.dragging : ''}`}
-            style={{
-                right: position.right,
-                bottom: position.bottom,
-                '--pet-scale': scale,
-                '--pet-travel-ms': `${travelMs}ms`,
-            } as CSSProperties}
+            style={isPetWindow
+                ? ({
+                    // 宠物窗口里不按 right/bottom 贴角——窗口本身就只有宠物那么大，
+                    // 贴角会让它压在窗口边上、气泡还被裁掉。居中放。
+                    '--pet-scale': scale,
+                    '--pet-travel-ms': `${travelMs}ms`,
+                } as CSSProperties)
+                : ({
+                    right: position.right,
+                    bottom: position.bottom,
+                    '--pet-scale': scale,
+                    '--pet-travel-ms': `${travelMs}ms`,
+                } as CSSProperties)}
             aria-label="伴侣宠物"
             data-no-pet-walk
+            // 透明窗里只有标了这个的元素接收鼠标事件，其余一律穿透到桌面。
+            // 见 globals.css 里 [data-desktop-pet] 那一节。
+            data-pet-hit
         >
             {chatOpen && (
                 <section
@@ -482,9 +520,23 @@ export default function FloatingPet() {
                                 onClick={() => { setRitualOpen(true); setMenuType('none'); }}>
                                 <CalendarHeart size={19} className={styles.tileIcon} aria-hidden />今天
                             </button>
-                            <Link href="/companion" className={styles.tile} onClick={() => setMenuType('none')}>
-                                <BookHeart size={19} className={styles.tileIcon} aria-hidden />对话本
-                            </Link>
+                            {/* **宠物窗口里不能用 Link。** 那个窗口只有两百像素宽，
+                                导航过去等于把整个站点塞进一个小方块，而且宠物本身
+                                就没了。改成把主窗口叫到前面来——桌面版的「去看对话本」
+                                本来就该发生在主界面里。 */}
+                            {isPetWindow ? (
+                                <button
+                                    type="button"
+                                    className={styles.tile}
+                                    onClick={() => { void openMainWindow(); setMenuType('none'); }}
+                                >
+                                    <BookHeart size={19} className={styles.tileIcon} aria-hidden />主界面
+                                </button>
+                            ) : (
+                                <Link href="/companion" className={styles.tile} onClick={() => setMenuType('none')}>
+                                    <BookHeart size={19} className={styles.tileIcon} aria-hidden />对话本
+                                </Link>
+                            )}
                             <button type="button" className={styles.tile}
                                 onClick={() => setMenuType('actions')}>
                                 <PawPrint size={19} className={styles.tileIcon} aria-hidden />动作
@@ -591,10 +643,17 @@ export default function FloatingPet() {
                 </section>
             )}
 
+            {/* 宠物窗口里，拖宠物 = 拖**整个窗口**，而不是让它在窗口里挪位置
+                （窗口只有它那么大，挪不到哪儿去，还会拖出边界被裁掉）。
+                `data-tauri-drag-region` 让系统接管拖动，所以那边不能再挂自己的
+                指针处理——两套拖动同时生效会打架，表现是拖一下窗口和宠物各走一半。
+                单击仍然打开菜单，走的是 onClick 而不是 pointerup。 */}
             <button
                 type="button"
                 className={styles.petButton}
-                {...petButtonProps}
+                {...(isPetWindow ? {} : petButtonProps)}
+                {...(isPetWindow ? { 'data-tauri-drag-region': true } : {})}
+                onClick={isPetWindow ? handleOpenMenu : undefined}
                 aria-label={loading ? '正在加载伴侣宠物' : `打开 ${pet?.name ?? '伴侣'} 菜单`}
             >
                 {loading || !pet ? (
@@ -609,7 +668,11 @@ export default function FloatingPet() {
                 )}
             </button>
 
-            {!chatOpen && (
+            {/* 对话入口的小气泡按钮。
+                **宠物窗口里不出现**：它是按网页布局挂在宠物左下角的，而宠物窗口只有
+                两百来像素宽，这个按钮会有一半悬在窗口外——在透明窗上就是桌面角落里
+                凭空多出来的半个圆。那边要说话点宠物本体开菜单就行。 */}
+            {!chatOpen && !isPetWindow && (
                 <button
                     type="button"
                     className={styles.chatButton}

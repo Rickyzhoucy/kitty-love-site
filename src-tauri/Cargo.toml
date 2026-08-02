@@ -9,7 +9,16 @@ tauri-build = { version = "2.5", features = [] }
 
 [dependencies]
 keyring = "3.6"
-tauri = { version = "2.9", features = [] }
+# `tray-icon` 是托盘的开关，不开这个 TrayIconBuilder 根本编译不出来。
+# 托盘不是装饰——主窗口收起、宠物又锁定之后，它是唯一还能操作的入口。
+# `tray-icon`：托盘。
+# `macos-private-api`：macOS 上的透明窗口。**必须和 tauri.conf.json 的
+#   macOSPrivateApi 同时开**，只开一边构建脚本会直接报错。
+#   代价是用了私有 API 的包上不了 Mac App Store——这个站是私人分发，无所谓。
+tauri = { version = "2.9", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 url = "2.5"
 
 [features]

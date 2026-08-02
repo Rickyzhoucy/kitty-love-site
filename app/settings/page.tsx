@@ -2,6 +2,7 @@
 
 import Card from '../components/ui/Card';
 import PasskeyManager from '../components/PasskeyManager';
+import DesktopSettingsPanel from '../components/DesktopSettingsPanel';
 
 /**
  * 主站的账号设置。**目前只有一件事：passkey。**
@@ -19,6 +20,10 @@ export default function SettingsPage() {
             <h1 className="m-0 mb-4 font-display text-2xl text-ink">账号设置</h1>
             <Card className="p-5">
                 <PasskeyManager base="/auth/passkey" />
+            </Card>
+            {/* 桌面版专属。浏览器里整块不渲染，所以这里不用再判一次。 */}
+            <Card className="mt-4 p-5">
+                <DesktopSettingsPanel />
             </Card>
         </div>
     );

@@ -89,33 +89,67 @@
   }
 }
 
-[data-desktop-companion="true"] body {
+/* ── 宠物窗口（/desktop-pet）──────────────────────────────────────────
+ *
+ * 这个窗口里**只有宠物**，其余一概不画。背景必须真透明——html 和 body 都要写，
+ * 漏掉任何一层，Tauri 那边的 `transparent: true` 就等于白配，桌面上会出现一个
+ * 白色方块。
+ *
+ * `color-scheme: normal` 也不能省：暗色模式下浏览器会给根元素铺一层深色底，
+ * 那层底在透明窗上同样是可见的。
+ */
+:root[data-desktop-pet="true"],
+:root[data-desktop-pet="true"] body {
   background: transparent !important;
+  background-color: transparent !important;
+  color-scheme: normal;
   overflow: hidden;
 }
 
-[data-desktop-companion="true"] main,
-[data-desktop-companion="true"] nav {
+/* 导航、主内容区、以及页面自己的装饰层全部不要。
+ * 用 display:none 而不是 visibility:hidden——后者仍然占位，透明窗里
+ * 一个占位的空 div 照样会拦住本该落到桌面的点击。 */
+:root[data-desktop-pet="true"] nav,
+:root[data-desktop-pet="true"] main {
   display: none !important;
 }
 
-.desktop-drag-handle {
-  display: none;
-  position: fixed;
-  inset: 8px 12px auto;
-  z-index: 9999;
-  height: 28px;
-  border-radius: 999px;
-  color: var(--color-ink-muted);
-  background: color-mix(in oklch, var(--color-surface), transparent 35%);
-  font-size: 12px;
-  line-height: 28px;
-  text-align: center;
-  cursor: move;
+/* **整页默认不接收鼠标事件。**
+ *
+ * 这是「点桌面不该碰到宠物」的关键一半（另一半是 Rust 侧的
+ * set_ignore_cursor_events，见 src-tauri）。窗口是个矩形，而宠物是圆的，
+ * 四个角那片透明区域如果还接收事件，你点桌面图标就会被这个看不见的方块吃掉。
+ *
+ * 只有宠物本体和它弹出的气泡/菜单重新打开事件接收。 */
+:root[data-desktop-pet="true"] body {
+  pointer-events: none;
 }
 
-[data-desktop-companion="true"] .desktop-drag-handle {
-  display: block;
+/* 容器只负责把宠物摆到窗口正中（窗口本身就只有宠物那么大，贴右下角会压边、
+ * 气泡还会被裁掉）。**它自己不接事件**——铺满整窗又接事件的话，等于整个透明
+ * 矩形都在拦截桌面点击，和没做穿透一样。 */
+:root[data-desktop-pet="true"] [data-pet-hit] {
+  position: fixed;
+  inset: 0;
+  right: auto;
+  bottom: auto;
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+/* 真正能点的只有它的直接子元素：宠物本体、气泡、菜单、对话面板。 */
+:root[data-desktop-pet="true"] [data-pet-hit] > * {
+  pointer-events: auto;
+}
+
+/* 锁定态：连宠物本身也不接收，纯装饰。
+ * Rust 侧同时会开整窗穿透，这里是双保险——万一某个平台上
+ * set_ignore_cursor_events 不生效，至少 CSS 这层还拦得住。 */
+:root[data-desktop-pet="locked"] [data-pet-hit] {
+  pointer-events: none !important;
 }
 
 /* 描边空心字：巨型排版装饰用。

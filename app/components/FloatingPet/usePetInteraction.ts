@@ -47,6 +47,14 @@ interface UsePetInteractionOptions {
      * 露在屏幕外。
      */
     sizeToken?: string | number;
+    /**
+     * 点页面空白处，宠物是否走过去。
+     *
+     * **桌面宠物窗口必须关掉这个。** 在网页里「点哪儿它走哪儿」很讨喜，但那个
+     * 窗口是一块铺在桌面上的透明矩形——你点的是桌面图标、是底下的另一个应用，
+     * 宠物没有理由因此挪窝。真要它走动，走菜单里的「走两步」。
+     */
+    clickToWalk?: boolean;
 }
 
 const DEFAULT_POSITION: PetPosition = { right: 20, bottom: 112 };
@@ -113,6 +121,7 @@ export function usePetInteraction({
     onOpenMenu,
     onInteraction,
     sizeToken,
+    clickToWalk = true,
 }: UsePetInteractionOptions) {
     const [position, setPosition] = useState<PetPosition>(() => {
         if (typeof window === 'undefined') return DEFAULT_POSITION;
@@ -172,7 +181,7 @@ export function usePetInteraction({
     }, [bodyRef, disabled, sizeToken]);
 
     useEffect(() => {
-        if (disabled) return;
+        if (disabled || !clickToWalk) return;
         const handlePageClick = (event: MouseEvent) => {
             const target = event.target;
             if (!(target instanceof Element) || event.button !== 0 || event.defaultPrevented) return;
@@ -220,6 +229,7 @@ export function usePetInteraction({
         return () => document.removeEventListener('click', handlePageClick);
     }, [
         bodyRef,
+        clickToWalk,
         disabled,
         onFacing,
         onInteraction,

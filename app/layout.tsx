@@ -5,6 +5,7 @@ import BottomNav from './components/BottomNav';
 import FloatingPetWrapper from './components/FloatingPetWrapper';
 import { ToastProvider } from './components/ui/Toast';
 import DesktopCompanionMode from './components/DesktopCompanionMode';
+import DesktopPetBridge from './components/DesktopPetBridge';
 import ChatMediationProvider from './components/ChatMediationProvider';
 
 const nunito = Nunito({
@@ -43,6 +44,7 @@ export default function RootLayout({
       <body>
         <ToastProvider>
           <DesktopCompanionMode />
+          <DesktopPetBridge />
           <ChatMediationProvider>
             <main className="relative min-h-dvh pb-24">{children}</main>
             <BottomNav />

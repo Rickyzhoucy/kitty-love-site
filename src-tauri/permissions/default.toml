@@ -12,3 +12,17 @@ commands.allow = ["load_device_token"]
 identifier = "allow-delete-device-token"
 description = "Removes the device session token from the operating-system credential vault."
 commands.allow = ["delete_device_token"]
+
+# 桌面偏好（锁定 / 置顶 / 开机自启 / 宠物大小）。只影响本机窗口行为，
+# 不碰站点数据。
+[[permission]]
+identifier = "allow-desktop-settings"
+description = "Reads and updates desktop-only window preferences."
+commands.allow = ["get_desktop_settings", "update_desktop_settings"]
+
+# 从宠物窗口把主界面叫回来。宠物窗口无边框、没有系统按钮，
+# 这是它唯一能打开主界面的路。
+[[permission]]
+identifier = "allow-window-control"
+description = "Shows the main window and remembers where the pet window was dragged to."
+commands.allow = ["show_main_window", "remember_pet_position"]

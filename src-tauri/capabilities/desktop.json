@@ -2,14 +2,21 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "desktop",
   "description": "Kitty Love trusted server window and credential commands",
-  "windows": ["main"],
+  "windows": ["main", "pet", "settings"],
   "remote": {
-    "urls": ["http://localhost:*", "http://127.0.0.1:*"]
+    "urls": [
+      "http://localhost:*",
+      "http://127.0.0.1:*",
+      "https://love.rickyai.cn"
+    ]
   },
   "permissions": [
     "core:default",
     "allow-save-device-token",
     "allow-load-device-token",
-    "allow-delete-device-token"
+    "allow-delete-device-token",
+    "allow-desktop-settings",
+    "allow-window-control",
+    "autostart:default"
   ]
 }
