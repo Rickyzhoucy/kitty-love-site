@@ -109,6 +109,10 @@ fn apply_settings(app: &AppHandle, settings: &DesktopSettings) {
         return;
     };
     let _ = pet.set_always_on_top(settings.always_on_top);
+    // **运行时再关一次阴影。** builder 上的 `.shadow(false)` 在 macOS 的透明窗
+    // 上不总是生效——已知问题（tauri#5494 / #14394）：透明窗会留下一圈黑边，
+    // 焦点切换时更明显，看起来就是宠物背后压着一个深色方块。
+    let _ = pet.set_shadow(false);
     // **锁定 = 整窗鼠标穿透。** 前端那层 pointer-events 只能挡住网页自己的
     // 元素，挡不住「这个窗口在桌面上占了一块地方」——不开这个，点桌面图标
     // 还是会被透明矩形吃掉。两层都要。
@@ -144,6 +148,28 @@ fn set_pet_ready(app: AppHandle, state: tauri::State<'_, SettingsState>, ready: 
         // 可点了——那和「应用没启动」没区别。所以这里主动把主界面推到前面。
         show_main_window(app);
     }
+}
+
+/// 菜单/对话面板打开时把宠物窗口撑大，关上再收回去。
+///
+/// 宠物窗口只有两百来像素——**菜单在里面根本放不下**，会被窗口边界裁掉，
+/// 表现是「右键了但什么都没出现」。
+///
+/// 换成在 Rust 里再写一套原生菜单也能解决，但那样动作、外观、改名这些就有了
+/// 两份实现，改一处得记得改两处。撑大窗口是更省的做法：菜单还是网页那一套。
+#[tauri::command]
+fn set_pet_expanded(app: AppHandle, state: tauri::State<'_, SettingsState>, expanded: bool) {
+    let Some(pet) = app.get_webview_window(PET_LABEL) else {
+        return;
+    };
+    let base = { state.0.lock().unwrap().pet_size };
+    let (w, h) = if expanded {
+        // 够装下菜单九宫格和对话框；宠物本身仍然居中，视觉上没跳。
+        (base.max(360.0), base.max(460.0))
+    } else {
+        (base, base)
+    };
+    let _ = pet.set_size(LogicalSize::new(w, h));
 }
 
 #[tauri::command]
@@ -498,6 +524,7 @@ fn main() {
             show_main_window,
             remember_pet_position,
             set_pet_ready,
+            set_pet_expanded,
             get_server_url,
             save_server_url,
             close_setup_window,

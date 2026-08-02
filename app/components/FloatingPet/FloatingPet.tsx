@@ -35,7 +35,7 @@ import { useChatNudge } from '../ChatMediationProvider';
 import DailyRitualPanel from '../DailyRitualPanel';
 import SpeechBubble from './SpeechBubble';
 import styles from './FloatingPet.module.css';
-import { DESKTOP_PET_ROUTE, openMainWindow } from '@/lib/desktopPet';
+import { DESKTOP_PET_ROUTE, openMainWindow, requestPetWindowRoom } from '@/lib/desktopPet';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
 import type { PetInitiative } from './petBodyProtocol';
 import { usePet } from './usePet';
@@ -324,6 +324,17 @@ export default function FloatingPet() {
      * 托盘触发。Rust 侧只发一个信号（见 DesktopPetBridge），**动作本身仍然
      * 走这边同一套** —— 步态、朝向、避障没有第二份实现。
      */
+    /**
+     * 宠物窗口里，菜单/对话/仪式面板一打开就得先把窗口撑大——
+     * 两百像素的窗口装不下它们，不撑大的话右键了也「什么都没出现」，
+     * 因为面板被窗口边界整个裁掉了。
+     */
+    useEffect(() => {
+        if (!isPetWindow) return;
+        const needsRoom = menuType !== 'none' || chatOpen || ritualOpen;
+        void requestPetWindowRoom(needsRoom);
+    }, [isPetWindow, menuType, chatOpen, ritualOpen]);
+
     useEffect(() => {
         if (shouldSkip) return;
         const handle = (event: Event) => {
@@ -643,17 +654,27 @@ export default function FloatingPet() {
                 </section>
             )}
 
-            {/* 宠物窗口里，拖宠物 = 拖**整个窗口**，而不是让它在窗口里挪位置
-                （窗口只有它那么大，挪不到哪儿去，还会拖出边界被裁掉）。
-                `data-tauri-drag-region` 让系统接管拖动，所以那边不能再挂自己的
-                指针处理——两套拖动同时生效会打架，表现是拖一下窗口和宠物各走一半。
-                单击仍然打开菜单，走的是 onClick 而不是 pointerup。 */}
+            {/* 宠物窗口里，拖宠物 = 拖**整个窗口**（窗口只有它那么大，
+                在窗口内部挪位置没有意义，还会被边界裁掉）。
+
+                **必须是 `deep`，不能只写 `data-tauri-drag-region`。**
+                Tauri 只认「鼠标正下方那个元素**自己**带没带这个属性」，不看祖先。
+                而按钮里装着宠物的图，鼠标压着的是那张 img，所以光标着的属性
+                根本不生效——表现就是「按住宠物怎么拖都不动」。
+                `deep`（Tauri 2.11+）会让不可点击的子元素也参与拖动。
+
+                代价是**左键被拖动接管了，onClick 不再可靠**，所以菜单改成右键
+                （`onContextMenu`）——桌宠本来也就该是右键出菜单，顺带还满足了
+                「点一下不要随便触发东西」。 */}
             <button
                 type="button"
                 className={styles.petButton}
                 {...(isPetWindow ? {} : petButtonProps)}
-                {...(isPetWindow ? { 'data-tauri-drag-region': true } : {})}
-                onClick={isPetWindow ? handleOpenMenu : undefined}
+                {...(isPetWindow ? { 'data-tauri-drag-region': 'deep' } : {})}
+                onContextMenu={isPetWindow
+                    ? (event) => { event.preventDefault(); handleOpenMenu(); }
+                    : undefined}
+                onDoubleClick={isPetWindow ? handleOpenMenu : undefined}
                 aria-label={loading ? '正在加载伴侣宠物' : `打开 ${pet?.name ?? '伴侣'} 菜单`}
             >
                 {loading || !pet ? (

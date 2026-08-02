@@ -67,6 +67,18 @@ export async function openMainWindow(): Promise<void> {
     await invoke('show_main_window');
 }
 
+/**
+ * 菜单/面板要展开时，先跟 Rust 要更大的窗口；关上再收回去。
+ *
+ * 宠物窗口只有两百来像素，菜单在里面装不下会被窗口边界裁掉——表现是
+ * 「右键了但什么都没出现」。不在 Tauri 里就是空操作。
+ */
+export async function requestPetWindowRoom(expanded: boolean): Promise<void> {
+    if (typeof window === 'undefined' || !('__TAURI__' in window)) return;
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('set_pet_expanded', { expanded }).catch(() => {});
+}
+
 /** 宠物窗口可选的几档大小。和 Rust 侧的窗口尺寸一一对应。 */
 export const PET_WINDOW_SIZES = [
     { id: 'small', label: '小', px: 160 },
