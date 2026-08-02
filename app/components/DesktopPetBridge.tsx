@@ -8,8 +8,12 @@ import { DESKTOP_PET_ROUTE, type DesktopSettings } from '@/lib/desktopPet';
 /**
  * 宠物窗口和 Rust 侧之间的那几根线。**只在宠物窗口里生效。**
  *
- * 做三件事：
+ * 做四件事：
  *
+ * 0. **告诉 Rust「可以露面了」。** 宠物窗口一律先建成隐藏的，只有这里确认
+ *    会话有效之后才显示。第一版没有这道闸，未登录时中间件把窗口重定向到登录页，
+ *    结果一个填不了（输入框在两百像素外）也关不掉（无边框置顶）的登录框
+ *    飘在所有窗口最上面。**任何异常都该表现为「没有窗口」，而不是「怪窗口」。**
  * 1. **把锁定状态同步到 DOM。** Rust 那边开的是整窗鼠标穿透
  *    （`set_ignore_cursor_events`），但网页自己并不知道被锁了——不同步的话
  *    宠物还会跟着鼠标做悬停反应，看着像"活的却点不动"，很怪。
@@ -42,6 +46,32 @@ export default function DesktopPetBridge() {
             const current = await invoke<DesktopSettings>('get_desktop_settings');
             if (disposed) return;
             applyLocked(current.locked);
+
+            /**
+             * 会话有效吗？有效才让窗口露面。
+             *
+             * 没登录时不停地问一遍——用户此刻多半正在主窗口里登录，登完这边
+             * 自己就亮出来了，不用他再去托盘点一下「显示宠物」。
+             */
+            const checkSession = async (): Promise<boolean> => {
+                try {
+                    const response = await fetch('/api/v1/auth/me', { credentials: 'include' });
+                    return response.ok;
+                } catch {
+                    return false;
+                }
+            };
+
+            let pollTimer: ReturnType<typeof setTimeout> | null = null;
+            const settle = async () => {
+                if (disposed) return;
+                const ok = await checkSession();
+                if (disposed) return;
+                await invoke('set_pet_ready', { ready: ok });
+                if (!ok) pollTimer = setTimeout(() => { void settle(); }, 3000);
+            };
+            void settle();
+            cleanups.push(() => { if (pollTimer) clearTimeout(pollTimer); });
 
             cleanups.push(
                 await listen<DesktopSettings>('desktop-settings-changed', event => {

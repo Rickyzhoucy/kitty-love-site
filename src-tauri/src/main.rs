@@ -23,6 +23,16 @@ use tauri::{
     WebviewWindowBuilder,
 };
 
+/// 宠物窗口是否「已经真的是一只宠物了」。
+///
+/// **这个门闩是必须的。** 宠物窗口无边框、置顶、只有两百像素——它显示任何
+/// 不是宠物的东西时都会变成一个甩不掉的浮块。第一版就栽在这儿：未登录时中间件
+/// 把它重定向到登录页，于是一个填不了、也关不掉的登录框飘在所有窗口最上面。
+///
+/// 所以窗口一律**先建成隐藏的**，只有前端明确说「宠物挂上了、会话也有效」
+/// 才显示。任何异常路径的结果都是「没有窗口」，而不是「一个奇怪的窗口」。
+static PET_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 const CREDENTIAL_SERVICE: &str = "kitty-love-site";
 const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
@@ -103,7 +113,10 @@ fn apply_settings(app: &AppHandle, settings: &DesktopSettings) {
     // 还是会被透明矩形吃掉。两层都要。
     let _ = pet.set_ignore_cursor_events(settings.locked);
     let _ = pet.set_size(LogicalSize::new(settings.pet_size, settings.pet_size));
-    if settings.pet_visible {
+    // 两个条件都成立才显示：用户想看它，**而且**它确实已经是一只宠物。
+    // 少了后半句，未登录时显示的就是那个关不掉的登录框。
+    let ready = PET_READY.load(std::sync::atomic::Ordering::Relaxed);
+    if settings.pet_visible && ready {
         let _ = pet.show();
     } else {
         let _ = pet.hide();
@@ -114,6 +127,23 @@ fn apply_settings(app: &AppHandle, settings: &DesktopSettings) {
 }
 
 // ── 窗口操作（给前端和托盘共用）──────────────────────────────────────
+
+/// 前端报告宠物窗口的状态。
+///
+/// `ready = true`  —— 宠物挂上了、会话有效，可以显示了。
+/// `ready = false` —— 还没登录（或出了别的岔子）。这时**把窗口藏起来，
+///                    并把主界面叫到前面**，让人有地方去登录。
+#[tauri::command]
+fn set_pet_ready(app: AppHandle, state: tauri::State<'_, SettingsState>, ready: bool) {
+    PET_READY.store(ready, std::sync::atomic::Ordering::Relaxed);
+    let settings = { state.0.lock().unwrap().clone() };
+    apply_settings(&app, &settings);
+    if !ready {
+        // 没登录时宠物窗口是隐藏的，如果主窗口也收着，用户就看不到任何东西
+        // 可点了——那和「应用没启动」没区别。所以这里主动把主界面推到前面。
+        show_main_window(app);
+    }
+}
 
 #[tauri::command]
 fn show_main_window(app: AppHandle) {
@@ -273,7 +303,10 @@ fn build_pet_window(app: &AppHandle, base: &url::Url, settings: &DesktopSettings
         // macOS 多空间下会显得时有时无。
         .visible_on_all_workspaces(true)
         .always_on_top(settings.always_on_top)
-        .visible(settings.pet_visible)
+        // **一律先隐藏。** 显示与否交给 set_pet_ready——网页那边确认「宠物挂上了、
+        // 会话有效」之后才亮相。这样加载中、未登录、页面报错这些中间状态，
+        // 用户看到的都是「什么都没有」，而不是一个无边框置顶的怪窗口。
+        .visible(false)
         .on_navigation(move |target| target.origin().ascii_serialization() == trusted);
 
     if let (Some(x), Some(y)) = (settings.pet_x, settings.pet_y) {
@@ -296,6 +329,7 @@ fn main() {
             update_desktop_settings,
             show_main_window,
             remember_pet_position,
+            set_pet_ready,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

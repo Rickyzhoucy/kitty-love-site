@@ -1,7 +1,21 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PUBLIC_PAGES = new Set(['/verify', '/admin']);
+/**
+ * 不需要登录就能打开的页面。
+ *
+ * `/desktop-pet` 在这里**不是**因为它该公开，而是因为**它绝不能被重定向**。
+ *
+ * 它是桌面版那个 220px、无边框、置顶的宠物窗口加载的路由。没放行之前，未登录
+ * 时中间件把它重定向到 `/verify`——于是登录页被塞进一个两百像素的方框里飘在
+ * 所有窗口最上面：输入框在可视区域外根本填不了，窗口又没有标题栏可以关。
+ * 既登不进去，也关不掉。
+ *
+ * 放行它是安全的：这个页面自己不渲染任何数据，宠物要的东西全走 `/api/v1/*`，
+ * 那边照样验会话。未登录时它只是一个空页面（而且会主动把窗口藏起来，
+ * 见 DesktopPetBridge）。
+ */
+const PUBLIC_PAGES = new Set(['/verify', '/admin', '/desktop-pet']);
 
 /**
  * 后台的门。**与主站是两把锁。**
