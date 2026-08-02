@@ -93,27 +93,35 @@
     地址只存在这台电脑上，不会发到任何地方。账号密码在连上之后的登录页里填。
   </div>
 
-<script type="module">
-const { invoke } = window.__TAURI__.core;
-
+<script>
 const input = document.getElementById('url');
 const save = document.getElementById('save');
 const cancel = document.getElementById('cancel');
 const msg = document.getElementById('msg');
 
-// 已经配过就带出来，改起来不用重打。
-try {
-  const current = await invoke('get_server_url');
-  if (current) input.value = current;
-} catch (error) {
-  console.error(error);
-}
-input.focus();
-input.select();
-
 function show(text, isError) {
   msg.textContent = text;
   msg.className = isError ? 'msg error' : 'msg';
+}
+
+/**
+ * **不要在顶层解构 `window.__TAURI__`。**
+ *
+ * 那个全局只有在 tauri.conf.json 里开了 `withGlobalTauri` 才注入，默认是关的。
+ * 一旦没注入，顶层的 `const { invoke } = window.__TAURI__.core` 会直接抛异常，
+ * 后面的 addEventListener 一行都执行不到——表现就是**页面长得完全正常，
+ * 但两个按钮点了都没反应**，而且不打开开发者工具根本看不出哪里错了。
+ *
+ * 所以改成用的时候才取，取不到就把错误显示在页面上。宁可丑，也别静悄悄地死。
+ */
+function invoke(command, args) {
+  const api = window.__TAURI__ && window.__TAURI__.core;
+  if (!api || typeof api.invoke !== 'function') {
+    return Promise.reject(new Error(
+      '和应用后台的连接没建立起来（__TAURI__ 未注入）。请重启应用；若仍然如此，这是个 bug。'
+    ));
+  }
+  return api.invoke(command, args);
 }
 
 async function submit() {
@@ -126,14 +134,23 @@ async function submit() {
     await invoke('save_server_url', { url: value });
     // 成功的话 Rust 会把主窗口开起来并关掉这一页，走不到下面。
   } catch (error) {
-    show(String(error), true);
+    show(String(error && error.message ? error.message : error), true);
     save.disabled = false;
   }
 }
 
+// 监听器先挂上，再去取已存的值——顺序反过来的话，取值一旦失败，
+// 按钮就又变成死的了。
 save.addEventListener('click', submit);
 input.addEventListener('keydown', event => { if (event.key === 'Enter') submit(); });
-cancel.addEventListener('click', () => invoke('close_setup_window').catch(() => {}));
+cancel.addEventListener('click', () => {
+  invoke('close_setup_window').catch(error => show(String(error.message || error), true));
+});
+
+invoke('get_server_url')
+  .then(current => { if (current) input.value = current; })
+  .catch(error => show(String(error.message || error), true))
+  .finally(() => { input.focus(); input.select(); });
 </script>
 </body>
 </html>
