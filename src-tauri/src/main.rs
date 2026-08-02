@@ -17,7 +17,7 @@ mod settings;
 
 use settings::{DesktopSettings, SettingsState};
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
@@ -36,6 +36,7 @@ static PET_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 const CREDENTIAL_SERVICE: &str = "kitty-love-site";
 const MAIN_LABEL: &str = "main";
 const PET_LABEL: &str = "pet";
+const SETUP_LABEL: &str = "setup";
 /// 必须和前端 `lib/desktopPet.ts` 里的 DESKTOP_PET_ROUTE 一致。
 const PET_ROUTE: &str = "/desktop-pet";
 
@@ -205,6 +206,7 @@ fn build_tray(app: &AppHandle, settings: &DesktopSettings) -> tauri::Result<()> 
     )?;
     let walk = MenuItem::with_id(app, "walk", "走两步", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "open_settings", "设置…", true, None::<&str>)?;
+    let setup_item = MenuItem::with_id(app, "open_setup", "连接设置…", true, None::<&str>)?;
     let quit = PredefinedMenuItem::quit(app, Some("退出"))?;
 
     let menu = Menu::with_items(
@@ -218,6 +220,7 @@ fn build_tray(app: &AppHandle, settings: &DesktopSettings) -> tauri::Result<()> 
             &walk,
             &PredefinedMenuItem::separator(app)?,
             &settings_item,
+            &setup_item,
             &quit,
         ],
     )?;
@@ -244,7 +247,11 @@ fn build_tray(app: &AppHandle, settings: &DesktopSettings) -> tauri::Result<()> 
                     return;
                 }
                 "open_settings" => {
-                    open_settings_window(app);
+                    open_site_settings_window(app);
+                    return;
+                }
+                "open_setup" => {
+                    open_setup_window(app);
                     return;
                 }
                 "toggle_pet" => next.pet_visible = !next.pet_visible,
@@ -264,26 +271,187 @@ fn build_tray(app: &AppHandle, settings: &DesktopSettings) -> tauri::Result<()> 
     Ok(())
 }
 
-/// 设置窗口。用站点的 `/settings` 页，不另做一套 UI。
-fn open_settings_window(app: &AppHandle) {
+/// 连接设置（服务器地址）。**这一页是打包进来的本地页面。**
+///
+/// 不能用服务器上的 `/settings`——那正是「地址填错了」时打不开的东西：
+/// 连不上所以打不开设置，打不开设置所以改不了地址。同一类自锁，
+/// 前面已经在宠物窗口上栽过一次，不能再栽第二次。
+fn open_setup_window(app: &AppHandle) {
+    if let Some(existing) = app.get_webview_window(SETUP_LABEL) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(
+        app,
+        SETUP_LABEL,
+        WebviewUrl::App("desktop/setup.html".into()),
+    )
+    .title("连接设置")
+    .inner_size(460.0, 480.0)
+    .resizable(false)
+    .build();
+}
+
+/// 站点自己的设置页（passkey、桌面偏好）。连上之后才有意义。
+fn open_site_settings_window(app: &AppHandle) {
     if let Some(existing) = app.get_webview_window("settings") {
         let _ = existing.show();
         let _ = existing.set_focus();
         return;
     }
     let Some(main) = app.get_webview_window(MAIN_LABEL) else {
+        // 还没连上服务器，能给的只有连接设置。
+        open_setup_window(app);
         return;
     };
     let Ok(mut url) = main.url() else { return };
     url.set_path("/settings");
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::External(url))
         .title("设置")
-        .inner_size(520.0, 640.0)
+        .inner_size(520.0, 660.0)
         .resizable(true)
         .build();
 }
 
+#[tauri::command]
+fn get_server_url(state: tauri::State<'_, SettingsState>) -> Option<String> {
+    state.0.lock().unwrap().server_url.clone()
+}
+
+#[tauri::command]
+fn close_setup_window(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(SETUP_LABEL) {
+        let _ = window.close();
+    }
+}
+
+/// 存服务器地址，然后把主窗口和宠物窗口指过去。
+#[tauri::command]
+fn save_server_url(
+    app: AppHandle,
+    state: tauri::State<'_, SettingsState>,
+    url: String,
+) -> Result<(), String> {
+    let trimmed = url.trim().trim_end_matches('/').to_string();
+    let parsed = trimmed
+        .parse::<url::Url>()
+        .map_err(|_| "地址格式不对，要带 https:// 或 http://".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("只支持 http:// 和 https://".into());
+    }
+    if parsed.host_str().is_none() {
+        return Err("这个地址里没有主机名".into());
+    }
+
+    let next = {
+        let mut current = state.0.lock().unwrap();
+        current.server_url = Some(trimmed);
+        current.clone()
+    };
+    settings::save(&app, &next);
+
+    open_app_windows(&app, &parsed, &next).map_err(|e| e.to_string())?;
+    close_setup_window(app);
+    Ok(())
+}
+
+// ── 顶部菜单 ────────────────────────────────────────────────────────────
+
+/// macOS 顶部菜单栏 / Windows 窗口菜单。
+///
+/// 托盘之外再给一条路：托盘图标在某些 macOS 版本上会被「菜单栏图标太多」
+/// 挤掉，而顶部菜单是跟着应用走的，不会消失。**连接设置必须在这里**——
+/// 它是服务器连不上时唯一还能用的入口。
+fn build_app_menu(app: &AppHandle) -> tauri::Result<()> {
+    let setup = MenuItem::with_id(app, "menu_setup", "连接设置…", true, Some("CmdOrCtrl+,"))?;
+    let site_settings =
+        MenuItem::with_id(app, "menu_site_settings", "账号与桌面设置…", true, None::<&str>)?;
+    let show_main = MenuItem::with_id(app, "menu_show_main", "主界面", true, None::<&str>)?;
+
+    // 混着 MenuItem 和 PredefinedMenuItem 时必须显式标成 `&dyn IsMenuItem`，
+    // 否则类型推断会拿第一个元素的具体类型去要求后面所有元素。
+    let app_menu = Submenu::with_items(
+        app,
+        "Kitty Love",
+        true,
+        &[
+            &setup as &dyn IsMenuItem<_>,
+            &site_settings,
+            &PredefinedMenuItem::separator(app)?,
+            &show_main,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::quit(app, Some("退出"))?,
+        ],
+    )?;
+
+    // 编辑菜单不是摆设：没有它，macOS 的输入框连 Cmd+V 都用不了
+    // ——登录时粘贴不了密码，填服务器地址也只能一个字一个字敲。
+    let edit_menu = Submenu::with_items(
+        app,
+        "编辑",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, Some("撤销"))?,
+            &PredefinedMenuItem::redo(app, Some("重做"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, Some("剪切"))?,
+            &PredefinedMenuItem::copy(app, Some("复制"))?,
+            &PredefinedMenuItem::paste(app, Some("粘贴"))?,
+            &PredefinedMenuItem::select_all(app, Some("全选"))?,
+        ],
+    )?;
+
+    let menu = Menu::with_items(app, &[&app_menu, &edit_menu])?;
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| match event.id().as_ref() {
+        "menu_setup" => open_setup_window(app),
+        "menu_site_settings" => open_site_settings_window(app),
+        "menu_show_main" => show_main_window(app.clone()),
+        _ => {}
+    });
+    Ok(())
+}
+
 // ── 启动 ────────────────────────────────────────────────────────────────
+
+/// 把主窗口和宠物窗口开到指定服务器上。已经存在就直接导航过去，
+/// 这样「改地址」不需要重启应用。
+fn open_app_windows(
+    app: &AppHandle,
+    base: &url::Url,
+    settings: &DesktopSettings,
+) -> tauri::Result<()> {
+    let trusted = base.origin().ascii_serialization();
+
+    if let Some(main) = app.get_webview_window(MAIN_LABEL) {
+        let _ = main.navigate(base.clone());
+        let _ = main.show();
+        let _ = main.set_focus();
+    } else {
+        let guard = trusted.clone();
+        WebviewWindowBuilder::new(app, MAIN_LABEL, WebviewUrl::External(base.clone()))
+            .title("Kitty Love")
+            .inner_size(1100.0, 760.0)
+            .min_inner_size(420.0, 560.0)
+            .resizable(true)
+            .on_navigation(move |target| target.origin().ascii_serialization() == guard)
+            .build()?;
+    }
+
+    let mut pet_url = base.clone();
+    pet_url.set_path(PET_ROUTE);
+    if let Some(pet) = app.get_webview_window(PET_LABEL) {
+        // 换服务器时宠物要重新验一次会话，先藏起来等它自己报到。
+        PET_READY.store(false, std::sync::atomic::Ordering::Relaxed);
+        let _ = pet.hide();
+        let _ = pet.navigate(pet_url);
+    } else {
+        build_pet_window(app, base, settings)?;
+    }
+    Ok(())
+}
 
 fn build_pet_window(app: &AppHandle, base: &url::Url, settings: &DesktopSettings) -> tauri::Result<WebviewWindow> {
     let mut url = base.clone();
@@ -330,30 +498,40 @@ fn main() {
             show_main_window,
             remember_pet_position,
             set_pet_ready,
+            get_server_url,
+            save_server_url,
+            close_setup_window,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
             let settings = settings::load(&handle);
             app.manage(SettingsState(std::sync::Mutex::new(settings.clone())));
 
-            let server_url = std::env::var("KITTY_SERVER_URL")
-                .unwrap_or_else(|_| "http://localhost:3000".to_string());
-            let base = server_url.parse::<url::Url>().map_err(|e| e.to_string())?;
-            let trusted = base.origin().ascii_serialization();
-
-            WebviewWindowBuilder::new(&handle, MAIN_LABEL, WebviewUrl::External(base.clone()))
-                .title("Kitty Love")
-                .inner_size(1100.0, 760.0)
-                .min_inner_size(420.0, 560.0)
-                .resizable(true)
-                .on_navigation(move |target| target.origin().ascii_serialization() == trusted)
-                .build()?;
-
-            build_pet_window(&handle, &base, &settings)?;
             build_tray(&handle, &settings)?;
-            // 位置/穿透/尺寸在窗口建好之后再落一次，builder 覆盖不到的
-            // （比如 ignore_cursor_events）在这里补上。
-            apply_settings(&handle, &settings);
+            build_app_menu(&handle)?;
+
+            // 服务器地址的来源，优先级从高到低：
+            //   1. KITTY_SERVER_URL 环境变量（开发时方便，`cargo run` 直接指过去）
+            //   2. 存下来的设置（正常路径，用户自己在设置页填的）
+            //   3. 都没有 → 弹连接设置页
+            //
+            // **没有硬编码的默认值。** 以前默认 localhost:3000，对分发出去的包
+            // 来说毫无意义——别人自托管的地址不可能是我的开发机，而双击启动的
+            // .app 又读不到环境变量，等于永远连不上还不知道去哪儿改。
+            let configured = std::env::var("KITTY_SERVER_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| settings.server_url.clone());
+
+            match configured.and_then(|value| value.parse::<url::Url>().ok()) {
+                Some(base) => {
+                    open_app_windows(&handle, &base, &settings)?;
+                    // 穿透/尺寸/位置在窗口建好之后再落一次，
+                    // builder 覆盖不到的（比如 ignore_cursor_events）在这里补上。
+                    apply_settings(&handle, &settings);
+                }
+                None => open_setup_window(&handle),
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

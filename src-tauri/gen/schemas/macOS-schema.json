@@ -201,6 +201,12 @@
           "markdownDescription": "Stores the device session token in the operating-system credential vault."
         },
         {
+          "description": "Reads and updates the self-hosted server address from the bundled setup page.",
+          "type": "string",
+          "const": "allow-server-url",
+          "markdownDescription": "Reads and updates the self-hosted server address from the bundled setup page."
+        },
+        {
           "description": "Shows the main window and remembers where the pet window was dragged to.",
           "type": "string",
           "const": "allow-window-control",

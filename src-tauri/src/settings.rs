@@ -17,6 +17,12 @@ use tauri::{AppHandle, Manager};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct DesktopSettings {
+    /// 自己那台服务器的地址。`None` 表示还没配过，启动时先弹设置页。
+    ///
+    /// **必须是可改的、且改的地方在应用自己身上。** 这个包要能分发给别人
+    /// 自托管，人家不可能为了换个域名重新打一次包；而写死成环境变量的话，
+    /// 双击启动的 .app 根本读不到。
+    pub server_url: Option<String>,
     /// 锁定：整窗鼠标穿透，宠物变纯装饰，点不到也拖不动。
     pub locked: bool,
     /// 宠物窗口置顶。
@@ -37,6 +43,7 @@ pub struct DesktopSettings {
 impl Default for DesktopSettings {
     fn default() -> Self {
         Self {
+            server_url: None,
             // **默认不锁。** 第一次打开如果宠物点不动，用户只会以为它坏了，
             // 而不会想到去托盘里找一个「锁定」开关。
             locked: false,

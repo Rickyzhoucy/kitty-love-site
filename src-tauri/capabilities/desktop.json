@@ -2,7 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "desktop",
   "description": "Kitty Love trusted server window and credential commands",
-  "windows": ["main", "pet", "settings"],
+  "windows": [
+    "main",
+    "pet",
+    "settings",
+    "setup"
+  ],
   "remote": {
     "urls": [
       "http://localhost:*",
@@ -17,6 +22,7 @@
     "allow-delete-device-token",
     "allow-desktop-settings",
     "allow-window-control",
-    "autostart:default"
+    "autostart:default",
+    "allow-server-url"
   ]
 }

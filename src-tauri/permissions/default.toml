@@ -26,3 +26,10 @@ commands.allow = ["get_desktop_settings", "update_desktop_settings"]
 identifier = "allow-window-control"
 description = "Shows the main window and remembers where the pet window was dragged to."
 commands.allow = ["show_main_window", "remember_pet_position", "set_pet_ready"]
+
+# 服务器地址。给打包进来的本地设置页用——那一页是「连不上服务器时」唯一
+# 还能打开的东西，所以它的命令不能依赖任何远端资源。
+[[permission]]
+identifier = "allow-server-url"
+description = "Reads and updates the self-hosted server address from the bundled setup page."
+commands.allow = ["get_server_url", "save_server_url", "close_setup_window"]

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>连接设置</title>
+<!--
+  服务器地址设置页。
+
+  **这一页必须是打包进应用里的本地页面，不能从服务器加载。**
+
+  它要解决的正是「地址填错了」这种情况——如果设置界面本身也住在那台连不上的
+  服务器上，人就被锁在外面了：连不上所以打不开设置，打不开设置所以改不了地址。
+  同一类自锁，前面已经在宠物窗口上栽过一次。
+
+  所以这里不引任何外部资源，样式内联，只依赖 Tauri 的 invoke。
+-->
+<style>
+  :root {
+    --bg: #fbf7f4;
+    --surface: #ffffff;
+    --ink: #2e2724;
+    --ink-muted: #857a73;
+    --accent: #8e2f43;
+    --line: #ece3dd;
+    --danger: #b3261e;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1614;
+      --surface: #241f1d;
+      --ink: #f0e9e5;
+      --ink-muted: #a89b94;
+      --accent: #e8879b;
+      --line: #362f2c;
+      --danger: #f2b8b5;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 28px 26px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  h1 { margin: 0 0 6px; font-size: 19px; font-weight: 650; }
+  .sub { margin: 0 0 22px; color: var(--ink-muted); font-size: 13px; }
+  label { display: block; margin-bottom: 7px; font-size: 13px; color: var(--ink-muted); }
+  input {
+    width: 100%; padding: 11px 13px; font-size: 14px; font-family: inherit;
+    color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: 11px; outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  .hint { margin: 9px 0 0; font-size: 12px; color: var(--ink-muted); }
+  .row { display: flex; gap: 10px; margin-top: 22px; }
+  button {
+    flex: 1; padding: 11px 16px; font-size: 14px; font-family: inherit; font-weight: 600;
+    border-radius: 999px; border: 1px solid transparent; cursor: pointer;
+  }
+  .primary { background: var(--accent); color: #fff; }
+  .primary:disabled { opacity: .55; cursor: default; }
+  .ghost { background: transparent; color: var(--ink-muted); border-color: var(--line); }
+  .note {
+    margin-top: 20px; padding: 12px 14px; border-radius: 11px;
+    background: var(--surface); border: 1px solid var(--line);
+    font-size: 12px; color: var(--ink-muted);
+  }
+  .msg { margin-top: 14px; font-size: 13px; min-height: 20px; }
+  .msg.error { color: var(--danger); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>连接到你的小世界</h1>
+  <p class="sub">填自己部署的那台服务器的地址。之后可以从菜单栏「设置」里改。</p>
+
+  <label for="url">服务器地址</label>
+  <input id="url" type="url" placeholder="https://love.example.com" autocomplete="off" spellcheck="false" />
+  <p class="hint">要带 <code>https://</code> 或 <code>http://</code>。本机开发填 <code>http://localhost:3000</code>。</p>
+
+  <div class="row">
+    <button type="button" class="ghost" id="cancel">取消</button>
+    <button type="button" class="primary" id="save">连接</button>
+  </div>
+
+  <p class="msg" id="msg"></p>
+
+  <div class="note">
+    地址只存在这台电脑上，不会发到任何地方。账号密码在连上之后的登录页里填。
+  </div>
+
+<script type="module">
+const { invoke } = window.__TAURI__.core;
+
+const input = document.getElementById('url');
+const save = document.getElementById('save');
+const cancel = document.getElementById('cancel');
+const msg = document.getElementById('msg');
+
+// 已经配过就带出来，改起来不用重打。
+try {
+  const current = await invoke('get_server_url');
+  if (current) input.value = current;
+} catch (error) {
+  console.error(error);
+}
+input.focus();
+input.select();
+
+function show(text, isError) {
+  msg.textContent = text;
+  msg.className = isError ? 'msg error' : 'msg';
+}
+
+async function submit() {
+  const value = input.value.trim();
+  if (!value) { show('填一个地址吧', true); return; }
+  save.disabled = true;
+  show('连接中…', false);
+  try {
+    // 校验和落盘都在 Rust 那边做，这里只负责收字。
+    await invoke('save_server_url', { url: value });
+    // 成功的话 Rust 会把主窗口开起来并关掉这一页，走不到下面。
+  } catch (error) {
+    show(String(error), true);
+    save.disabled = false;
+  }
+}
+
+save.addEventListener('click', submit);
+input.addEventListener('keydown', event => { if (event.key === 'Enter') submit(); });
+cancel.addEventListener('click', () => invoke('close_setup_window').catch(() => {}));
+</script>
+</body>
+</html>
