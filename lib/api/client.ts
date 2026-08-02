@@ -107,8 +107,22 @@ async function request<T>(method: string, path: string, options: RequestOptions 
     if (response.status === 401 && typeof window !== 'undefined') {
         const pathname = window.location.pathname;
         const isAdmin = pathname.startsWith('/admin');
+        /**
+         * **桌面宠物窗口绝不能跳走。**
+         *
+         * 那是一个 220px、无边框、置顶的透明窗。一旦它跳到 `/verify`，桌面上
+         * 就多出一块不透明的登录页方块：输入框在可视区域外填不了，没有标题栏
+         * 关不掉，也没有拖动区拖不动——「浮窗不透明、拖也拖不动」就是这么来的。
+         *
+         * 中间件那边已经放行了这个路由，但光放行不够：宠物一挂载就会去请求
+         * `/api/v1/pet`，未登录时那个 401 会从**这里**把整个窗口带走。
+         *
+         * 未登录该做的是让窗口自己藏起来、把主界面推到前面（见
+         * DesktopPetBridge），而不是把登录页塞进一个填不了的小方框。
+         */
+        const isPetWindow = pathname.startsWith('/desktop-pet');
         const isLoginPage = pathname.startsWith('/verify') || pathname.replace(/\/$/, '') === '/admin';
-        if (!isLoginPage) {
+        if (!isLoginPage && !isPetWindow) {
             // 后台和主站是两套账号，掉线了要各回各的登录页。
             // 后台 401 跳 /verify 的话，人登进主站也还是进不去后台，
             // 只会以为「密码不对」。

@@ -39,8 +39,11 @@ export default function DesktopPetBridge() {
             ]);
             if (disposed) return;
 
+            // 锁定状态写在**另一个属性**上。写进 data-desktop-pet 的话会把
+            // 「是不是宠物窗口」那套按 `="true"` 匹配的透明/布局规则整体顶掉，
+            // 一锁定窗口就变成不透明的方块（见 globals.css 那段注释）。
             const applyLocked = (locked: boolean) => {
-                document.documentElement.dataset.desktopPet = locked ? 'locked' : 'true';
+                document.documentElement.dataset.petLocked = locked ? 'true' : 'false';
             };
 
             const current = await invoke<DesktopSettings>('get_desktop_settings');

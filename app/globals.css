@@ -148,7 +148,12 @@
 /* 锁定态：连宠物本身也不接收，纯装饰。
  * Rust 侧同时会开整窗穿透，这里是双保险——万一某个平台上
  * set_ignore_cursor_events 不生效，至少 CSS 这层还拦得住。 */
-:root[data-desktop-pet="locked"] [data-pet-hit] {
+ *
+ * **锁定用的是另一个属性，不是 data-desktop-pet 的另一个值。**
+ * 一开始写成 `data-desktop-pet="locked"`，结果一锁定，上面那些按 `="true"`
+ * 匹配的透明和布局规则**全部失效**——窗口当场变成一个不透明的米色方块。
+ * 用同一个属性同时表达「是不是宠物窗口」和「锁没锁」，就是在挖这个坑。 */
+:root[data-pet-locked="true"] [data-pet-hit] > * {
   pointer-events: none !important;
 }
 
