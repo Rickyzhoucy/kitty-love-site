@@ -18,7 +18,15 @@
   box-shadow: var(--shadow-lift);
 }
 
-.item {
+/* 下面每条都写成 `.menu .xxx` 的两级形式，不是为了排版好看，是为了**权重**。
+ *
+ * 这个菜单是共用组件，会被塞进各种各样的容器里，而那些容器常带着
+ * `.某个面板 button { … }` 这种后代选择器——(0,1,1)，比单个类 (0,1,0) 高，
+ * 于是候选项被容器的按钮样式接管。实际发生过：宠物对话面板的
+ * `.chatInput button` 把整个菜单涂成了发送按钮的粉色。
+ *
+ * 两级选择器 (0,2,0) 高过所有这类环境规则，菜单在哪儿都长一个样。 */
+.menu .item {
   position: relative;
   display: flex;
   width: 100%;
@@ -45,21 +53,21 @@
  * 哪个就变暗」，然后把没选中的那条当成了选中的。
  *
  * 实心底色在两种主题下都只有一个读法：这一条是当前项。 */
-.item[data-active],
-.item:focus-visible {
+.menu .item[data-active],
+.menu .item:focus-visible {
   background: var(--color-accent);
   color: var(--color-on-accent);
 }
 
 /* 文件大小那一列在实心底上要跟着换前景色，否则 ink-muted 落在 accent 上
    几乎看不见——而它正是你用来分辨两个同名文件的信息。 */
-.item[data-active] .hint {
+.menu .item[data-active] .hint {
   color: color-mix(in oklch, var(--color-on-accent), transparent 25%);
 }
 
 /* 选中的那条左边再加一个记号。颜色之外多一层冗余：
    有人分不清这两种红，但没人会看不见「多了一个尖角」。 */
-.item[data-active]::before {
+.menu .item[data-active]::before {
   content: '';
   position: absolute;
   left: 2px;
@@ -71,11 +79,11 @@
 
 /* 读取中时不再整体压暗：压暗会和选中的实心底叠在一起，
    反而看不出哪条是当前项。只把指针变回默认，右边的「读取中…」已经说明了状态。 */
-.item:disabled {
+.menu .item:disabled {
   cursor: default;
 }
 
-.name {
+.menu .name {
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -85,7 +93,7 @@
   white-space: nowrap;
 }
 
-.hint {
+.menu .hint {
   flex: none;
   color: var(--color-ink-muted);
   font-size: 11px;

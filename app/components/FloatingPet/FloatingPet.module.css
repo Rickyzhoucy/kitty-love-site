@@ -776,8 +776,13 @@
   border-color: var(--color-accent);
 }
 
-.chatInput button,
-.rename button {
+/* **直接子级，不是后代。**
+   `.chatInput` 里除了发送按钮，还挂着 `@` 文件候选菜单（它需要这个定位上下文）。
+   写成 `.chatInput button` 的话，菜单里每一条候选都会被涂成发送按钮的粉底——
+   而且因为 `.chatInput button` 是 (0,1,1)、比候选自己的 `.item` (0,1,0) 高，
+   它还赢了。结果是整个菜单一片粉，看不出哪条是选中的。 */
+.chatInput > button,
+.rename > button {
   padding: 8px 12px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -786,7 +791,7 @@
   cursor: pointer;
 }
 
-.chatInput button:disabled {
+.chatInput > button:disabled {
   opacity: 0.55;
   cursor: wait;
 }
