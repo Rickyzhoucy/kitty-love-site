@@ -102,6 +102,20 @@ pub fn resolve_within(roots: &[String], requested: &str) -> Result<PathBuf, Stri
     ))
 }
 
+/// 这个目录项是不是软链。
+///
+/// **遍历时必须用它，不能用 `path.is_dir()`。** 后者会跟随软链：授权目录里
+/// 放一个 `escape -> /etc`，`is_dir()` 返回 true，递归就一头扎进了 /etc，
+/// 于是候选列表和搜索结果里出现授权范围外的文件名。
+///
+/// 内容其实还是安全的（真去读会被 `resolve_within` 挡下），但**文件名本身
+/// 就是信息**——「你有一个叫『离婚协议.docx』的文件」这件事不该泄露。
+///
+/// `file_type()` 来自 `read_dir` 的目录项，不跟随软链，正是这里要的。
+fn is_symlink(entry: &fs::DirEntry) -> bool {
+    entry.file_type().map(|t| t.is_symlink()).unwrap_or(true)
+}
+
 fn describe(path: &Path) -> Option<EntryInfo> {
     let meta = fs::metadata(path).ok()?;
     let modified = meta.modified().ok().and_then(|time| {
@@ -164,7 +178,8 @@ pub fn list(roots: &[String], requested: &str) -> Result<Vec<EntryInfo>, String>
         .filter(|entry| {
             // 隐藏文件默认不列。宠物没有理由去翻 .ssh / .aws / .git，
             // 而它们恰恰是最不该被读到的东西。
-            !entry.file_name().to_string_lossy().starts_with('.')
+            // 软链也不列：它可能指向授权范围外，而列出来就等于泄露那个名字。
+            !entry.file_name().to_string_lossy().starts_with('.') && !is_symlink(entry)
         })
         .filter_map(|entry| describe(&entry.path()))
         .take(MAX_ENTRIES)
@@ -213,7 +228,8 @@ fn walk(dir: &Path, pattern: &str, out: &mut Vec<EntryInfo>, depth: usize) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.filter_map(|e| e.ok()) {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
+        // 软链一律跳过——`is_dir()` 会跟随它，递归就能走出授权目录。
+        if name.starts_with('.') || is_symlink(&entry) {
             continue;
         }
         let path = entry.path();
@@ -299,7 +315,9 @@ fn collect_files(dir: &Path, needle: &str, out: &mut Vec<EntryInfo>, depth: usiz
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.filter_map(|e| e.ok()) {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
+        // 同上：不跳过软链的话，一个 `escape -> /etc` 就能让 @ 候选里
+        // 冒出授权目录外的文件名。
+        if name.starts_with('.') || is_symlink(&entry) {
             continue;
         }
         let path = entry.path();
@@ -533,6 +551,28 @@ mod tests {
         assert_eq!(fs::read(&backup).unwrap(), b"original");
         // 新文件没有可备份的东西，返回 None 而不是报错。
         assert!(backup_before_write(&tmp, &tmp.join("nope.md")).is_none());
+    }
+
+
+    /// **探针**：候选列表会不会顺着软链走到授权目录外。
+    #[cfg(unix)]
+    #[test]
+    fn candidates_do_not_follow_symlinks_out() {
+        let tmp = std::env::temp_dir().join("kitty-candidate-symlink");
+        let _ = fs::remove_dir_all(&tmp);
+        let inside = tmp.join("inside");
+        let outside = tmp.join("outside");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("机密.md"), b"secret").unwrap();
+        std::os::unix::fs::symlink(&outside, inside.join("escape")).unwrap();
+
+        let roots = vec![inside.to_string_lossy().into_owned()];
+        let names: Vec<String> = search_all(&roots, "md").into_iter().map(|i| i.name).collect();
+        assert!(
+            !names.iter().any(|n| n == "机密.md"),
+            "候选顺着软链跑到授权目录外了：{names:?}"
+        );
     }
 
     /// 符号链接指向白名单外时也要拒绝——这是 canonicalize 存在的理由。
