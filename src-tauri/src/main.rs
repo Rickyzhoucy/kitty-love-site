@@ -800,6 +800,22 @@ fn audit(app: &AppHandle, tool: &str, path: &str, outcome: &Result<serde_json::V
     }
 }
 
+/// 主界面现在是不是真的摆在人眼前。
+///
+/// 「新消息该不该由宠物来提醒」全看这一个答案：主界面开着的时候，消息本来就在
+/// 那儿，宠物再报一遍是噪音；主界面收起来或者关掉了，宠物就是唯一的通路。
+///
+/// **最小化要算「没在看」。** 只问 `is_visible` 是不够的——被最小化到 Dock 的
+/// 窗口在 macOS 上仍然报告 visible=true，照那个判断的话，人把主界面收进 Dock
+/// 之后就再也收不到提醒了，而那恰恰是最需要提醒的时候。
+#[tauri::command]
+fn is_main_window_showing(app: AppHandle) -> bool {
+    let Some(main) = app.get_webview_window(MAIN_LABEL) else {
+        return false;
+    };
+    main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false)
+}
+
 #[tauri::command]
 fn show_main_window(app: AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_LABEL) {
@@ -1338,6 +1354,7 @@ fn main() {
             read_local_attachment,
             show_pet_context_menu,
             set_pet_roam,
+            is_main_window_showing,
             get_server_url,
             save_server_url,
             close_setup_window,

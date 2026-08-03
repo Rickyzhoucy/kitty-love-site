@@ -96,6 +96,7 @@ from app.perception import record_event as record_perception_event
 from app.pet_cognition import PetCognitionService
 from app.pet_mediation import run_mediation
 from app.pet_state import (
+    DEFAULT_ASSET,
     MAX_OFFLINE_SECONDS,
     elapsed_seconds,
     load_state,
@@ -1038,6 +1039,21 @@ async def update_pet(data: PetUpdate, db: Db, user: CurrentUser):
         profile.body_asset_id = changes["asset_id"]
         profile.species = species_of(changes["asset_id"])
     profile.updated_at = utcnow()
+
+    # **改完要广播。** 同一个人可能同时开着网页、Tauri 主窗口和桌宠窗口，
+    # 每个表面各有一份 usePet 的本地状态和一份模块级缓存；不发这条事件的话，
+    # 只有动手改的那个窗口会变，其余的要重启才更新——用户看到的就是
+    # 「我明明改了名字，桌宠还叫原来那个」。
+    #
+    # 不带正文，只带 id：SSE 是广播给所有连接的，收到的人自己去拉。
+    db.add(
+        OutboxEvent(
+            topic="resource.changed",
+            aggregate_type="pet",
+            aggregate_id=companion.id,
+            payload={"resource": "pet", "action": "updated", "id": companion.id},
+        )
+    )
     await db.commit()
     return pet_view(companion, profile)
 
@@ -1253,10 +1269,52 @@ async def read_chat_thread(db: Db, user: CurrentUser):
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     messages = await list_thread(db, user.id, partner.id)
     interjections = await list_interjections(db, user.id)
+
+    # 把每条插话的说话者补成名字和外观。
+    #
+    # **不能让前端拿自己那只顶上。** 两个人各有一只宠物，前端只知道自己那只；
+    # 靠本地猜的结果就是同一条插话在两边挂着不同的名字——@ 饼干得到的回答，
+    # 在对方屏幕上署着对方宠物的名。
+    speaker_ids = {item.companion_id for item in interjections if item.companion_id}
+    speakers: dict[str, tuple[str, str]] = {}
+    if speaker_ids:
+        rows = await db.execute(
+            select(Companion.id, Companion.name, CompanionPetProfile.body_asset_id)
+            .join(
+                CompanionPetProfile,
+                CompanionPetProfile.companion_id == Companion.id,
+                isouter=True,
+            )
+            .where(Companion.id.in_(speaker_ids))
+        )
+        speakers = {row[0]: (row[1], row[2] or DEFAULT_ASSET) for row in rows}
+
+    payload = []
+    for item in interjections:
+        speaker = speakers.get(item.companion_id) if item.companion_id else None
+        payload.append(
+            {
+                "id": item.id,
+                "createdAt": item.created_at,
+                "kind": item.kind,
+                "body": item.body,
+                "messageId": item.message_id,
+                "speakerName": speaker[0] if speaker else None,
+                "speakerAssetId": speaker[1] if speaker else None,
+            }
+        )
+
+    # 对方那只宠物的名字：前端要用它判断「这条消息是不是在叫对方的宠物」。
+    partner_companion, _ = await resolve_pet(db, partner.id)
     return {
-        "partner": partner,
+        "partner": {
+            "id": partner.id,
+            "username": partner.username,
+            "displayName": partner.display_name,
+            "petName": partner_companion.name,
+        },
         "messages": messages,
-        "interjections": interjections,
+        "interjections": payload,
         "unreadCount": await unread_count(db, user.id),
     }
 

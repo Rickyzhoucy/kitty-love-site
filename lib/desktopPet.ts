@@ -100,6 +100,20 @@ export async function openPetContextMenu(state: PetMenuState): Promise<void> {
 }
 
 /**
+ * 主界面现在是不是真的摆在人眼前。
+ *
+ * 「新消息该不该由宠物来提醒」就看这个：主界面开着的时候消息本来就在那儿，
+ * 宠物再念一遍是噪音。**最小化算「没在看」**——被收进 Dock 的窗口在 macOS 上
+ * 仍然报告 visible=true，所以判断在 Rust 那侧多问了一次 is_minimized。
+ *
+ * 不在 Tauri 里就返回 false：网页版没有「另一个主窗口」这回事。
+ */
+export async function isMainWindowShowing(): Promise<boolean> {
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return false;
+    return invoke<boolean>('is_main_window_showing');
+}
+
+/**
  * 自由行动：宠物跟着鼠标在桌面上走。
  *
  * 真正的跟随在 Rust 那边（src-tauri/src/main.rs）——桌面上的「走动」是移动

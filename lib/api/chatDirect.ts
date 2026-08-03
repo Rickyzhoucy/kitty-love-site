@@ -27,12 +27,23 @@ export interface PetInterjection {
     kind: 'unread_nudge' | 'standin' | 'company' | string;
     body: string;
     messageId: string | null;
+    /**
+     * 说这句话的那只宠物。
+     *
+     * **由服务端给，不要拿本地那只顶上。** 两个人各有一只宠物，这边只知道
+     * 自己那只；靠本地猜的结果是同一条插话在两个人屏幕上挂着不同的名字。
+     * 旧数据没有归属，这里是 null，显示时回退到中性称呼。
+     */
+    speakerName: string | null;
+    speakerAssetId: string | null;
 }
 
 export interface Partner {
     id: string;
     username: string;
     displayName: string;
+    /** 对方那只宠物叫什么。用来判断一条消息是不是在叫**对方的**宠物。 */
+    petName: string | null;
 }
 
 export interface ChatThread {

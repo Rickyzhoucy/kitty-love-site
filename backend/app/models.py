@@ -976,6 +976,17 @@ class PetInterjection(StringIdMixin, CreatedAtMixin, Base):
     message_id: Mapped[str | None] = mapped_column(
         "messageId", ForeignKey("DirectMessage.id", ondelete="CASCADE"), nullable=True
     )
+    #: **说这句话的是哪只宠物。**
+    #:
+    #: 少了这一列，「谁说的」在落库时就丢了，前端只能拿本地那只顶上去——于是
+    #: 同一条插话在两个人屏幕上挂着不同的名字。@ 谁就该是谁在答，而这个归属
+    #: 只有写入的那一刻知道。
+    #:
+    #: 可空是为了旧数据：迁移之前的行没有这个信息，猜一个不如老实留空，
+    #: 前端对空值回退到「宠物」这个中性称呼。
+    companion_id: Mapped[str | None] = mapped_column(
+        "companionId", ForeignKey("Companion.id", ondelete="SET NULL"), nullable=True
+    )
     #: unread_nudge（催你看）/ standin（替你答）/ company（转移陪伴）
     kind: Mapped[str] = mapped_column(String(30))
     body: Mapped[str] = mapped_column(Text)

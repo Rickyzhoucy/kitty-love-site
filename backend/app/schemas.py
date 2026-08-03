@@ -603,12 +603,22 @@ class PetInterjectionRead(ApiModel):
     kind: str
     body: str
     message_id: str | None
+    #: 说这句话的那只宠物，以及它当时的名字和外观。
+    #:
+    #: **必须由服务端给，不能让前端拿本地那只顶上。** 两个人各有一只宠物，
+    #: 前端只知道自己那只；靠本地猜的结果是同一条插话在两边挂着不同名字。
+    #: 旧数据没有归属，这里就是 None，前端回退到中性称呼。
+    speaker_name: str | None = None
+    speaker_asset_id: str | None = None
 
 
 class PartnerRead(ApiModel):
     id: str
     username: str
     display_name: str
+    #: 对方那只宠物叫什么。前端要用它判断「这条消息是不是在叫对方的宠物」
+    #: ——只知道自己那只的话，对方 @ 自己宠物时这边不会显示「正在想」。
+    pet_name: str | None = None
 
 
 class ChatThreadRead(ApiModel):

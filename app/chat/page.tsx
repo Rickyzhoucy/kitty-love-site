@@ -173,10 +173,42 @@ export default function ChatPage() {
         void load();
     }, [load]);
 
-    // 打开这一页就算看到了 —— 宠物的唠叨据此立刻停。
+    /**
+     * 「看到了」要有人在场的证据，光是页面开着不算。
+     *
+     * 原来的判断是「这一页挂上了且有未读 → 全标已读」。问题在于消息是从 SSE
+     * 实时进来的：把这一页开着走开，之后每来一条都会在无人的情况下立刻变成
+     * 已读——对方看到的是「已读不回」，宠物的催促也永远赶不上。**电脑开着人
+     * 不在是每天都会发生的事**，不能把它当成看过了。
+     *
+     * 所以要三件事同时成立：页面可见、窗口有焦点、最近有过真人输入。人回来
+     * 时任何一次按键或点击都会立刻补上这一步，所以感觉不到延迟。
+     */
+    const PRESENCE_WINDOW_MS = 120_000;
+    const lastInputRef = useRef(Date.now());
+    useEffect(() => {
+        const touch = () => { lastInputRef.current = Date.now(); };
+        const events = ['pointerdown', 'keydown', 'wheel', 'focus'] as const;
+        events.forEach(name => window.addEventListener(name, touch, { passive: true }));
+        return () => events.forEach(name => window.removeEventListener(name, touch));
+    }, []);
+
     useEffect(() => {
         if (!thread || thread.unreadCount === 0) return;
-        void markChatRead().then(() => void load());
+        const present = () =>
+            document.visibilityState === 'visible'
+            && document.hasFocus()
+            && Date.now() - lastInputRef.current < PRESENCE_WINDOW_MS;
+
+        const settle = () => {
+            if (!present()) return;
+            void markChatRead().then(() => void load());
+        };
+        settle();
+        // 人回来的那一下（切回标签页、点一下、按个键）立刻补标已读。
+        const events = ['pointerdown', 'keydown', 'focus', 'visibilitychange'] as const;
+        events.forEach(name => window.addEventListener(name, settle, { passive: true }));
+        return () => events.forEach(name => window.removeEventListener(name, settle));
     }, [thread, load]);
 
     // 对方发消息时实时刷新。SSE 不带正文，只是个信号。
@@ -272,6 +304,30 @@ export default function ChatPage() {
         awaiting
         && thread?.interjections.some(item => item.messageId === awaiting.messageId),
     );
+
+    /**
+     * **对方叫他自己宠物时，这边也要显示「正在想」。**
+     *
+     * 上面那个 `setAwaiting` 只在「我发消息」这条路径上触发，而且拿的是我自己
+     * 宠物的名字。于是 A 打 `@饼干`，B 的客户端拿「Kitty」去匹配——匹配不上，
+     * B 那边就是聊天框静默十几秒，然后凭空冒出一句回答。
+     *
+     * 病根和署名是同一个：前端用本地那只宠物去解释一条本该自带归属的消息。
+     * 对方宠物的名字现在随 thread.partner 一起来（见后端 PartnerRead）。
+     */
+    useEffect(() => {
+        if (awaiting || !thread) return;
+        const partnerPet = thread.partner.petName;
+        if (!partnerPet) return;
+        const replied = new Set(
+            thread.interjections.map(item => item.messageId).filter(Boolean),
+        );
+        const waiting = [...thread.messages].reverse().find(message =>
+            message.senderId === thread.partner.id
+            && mentionsPet(message.body, partnerPet)
+            && !replied.has(message.id));
+        if (waiting) setAwaiting({ messageId: waiting.id, timedOut: false });
+    }, [awaiting, thread]);
 
     // 等太久就换个说法，而不是让圈悄悄消失。后端超时是静默放弃的，
     // 不标出来的话用户会一直等一句永远不来的话。
@@ -420,17 +476,31 @@ export default function ChatPage() {
                     lastDay = day;
 
                     if (item.kind === 'pet') {
+                        /**
+                         * 署**说话的那只**，不是看的人那只。
+                         *
+                         * 两个人各有一只宠物。以前这里挂的是本地的 `petName`，
+                         * 于是 A 打 `@饼干` 得到的回答，在 B 屏幕上署着 B 那只的名字
+                         * ——同一句话两个署名。归属由服务端随插话一起给
+                         * （见 lib/api/chatDirect.ts 的 speakerName）。
+                         *
+                         * 旧数据没有归属，回退到中性的「宠物」，不猜。
+                         */
+                        const speaker = item.interjection.speakerName;
+                        const speakerEmoji = item.interjection.speakerAssetId
+                            ? PET_ASSETS.find(a => a.id === item.interjection.speakerAssetId)?.emoji
+                            : undefined;
                         return (
                             <div key={`pet-${item.interjection.id}`}>
                                 {divider && <div className={styles.dayDivider}>{divider}</div>}
                                 {/* 宠物的话：一眼看出不是人在说（§3.2） */}
                                 <div className={styles.interjection}>
                                     <span className={styles.interjectionIcon} aria-hidden="true">
-                                        {petEmoji}
+                                        {speakerEmoji ?? '🐾'}
                                     </span>
                                     <div className={styles.interjectionBody}>
                                         <span className={styles.interjectionTag}>
-                                            {petName}说
+                                            {speaker ? `${speaker}说` : '宠物说'}
                                         </span>
                                         {item.interjection.body}
                                     </div>

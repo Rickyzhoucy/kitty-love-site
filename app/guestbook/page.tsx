@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Send } from 'lucide-react';
 import { format } from 'date-fns';
 import Button from '../components/ui/Button';
@@ -41,11 +40,14 @@ export default function Guestbook() {
 
         setLoading(true);
         try {
-            const newMessage = await messagesApi.create({ nickname, content });
-            setMessages([newMessage, ...messages]);
+            await messagesApi.create({ nickname, content });
+            // **不做乐观插入。** 这一页同时还挂着 SSE 重取（useResourceEvents），
+            // 两条路谁先到不一定：乐观插入用的是提交那一刻的 `messages` 闭包，
+            // 如果重取先落地，这一插就把对方在这期间发的留言又抹掉了。
+            // 直接以服务器为准重取一次，慢一个来回，但不会丢别人的话。
+            await loadMessages();
             setContent('');
             toast('留言成功 💌');
-            // 通知宠物获得经验
         } catch (error) {
             toast(error instanceof Error ? error.message : '发送失败', 'error');
         } finally {
@@ -115,15 +117,25 @@ export default function Guestbook() {
             ) : (
                 /* 瀑布流便签墙：自然错落 + 胶带两色交替 */
                 <div className="columns-1 sm:columns-2 lg:columns-3 gap-6">
-                    <AnimatePresence>
-                        {messages.map((msg, index) => (
-                            <motion.div
+                    {messages.map((msg, index) => (
+                            /**
+                             * **这面墙上不能有 JS 驱动的入场动画。**
+                             *
+                             * 原来是 framer-motion 的 `initial={{opacity:0}}` →
+                             * `animate={{opacity:1}}`。motion 走 rAF，而窗口切到后台时
+                             * rAF 会被节流甚至停掉——动画停在哪儿，内联样式就停在哪儿。
+                             * 实测后台标签页里卡片停在 `opacity: 0; transform: scale(0.9)`，
+                             * 也就是**留言直接看不见了**。桌面版那个窗口天天在后台。
+                             *
+                             * 现在改成：可见是默认状态，不依赖任何动画跑完。倾斜回到
+                             * Tailwind 类（没有 motion 写内联 transform 来盖它了，
+                             * 这也是原先整面墙从来没斜过的原因），悬停用 CSS transition。
+                             *
+                             * 顺带去掉了 `layout` 和 `AnimatePresence`：布局动画会给多列
+                             * 容器做绝对定位，卡片在列之间跳，还会留下浮在别处的空白块。
+                             */
+                            <div
                                 key={msg.id}
-                                layout
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                exit={{ opacity: 0, scale: 0.9 }}
-                                transition={{ duration: 0.25 }}
                                 className={cn(
                                     'relative mb-6 break-inside-avoid rounded-sm bg-surface px-5 pb-5 pt-9 shadow-lift',
                                     'transition-transform duration-300 ease-spring hover:rotate-0 hover:-translate-y-1',
@@ -147,9 +159,8 @@ export default function Guestbook() {
                                         {format(new Date(msg.createdAt), 'yyyy.MM.dd')}
                                     </span>
                                 </div>
-                            </motion.div>
-                        ))}
-                    </AnimatePresence>
+                            </div>
+                    ))}
                 </div>
             )}
         </div>

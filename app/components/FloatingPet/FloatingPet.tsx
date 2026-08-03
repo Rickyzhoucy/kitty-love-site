@@ -32,7 +32,8 @@ import type { AgentTaskEvent } from '@/lib/api/events';
 import { recordPetEvent } from '@/lib/api/petCognition';
 import { uploadAttachment, type Attachment } from '@/lib/api/attachments';
 import { ApiError } from '@/lib/api/client';
-import { useChatNudge } from '../ChatMediationProvider';
+import { useChatNudge, useLatestUnread, type UnreadPeek } from '../ChatMediationProvider';
+import { markChatRead, sendDirectMessage } from '@/lib/api/chatDirect';
 import DailyRitualPanel from '../DailyRitualPanel';
 import SpeechBubble from './SpeechBubble';
 import LocalFileMentionMenu, { useLocalFileMention } from '../LocalFileMentionMenu';
@@ -43,6 +44,7 @@ import {
     DESKTOP_PET_ROUTE,
     openMainWindow,
     openPetContextMenu,
+    isMainWindowShowing,
     requestPetWindowRoom,
     setPetRoam,
     startPetWindowDragging,
@@ -200,11 +202,78 @@ export default function FloatingPet() {
     // 挪到这儿之前，催促逻辑长在 /chat 页面里，而那页一打开就会把未读清零，
     // 导致提醒永远赶不上已读、实际上从没被人看到过。
     const [nudge, consumeNudge] = useChatNudge();
+    const [latestUnread, refreshUnread] = useLatestUnread();
+    /**
+     * 宠物正在替谁转达。非 null 时气泡里那段话是**对方发的消息**，
+     * 于是回复框要把话送给对方，而不是送给宠物——两个去处，一个气泡。
+     */
+    const [unreadAlert, setUnreadAlert] = useState<UnreadPeek | null>(null);
+    /** 已经报过的那条。同一条消息不重复弹，除非催促计时器又催了一遍。 */
+    const alertedRef = useRef<string | null>(null);
+
+    /**
+     * 由宠物转达新消息。
+     *
+     * ## 「显示了」不等于「看到了」
+     *
+     * 这里**绝不调用 markChatRead**。屏幕上出现过不代表有人在屏幕前——电脑开着
+     * 人不在是每天都会发生的事。已读只认两种证据：你回了这条，或者你亲手把气泡
+     * 关掉。没有动作就一直是未读，对方那边也就一直显示没看，催促也照旧。
+     *
+     * ## 主界面开着的时候不报
+     *
+     * 消息本来就在那儿，宠物再念一遍是噪音。最小化算「没在看」——被收进 Dock 的
+     * 窗口在 macOS 上仍然报告 visible=true，所以 Rust 那侧要额外问一次
+     * is_minimized（见 is_main_window_showing）。
+     */
     useEffect(() => {
-        if (!nudge) return;
-        showSpeech(nudge.body, 8_000);
-        consumeNudge();
-    }, [nudge, consumeNudge, showSpeech]);
+        if (shouldSkip || !latestUnread) return;
+        // 桌面版主窗口里的这一份不报：报了也在主界面里，而该报的时候
+        // 主界面根本没开着。那种时候由宠物窗口负责。
+        if (isTauriDesktop() && !isPetWindow) return;
+        // 同一条只报一次；再催由 nudge 那条计时器决定（0/10/30 分钟递减）。
+        const repeat = nudge !== null;
+        if (!repeat && alertedRef.current === latestUnread.messageId) return;
+
+        let cancelled = false;
+        void (async () => {
+            if (isPetWindow && await isMainWindowShowing().catch(() => false)) return;
+            if (cancelled) return;
+            alertedRef.current = latestUnread.messageId;
+            setUnreadAlert(latestUnread);
+            // duration 0 = 一直挂着并且能回。**必须是 0**：自动消失的提醒
+            // 在没人的时候等于没提醒过，而这条消息还得有人真的看见。
+            showSpeech(`${latestUnread.senderName}刚发来：\n\n${latestUnread.body}`, 0);
+            if (repeat) consumeNudge();
+        })();
+        return () => { cancelled = true; };
+    }, [latestUnread, nudge, consumeNudge, isPetWindow, shouldSkip, showSpeech]);
+
+    /** 把话送给对方，并且**这时才**算已读——你回了，说明你确实看见了。 */
+    const replyToPartner = useCallback((body: string) => {
+        setSending(true);
+        void sendDirectMessage(body)
+            .then(() => markChatRead())
+            .then(() => {
+                setUnreadAlert(null);
+                setSpeech(null);
+                refreshUnread();
+                showSpeech('帮你回过去啦～', 2_500);
+            })
+            .catch(() => showSpeech('没发出去，等下再试一次', 3_000))
+            .finally(() => setSending(false));
+    }, [refreshUnread, showSpeech]);
+
+    /**
+     * 亲手关掉气泡 = 看到了。
+     *
+     * 这一下和自动消失的区别就是全部区别：有人点了这个 ×，屏幕前确实坐着人。
+     */
+    const dismissUnreadAlert = useCallback(() => {
+        setUnreadAlert(null);
+        setSpeech(null);
+        void markChatRead().then(refreshUnread).catch(() => {});
+    }, [refreshUnread]);
 
     const activityBridge = usePetActivityBridge({
         disabled: shouldSkip,
@@ -697,13 +766,23 @@ export default function FloatingPet() {
                     petName={pet?.name ?? '它'}
                     petEmoji={petEmoji}
                     side={bubbleSide}
-                    onClose={() => setSpeech(null)}
+                    // 转达消息的那种气泡，关掉 = 你看到了 = 标已读；
+                    // 宠物自己说话的气泡关掉就只是关掉。
+                    onClose={unreadAlert ? dismissUnreadAlert : () => setSpeech(null)}
                     // 只有「它真的在跟你说话」那种气泡才给回复框，
                     // 几秒就消失的状态提示不给。见 showSpeech 的注释。
                     // 等着点头的时候不给回复框——先把这件事处理完。
-                    onReply={speechRepliable && !approval
-                        ? (value) => void sendMessage(value)
-                        : undefined}
+                    //
+                    // **回复的去处有两个。** 气泡里是对方的消息时，这句话要送给
+                    // 对方（一条真的私信）；是宠物在说话时，才是送给宠物。
+                    // 同一个输入框，两个收件人，靠 unreadAlert 区分。
+                    onReply={approval
+                        ? undefined
+                        : unreadAlert
+                            ? replyToPartner
+                            : speechRepliable
+                                ? (value) => void sendMessage(value)
+                                : undefined}
                     sending={sending}
                     approval={approval && (
                         <LocalApprovalCard

@@ -39,6 +39,7 @@ commands.allow = [
   "set_pet_expanded",
   "show_pet_context_menu",
   "set_pet_roam",
+  "is_main_window_showing",
 ]
 
 # 服务器地址。给打包进来的本地设置页用——那一页是「连不上服务器时」唯一

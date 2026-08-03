@@ -221,12 +221,20 @@ async def record_interjection(
     kind: str,
     body: str,
     message_id: str | None = None,
+    companion_id: str | None = None,
 ) -> PetInterjection:
+    """记一条插话。
+
+    `companion_id` 是**说这句话的那只宠物**，不是听的人那只。两者经常不同：
+    代答时说话的是没读消息那位的宠物，而听的是在等回复的另一位。不在这里记下来
+    的话，前端只能拿本地那只顶上去，同一条插话在两边就挂着不同的名字。
+    """
     interjection = PetInterjection(
         audience_id=audience_id,
         kind=kind,
         body=body,
         message_id=message_id,
+        companion_id=companion_id,
     )
     db.add(interjection)
     await db.flush()
@@ -251,6 +259,14 @@ async def run_mediation(
     if oldest_unread is None:
         return []
 
+    # 说话的都是**收信人那只**宠物：催促是「你的宠物在催你看消息」，代答是
+    # 「你的宠物替还没读消息的你答一句」。两种都属于 recipient 的宠物，
+    # 只是听众不同。
+    from app.pet_state import resolve_pet
+
+    speaker, _ = await resolve_pet(db, recipient_id)
+    speaker_id = speaker.id
+
     created: list[PetInterjection] = []
     window_start = oldest_unread.created_at
     if window_start.tzinfo is None:
@@ -271,6 +287,7 @@ async def run_mediation(
                 "unread_nudge",
                 decision.body,
                 oldest_unread.id,
+                companion_id=speaker_id,
             )
         )
     else:
@@ -284,7 +301,9 @@ async def run_mediation(
     )
     if should:
         created.append(
-            await record_interjection(db, sender_id, kind, body, oldest_unread.id)
+            await record_interjection(
+                db, sender_id, kind, body, oldest_unread.id, companion_id=speaker_id
+            )
         )
     else:
         logger.debug("不代答：%s", reason)

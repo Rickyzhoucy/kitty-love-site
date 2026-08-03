@@ -861,8 +861,12 @@ async def handle_chat_assist(
             return
         # 问题是在双人聊天里问的，答案两个人都该看到——插话按 audience 存，
         # 所以两边各写一条。
+        # 说话的是**被 @ 的那只**，也就是提问者自己的宠物。两条记录挂同一个
+        # companion_id，所以两个人屏幕上看到的署名一致——「@ 谁就是谁在答」。
         for audience in (asker_id, partner_id):
-            await record_interjection(db, audience, ASSIST_KIND, reply, message_id)
+            await record_interjection(
+                db, audience, ASSIST_KIND, reply, message_id, companion_id=companion.id
+            )
         # 复用既有的 chat.message 通道让两边刷新。不带正文：SSE 是广播给所有
         # 连接的，内容只该由收件人自己去拉（与 send_direct_message 同一条规矩）。
         db.add(
