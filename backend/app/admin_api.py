@@ -27,9 +27,10 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import passkeys, runtime_config
 from app.admin_auth import (
     ATTEMPT_PREFIX,
     CurrentAdmin,
@@ -48,7 +49,9 @@ from app.models import (
     AuthAttempt,
     Companion,
     CompanionPersona,
-    MemoryItem,
+    MemoryRecord,
+    MemoryRecordEmbedding,
+    MemoryRevision,
     SiteConfig,
     Skill,
     SkillVersion,
@@ -57,7 +60,6 @@ from app.models import (
     UserSession,
     utcnow,
 )
-from app import passkeys, runtime_config
 from app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,7 @@ HERO_CONTENT_TYPES = {
 
 
 # ── 登录 ──────────────────────────────────────────────────────────────────
+
 
 class AdminLogin(BaseModel):
     username: str
@@ -111,22 +114,27 @@ async def admin_login(
     window = int(values["security.login_window_minutes"])
     limit = int(values["security.login_max_failures"])
 
-    failures = await db.scalar(
-        select(func.count(AuthAttempt.id)).where(
-            AuthAttempt.success.is_(False),
-            AuthAttempt.created_at >= utcnow() - timedelta(minutes=window),
-            or_(
-                AuthAttempt.ip == client_ip,
-                AuthAttempt.username == ATTEMPT_PREFIX + data.username,
-            ),
+    failures = (
+        await db.scalar(
+            select(func.count(AuthAttempt.id)).where(
+                AuthAttempt.success.is_(False),
+                AuthAttempt.created_at >= utcnow() - timedelta(minutes=window),
+                or_(
+                    AuthAttempt.ip == client_ip,
+                    AuthAttempt.username == ATTEMPT_PREFIX + data.username,
+                ),
+            )
         )
-    ) or 0
+        or 0
+    )
     if failures >= limit:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "尝试过多，请稍后再试")
 
     admin = await db.scalar(select(Admin).where(Admin.username == data.username))
-    valid = admin is not None and admin.status != "disabled" and verify_admin_password(
-        admin, data.password
+    valid = (
+        admin is not None
+        and admin.status != "disabled"
+        and verify_admin_password(admin, data.password)
     )
     db.add(
         AuthAttempt(
@@ -177,9 +185,7 @@ class PasswordChange(BaseModel):
 
 
 @router.post("/auth/password", status_code=status.HTTP_204_NO_CONTENT)
-async def change_admin_password(
-    data: PasswordChange, db: Db, admin: CurrentAdmin
-) -> None:
+async def change_admin_password(data: PasswordChange, db: Db, admin: CurrentAdmin) -> None:
     """改后台密码。**要先验旧密码**——会话可能是别人在你没锁屏的电脑上捡的。"""
     if not verify_admin_password(admin, data.current_password):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "当前密码不对")
@@ -188,6 +194,7 @@ async def change_admin_password(
 
 
 # ── 配置 ──────────────────────────────────────────────────────────────────
+
 
 @router.get("/config")
 async def read_config(db: Db, settings: Config, admin: CurrentAdmin) -> dict[str, Any]:
@@ -235,12 +242,16 @@ async def reset_config(
 
 # ── 记忆 ──────────────────────────────────────────────────────────────────
 
+
 class MemoryRead(BaseModel):
     id: str
-    scope: str
-    kind: str
+    visibility: str
+    memory_type: str
     content: str
     importance: int
+    confidence: float
+    status: str
+    access_count: int
     created_at: Any
     occurred_at: Any = None
 
@@ -252,85 +263,93 @@ async def list_memories(
     db: Db,
     admin: CurrentAdmin,
     q: str = "",
-    kind: str = "",
-    scope: str = "",
+    memory_type: str = "",
+    visibility: str = "",
     min_importance: int = 0,
     limit: int = 100,
     offset: int = 0,
-) -> list[MemoryItem]:
-    stmt = select(MemoryItem)
+) -> list[MemoryRecord]:
+    stmt = select(MemoryRecord)
     if q:
-        stmt = stmt.where(MemoryItem.content.ilike(f"%{q}%"))
-    if kind:
-        stmt = stmt.where(MemoryItem.kind == kind)
-    if scope:
-        stmt = stmt.where(MemoryItem.scope == scope)
+        stmt = stmt.where(MemoryRecord.content.ilike(f"%{q}%"))
+    if memory_type:
+        stmt = stmt.where(MemoryRecord.memory_type == memory_type)
+    if visibility:
+        stmt = stmt.where(MemoryRecord.visibility == visibility)
     if min_importance:
-        stmt = stmt.where(MemoryItem.importance >= min_importance)
-    stmt = stmt.order_by(MemoryItem.created_at.desc()).limit(min(limit, 500)).offset(offset)
+        stmt = stmt.where(MemoryRecord.importance >= min_importance)
+    stmt = stmt.order_by(MemoryRecord.created_at.desc()).limit(min(limit, 500)).offset(offset)
     return list(await db.scalars(stmt))
 
 
 @router.get("/memories/facets")
 async def memory_facets(db: Db, admin: CurrentAdmin) -> dict[str, Any]:
-    """有哪些 kind / scope，各多少条。筛选下拉用，也是一眼看清「它都记了些啥」。"""
-    kinds = (await db.execute(
-        select(MemoryItem.kind, func.count()).group_by(MemoryItem.kind).order_by(func.count().desc())
-    )).all()
-    scopes = (await db.execute(
-        select(MemoryItem.scope, func.count()).group_by(MemoryItem.scope)
-    )).all()
+    """有哪些类型和可见域，各多少条。"""
+    kinds = (
+        await db.execute(
+            select(MemoryRecord.memory_type, func.count())
+            .group_by(MemoryRecord.memory_type)
+            .order_by(func.count().desc())
+        )
+    ).all()
+    scopes = (
+        await db.execute(
+            select(MemoryRecord.visibility, func.count()).group_by(MemoryRecord.visibility)
+        )
+    ).all()
     return {
         "kinds": [{"value": k, "count": c} for k, c in kinds],
         "scopes": [{"value": s, "count": c} for s, c in scopes],
-        "total": await db.scalar(select(func.count(MemoryItem.id))) or 0,
+        "total": await db.scalar(select(func.count(MemoryRecord.id))) or 0,
     }
-
-
-class MemoryWrite(BaseModel):
-    content: str | None = None
-    importance: int | None = Field(default=None, ge=0, le=100)
-
-
-@router.patch("/memories/{memory_id}", response_model=MemoryRead)
-async def update_memory(
-    memory_id: str, data: MemoryWrite, db: Db, admin: CurrentAdmin
-) -> MemoryItem:
-    item = await db.get(MemoryItem, memory_id)
-    if item is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "记忆不存在")
-    if data.content is not None:
-        item.content = data.content
-    if data.importance is not None:
-        item.importance = data.importance
-    await db.commit()
-    return item
 
 
 @router.delete("/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory(memory_id: str, db: Db, admin: CurrentAdmin) -> None:
     """删记忆。
 
-    `MemoryEmbedding` 的外键是 `ondelete="CASCADE"`，所以向量会跟着删掉，
-    不会在向量库里留下检索得到、却已经没有正文的孤儿。
+    后台删除也走撤回语义，正文与证据链保留用于审计，但检索立即停止且向量移除。
     """
-    item = await db.get(MemoryItem, memory_id)
+    item = await db.get(MemoryRecord, memory_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "记忆不存在")
-    await db.delete(item)
+    before = {
+        "content": item.content,
+        "importance": item.importance,
+        "status": item.status,
+    }
+    item.status = "retracted"
+    item.valid_to = utcnow()
+    db.add(
+        MemoryRevision(
+            memory_id=item.id,
+            operation="admin_retract",
+            before_json=before,
+            after_json={**before, "status": "retracted"},
+            actor_type="admin",
+            actor_id=admin.id,
+            reason="后台撤回",
+        )
+    )
+    await db.execute(
+        delete(MemoryRecordEmbedding).where(MemoryRecordEmbedding.memory_id == item.id)
+    )
     await db.commit()
     logger.info("后台 %s 删了记忆 %s", admin.username, memory_id)
 
 
 # ── 技能与工具调用 ────────────────────────────────────────────────────────
 
+
 @router.get("/skills")
 async def list_skills(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
     skills = list(await db.scalars(select(Skill).order_by(Skill.name)))
     counts = dict(
-        (await db.execute(
-            select(SkillVersion.skill_id, func.count()).group_by(SkillVersion.skill_id)
-        )).all()
+        (
+            await db.execute(
+                select(SkillVersion.skill_id, func.count()).group_by(SkillVersion.skill_id)
+            )
+        ).all()
     )
     return [
         {
@@ -395,14 +414,14 @@ async def list_tool_runs(
         stmt = stmt.where(ToolRun.tool_name == tool)
     if status_filter:
         stmt = stmt.where(ToolRun.status == status_filter)
-    runs = list(
-        await db.scalars(stmt.order_by(ToolRun.created_at.desc()).limit(min(limit, 500)))
-    )
-    summary = (await db.execute(
-        select(ToolRun.tool_name, ToolRun.status, func.count())
-        .group_by(ToolRun.tool_name, ToolRun.status)
-        .order_by(func.count().desc())
-    )).all()
+    runs = list(await db.scalars(stmt.order_by(ToolRun.created_at.desc()).limit(min(limit, 500))))
+    summary = (
+        await db.execute(
+            select(ToolRun.tool_name, ToolRun.status, func.count())
+            .group_by(ToolRun.tool_name, ToolRun.status)
+            .order_by(func.count().desc())
+        )
+    ).all()
     return {
         "runs": [
             {
@@ -417,21 +436,22 @@ async def list_tool_runs(
             }
             for r in runs
         ],
-        "summary": [
-            {"tool": t, "status": s, "count": c} for t, s, c in summary
-        ],
+        "summary": [{"tool": t, "status": s, "count": c} for t, s, c in summary],
     }
 
 
 # ── 宠物人格 ──────────────────────────────────────────────────────────────
 
+
 @router.get("/personas")
 async def list_personas(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
-    rows = (await db.execute(
-        select(CompanionPersona, Companion.name)
-        .join(Companion, Companion.id == CompanionPersona.companion_id)
-        .order_by(CompanionPersona.created_at.desc())
-    )).all()
+    rows = (
+        await db.execute(
+            select(CompanionPersona, Companion.name)
+            .join(Companion, Companion.id == CompanionPersona.companion_id)
+            .order_by(CompanionPersona.created_at.desc())
+        )
+    ).all()
     return [
         {
             "id": p.id,
@@ -464,16 +484,19 @@ async def update_persona(
 
 # ── 主站账号 ──────────────────────────────────────────────────────────────
 
+
 @router.get("/accounts")
 async def list_accounts(db: Db, admin: CurrentAdmin) -> dict[str, Any]:
     users = list(await db.scalars(select(User).order_by(User.created_at)))
     now = utcnow()
     active = dict(
-        (await db.execute(
-            select(UserSession.user_id, func.count())
-            .where(UserSession.revoked_at.is_(None), UserSession.expires_at > now)
-            .group_by(UserSession.user_id)
-        )).all()
+        (
+            await db.execute(
+                select(UserSession.user_id, func.count())
+                .where(UserSession.revoked_at.is_(None), UserSession.expires_at > now)
+                .group_by(UserSession.user_id)
+            )
+        ).all()
     )
     from app.cli import MAX_USERS
 
@@ -502,9 +525,7 @@ class AccountCreate(BaseModel):
 
 
 @router.post("/accounts", status_code=status.HTTP_201_CREATED)
-async def create_account(
-    data: AccountCreate, db: Db, admin: CurrentAdmin
-) -> dict[str, Any]:
+async def create_account(data: AccountCreate, db: Db, admin: CurrentAdmin) -> dict[str, Any]:
     """新建主站账号。
 
     **上限两个，而且这不是配置项。** 「对方」在这个站里的定义就是「另一个
@@ -554,9 +575,7 @@ async def reset_account_password(
     user.password_hash = hash_password(data.new_password)
     now = utcnow()
     for session in await db.scalars(
-        select(UserSession).where(
-            UserSession.user_id == user_id, UserSession.revoked_at.is_(None)
-        )
+        select(UserSession).where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
     ):
         session.revoked_at = now
     await db.commit()
@@ -591,15 +610,14 @@ async def toggle_account(
 async def revoke_account_sessions(user_id: str, db: Db, admin: CurrentAdmin) -> None:
     now = utcnow()
     for session in await db.scalars(
-        select(UserSession).where(
-            UserSession.user_id == user_id, UserSession.revoked_at.is_(None)
-        )
+        select(UserSession).where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
     ):
         session.revoked_at = now
     await db.commit()
 
 
 # ── 首页素材 ──────────────────────────────────────────────────────────────
+
 
 @router.post("/hero/{slot}")
 async def upload_hero(
@@ -655,28 +673,32 @@ def _hhmm(value: Any) -> str:
     """静默时段在配置里可能是 `time` 也可能是字符串，前端只想要 HH:MM。"""
     return value.strftime("%H:%M") if hasattr(value, "strftime") else str(value)
 
+
 @router.get("/dashboard")
 async def dashboard(db: Db, settings: Config, admin: CurrentAdmin) -> dict[str, Any]:
     values = await runtime_config.load_all(db, settings)
     counts = {}
     for label, model in (
-        ("memories", MemoryItem),
+        ("memories", MemoryRecord),
         ("skills", Skill),
         ("toolRuns", ToolRun),
         ("users", User),
     ):
         counts[label] = await db.scalar(select(func.count(model.id))) or 0
 
-    failed_runs = await db.scalar(
-        select(func.count(ToolRun.id)).where(ToolRun.status == "failed")
-    ) or 0
+    failed_runs = (
+        await db.scalar(select(func.count(ToolRun.id)).where(ToolRun.status == "failed")) or 0
+    )
     # 有多少项被后台改过（其余的跟着 .env 走）。只数 cfg. 前缀，
     # 那张表里还住着 letter_title 这些内容类配置。
-    overridden = await db.scalar(
-        select(func.count(SiteConfig.key)).where(
-            SiteConfig.key.startswith(runtime_config.PREFIX)
+    overridden = (
+        await db.scalar(
+            select(func.count(SiteConfig.key)).where(
+                SiteConfig.key.startswith(runtime_config.PREFIX)
+            )
         )
-    ) or 0
+        or 0
+    )
 
     return {
         "counts": counts,
@@ -696,6 +718,7 @@ async def dashboard(db: Db, settings: Config, admin: CurrentAdmin) -> dict[str, 
 #
 # 与主站同一套逻辑，但 audience 是 "admin"——**主站的 passkey 登不了后台**，
 # 反过来也一样。这与 Cookie 和会话表的隔离是同一条思路。
+
 
 class AdminPasskeyFinish(BaseModel):
     challenge_id: str

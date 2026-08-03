@@ -12,7 +12,7 @@ from app.agents.reflection import (
 )
 from app.conversations import ConversationService
 from app.memory import MemoryService
-from app.models import CompanionPetEvent, MemoryItem, User
+from app.models import CompanionPetEvent, MemoryRecord, User
 
 
 class FakeEmbeddingProvider:
@@ -59,12 +59,8 @@ async def test_tool_logs_never_reach_the_reflection_prompt(session_maker):
     """
     companion_id = await _companion(session_maker)
     async with session_maker() as db:
-        await record_event(
-            db, companion_id, "tool.completed", {"name": "site_resource_list"}, 90
-        )
-        await record_event(
-            db, companion_id, "interaction.milestone", {"level": 3}, 80
-        )
+        await record_event(db, companion_id, "tool.completed", {"name": "site_resource_list"}, 90)
+        await record_event(db, companion_id, "interaction.milestone", {"level": 3}, 80)
         await db.commit()
 
         events = await pending_events(db, companion_id)
@@ -74,9 +70,7 @@ async def test_tool_logs_never_reach_the_reflection_prompt(session_maker):
 async def test_low_importance_events_are_filtered_out(session_maker):
     companion_id = await _companion(session_maker)
     async with session_maker() as db:
-        await record_event(
-            db, companion_id, "interaction.milestone", {}, IMPORTANCE_FLOOR - 1
-        )
+        await record_event(db, companion_id, "interaction.milestone", {}, IMPORTANCE_FLOOR - 1)
         await db.commit()
         assert await pending_events(db, companion_id) == []
 
@@ -84,9 +78,7 @@ async def test_low_importance_events_are_filtered_out(session_maker):
 async def test_reflection_writes_memory_and_marks_events_processed(session_maker):
     companion_id = await _companion(session_maker)
     async with session_maker() as db:
-        await record_event(
-            db, companion_id, "proactive.accepted", {"utterance": "要休息吗"}, 75
-        )
+        await record_event(db, companion_id, "proactive.accepted", {"utterance": "要休息吗"}, 75)
         await db.commit()
 
     model = ScriptedModel(
@@ -96,16 +88,16 @@ async def test_reflection_writes_memory_and_marks_events_processed(session_maker
         from app.models import Companion
 
         companion = await db.get(Companion, companion_id)
-        written = await ReflectionAgent(
-            model, MemoryService(FakeEmbeddingProvider())
-        ).reflect(db, companion)
+        written = await ReflectionAgent(model, MemoryService(FakeEmbeddingProvider())).reflect(
+            db, companion
+        )
     assert written == ["主人愿意在忙碌时被打断一下"]
 
     async with session_maker() as db:
-        memories = list(await db.scalars(select(MemoryItem)))
+        memories = list(await db.scalars(select(MemoryRecord)))
         events = list(await db.scalars(select(CompanionPetEvent)))
     assert len(memories) == 1
-    assert memories[0].scope == "companion"
+    assert memories[0].visibility == "companion_relationship"
     assert all(event.processed_at is not None for event in events)
 
 
@@ -184,7 +176,7 @@ async def test_reflection_survives_embedding_failure(session_maker):
     assert written == ["关系更近了一步"]
 
     async with session_maker() as db:
-        assert len(list(await db.scalars(select(MemoryItem)))) == 1
+        assert len(list(await db.scalars(select(MemoryRecord)))) == 1
 
 
 async def test_event_endpoint_enqueues_reflection_once_a_batch_is_ready(
@@ -256,7 +248,5 @@ async def test_reflection_does_not_call_the_model_when_nothing_qualifies(
         from app.models import Companion
 
         companion = await db.get(Companion, companion_id)
-        await ReflectionAgent(
-            model, MemoryService(FakeEmbeddingProvider())
-        ).reflect(db, companion)
+        await ReflectionAgent(model, MemoryService(FakeEmbeddingProvider())).reflect(db, companion)
     assert model.calls == 0

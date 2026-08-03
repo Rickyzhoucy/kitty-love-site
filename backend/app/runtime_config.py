@@ -49,7 +49,7 @@ import hashlib
 import logging
 import time as time_module
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import time
 from typing import Any, Literal
 
@@ -103,9 +103,7 @@ class Setting:
 
 def _group(name: str, *settings: Setting) -> tuple[Setting, ...]:
     """把一组设置项打上同一个分组名，省得每行都写一遍。"""
-    return tuple(
-        Setting(**{**item.__dict__, "group": name}) for item in settings
-    )
+    return tuple(Setting(**{**item.__dict__, "group": name}) for item in settings)
 
 
 def _s(key: str, label: str, kind: Kind, **kwargs: Any) -> Setting:
@@ -116,139 +114,399 @@ REGISTRY: tuple[Setting, ...] = (
     # ── 对话模型 ───────────────────────────────────────────────────────────
     *_group(
         "chat",
-        _s("chat.model", "模型名", "str", env_attr="chat_model",
-           help="宠物用来说话和思考的模型。"),
-        _s("chat.base_url", "接口地址", "str", env_attr="chat_base_url",
-           help="OpenAI 兼容的 /v1 端点。"),
-        _s("chat.api_key", "API Key", "secret", env_attr="chat_api_key",
-           help="加密存储，保存后不再显示完整值。留空表示沿用环境变量里的。"),
-        _s("chat.temperature", "温度", "float", env_attr="chat_temperature",
-           minimum=0.0, maximum=2.0,
-           help="越高越发散。宠物是陪伴角色，建议 0.6–0.9。"),
-        _s("chat.timeout", "超时（秒）", "float", env_attr="chat_timeout",
-           minimum=5.0, maximum=600.0),
-        _s("chat.context_tokens", "上下文窗口", "int", env_attr="chat_context_tokens",
-           minimum=8_000, maximum=4_000_000,
-           help="**填模型真实支持的值**。填大了会在对话变长后突然报错，"
-                "填小了会过早触发压缩、白白丢掉上下文。"),
-        _s("chat.compact_at", "压缩触发点", "float", env_attr="chat_compact_at",
-           minimum=0.2, maximum=0.95,
-           help="用掉上下文窗口的这个比例时开始压缩历史。"),
-        _s("chat.compact_keep_messages", "压缩时保留最近几条", "int",
-           env_attr="chat_compact_keep_messages", minimum=4, maximum=200),
+        _s("chat.model", "模型名", "str", env_attr="chat_model", help="宠物用来说话和思考的模型。"),
+        _s(
+            "chat.base_url",
+            "接口地址",
+            "str",
+            env_attr="chat_base_url",
+            help="OpenAI 兼容的 /v1 端点。",
+        ),
+        _s(
+            "chat.api_key",
+            "API Key",
+            "secret",
+            env_attr="chat_api_key",
+            help="加密存储，保存后不再显示完整值。留空表示沿用环境变量里的。",
+        ),
+        _s(
+            "chat.temperature",
+            "温度",
+            "float",
+            env_attr="chat_temperature",
+            minimum=0.0,
+            maximum=2.0,
+            help="越高越发散。宠物是陪伴角色，建议 0.6–0.9。",
+        ),
+        _s(
+            "chat.timeout",
+            "超时（秒）",
+            "float",
+            env_attr="chat_timeout",
+            minimum=5.0,
+            maximum=600.0,
+        ),
+        _s(
+            "chat.context_tokens",
+            "上下文窗口",
+            "int",
+            env_attr="chat_context_tokens",
+            minimum=8_000,
+            maximum=4_000_000,
+            help="**填模型真实支持的值**。填大了会在对话变长后突然报错，"
+            "填小了会过早触发压缩、白白丢掉上下文。",
+        ),
+        _s(
+            "chat.compact_at",
+            "压缩触发点",
+            "float",
+            env_attr="chat_compact_at",
+            minimum=0.2,
+            maximum=0.95,
+            help="用掉上下文窗口的这个比例时开始压缩历史。",
+        ),
+        _s(
+            "chat.compact_keep_messages",
+            "压缩时保留最近几条",
+            "int",
+            env_attr="chat_compact_keep_messages",
+            minimum=4,
+            maximum=200,
+        ),
     ),
     # ── 向量与检索 ─────────────────────────────────────────────────────────
     *_group(
         "embedding",
-        _s("embedding.model", "向量模型", "str", env_attr="embedding_model",
-           restart_required=True,
-           help="**换模型等于换向量空间**。已有记忆的向量是用旧模型算的，"
-                "换了之后新旧不可比，检索会明显变差——换之前要有重算的打算。"),
-        _s("embedding.base_url", "接口地址", "str", env_attr="embedding_base_url",
-           restart_required=True),
-        _s("embedding.api_key", "API Key", "secret", env_attr="embedding_api_key",
-           restart_required=True),
-        _s("embedding.dimensions", "向量维度", "int", env_attr="embedding_dimensions",
-           minimum=64, maximum=4096, restart_required=True,
-           help="**改这个会让已存的向量全部作废**（列宽对不上）。"
-                "只有在换模型且准备重算全部记忆时才动。"),
+        _s(
+            "embedding.model",
+            "向量模型",
+            "str",
+            env_attr="embedding_model",
+            restart_required=True,
+            help="**换模型等于换向量空间**。已有记忆的向量是用旧模型算的，"
+            "换了之后新旧不可比，检索会明显变差——换之前要有重算的打算。",
+        ),
+        _s(
+            "embedding.base_url",
+            "接口地址",
+            "str",
+            env_attr="embedding_base_url",
+            restart_required=True,
+        ),
+        _s(
+            "embedding.api_key",
+            "API Key",
+            "secret",
+            env_attr="embedding_api_key",
+            restart_required=True,
+        ),
+        _s(
+            "embedding.dimensions",
+            "向量维度",
+            "int",
+            env_attr="embedding_dimensions",
+            minimum=64,
+            maximum=4096,
+            restart_required=True,
+            help="**改这个会让已存的向量全部作废**（列宽对不上）。"
+            "只有在换模型且准备重算全部记忆时才动。",
+        ),
     ),
     # ── 联网 ───────────────────────────────────────────────────────────────
     *_group(
         "web",
-        _s("web.search_provider", "搜索服务", "choice",
-           env_attr="web_search_provider", choices=("bocha", "none"),
-           help="选 none 就是关掉联网搜索，宠物只能靠站内数据回答。"),
-        _s("web.search_api_key", "搜索 API Key", "secret",
-           env_attr="web_search_api_key"),
-        _s("web.search_max_results", "搜索结果条数", "int",
-           env_attr="web_search_max_results", minimum=1, maximum=30),
-        _s("web.search_timeout", "搜索超时（秒）", "float",
-           env_attr="web_search_timeout", minimum=2.0, maximum=60.0),
-        _s("web.fetch_timeout", "抓网页超时（秒）", "float",
-           env_attr="web_fetch_timeout", minimum=2.0, maximum=60.0),
-        _s("web.fetch_max_chars", "网页正文最多取多少字", "int",
-           env_attr="web_fetch_max_chars", minimum=1_000, maximum=200_000),
+        _s(
+            "web.search_provider",
+            "搜索服务",
+            "choice",
+            env_attr="web_search_provider",
+            choices=("bocha", "none"),
+            help="选 none 就是关掉联网搜索，宠物只能靠站内数据回答。",
+        ),
+        _s("web.search_api_key", "搜索 API Key", "secret", env_attr="web_search_api_key"),
+        _s(
+            "web.search_max_results",
+            "搜索结果条数",
+            "int",
+            env_attr="web_search_max_results",
+            minimum=1,
+            maximum=30,
+        ),
+        _s(
+            "web.search_timeout",
+            "搜索超时（秒）",
+            "float",
+            env_attr="web_search_timeout",
+            minimum=2.0,
+            maximum=60.0,
+        ),
+        _s(
+            "web.fetch_timeout",
+            "抓网页超时（秒）",
+            "float",
+            env_attr="web_fetch_timeout",
+            minimum=2.0,
+            maximum=60.0,
+        ),
+        _s(
+            "web.fetch_max_chars",
+            "网页正文最多取多少字",
+            "int",
+            env_attr="web_fetch_max_chars",
+            minimum=1_000,
+            maximum=200_000,
+        ),
     ),
     # ── 宠物的节奏与预算 ───────────────────────────────────────────────────
     *_group(
         "pet",
-        _s("pet.daily_call_budget", "每天最多思考多少次", "int",
-           fallback=200, minimum=10, maximum=5_000,
-           help="每天调用模型的上限，用尽后当天只做兜底回应。"
-                "**这是花钱的闸门**，调高之前先看清单价。"),
-        _s("pet.daily_proactive_budget", "每天最多主动说几次", "int",
-           fallback=12, minimum=0, maximum=100,
-           help="填 0 就是完全不主动说话，只在你叫它时回应。"),
-        _s("pet.min_proactive_gap_seconds", "两次主动之间至少隔（秒）", "int",
-           fallback=600, minimum=30, maximum=86_400,
-           help="防止它在短时间里连着说好几句。"),
-        _s("pet.debounce_seconds", "思考防抖（秒）", "float",
-           fallback=5.0, minimum=0.5, maximum=60.0,
-           help="连续动作合并成一次思考的窗口。调小更灵敏但更费钱。"),
-        _s("pet.quiet_start", "静默开始", "time", fallback="23:00",
-           help="这段时间里不主动打扰。纪念日当天可以突破，唠叨不行。"),
+        _s(
+            "pet.daily_call_budget",
+            "每天最多思考多少次",
+            "int",
+            fallback=200,
+            minimum=10,
+            maximum=5_000,
+            help="每天调用模型的上限，用尽后当天只做兜底回应。"
+            "**这是花钱的闸门**，调高之前先看清单价。",
+        ),
+        _s(
+            "pet.daily_proactive_budget",
+            "每天最多主动说几次",
+            "int",
+            fallback=12,
+            minimum=0,
+            maximum=100,
+            help="填 0 就是完全不主动说话，只在你叫它时回应。",
+        ),
+        _s(
+            "pet.min_proactive_gap_seconds",
+            "两次主动之间至少隔（秒）",
+            "int",
+            fallback=600,
+            minimum=30,
+            maximum=86_400,
+            help="防止它在短时间里连着说好几句。",
+        ),
+        _s(
+            "pet.debounce_seconds",
+            "思考防抖（秒）",
+            "float",
+            fallback=5.0,
+            minimum=0.5,
+            maximum=60.0,
+            help="连续动作合并成一次思考的窗口。调小更灵敏但更费钱。",
+        ),
+        _s(
+            "pet.quiet_start",
+            "静默开始",
+            "time",
+            fallback="23:00",
+            help="这段时间里不主动打扰。纪念日当天可以突破，唠叨不行。",
+        ),
         _s("pet.quiet_end", "静默结束", "time", fallback="08:00"),
-        _s("pet.nudge_schedule_minutes", "催看消息的节奏（分钟）", "str",
-           fallback="0,10,30",
-           help="逗号分隔。**递减而非递增**——催三次之后就不再提了，"
-                "免得变成骚扰。留空表示不催。"),
-        _s("pet.standin_after_minutes", "对方多久没回，它才替你说话（分钟）", "int",
-           fallback=30, minimum=1, maximum=1_440),
-        _s("pet.assist_context_messages", "@它时带上最近几条聊天", "int",
-           fallback=14, minimum=2, maximum=60,
-           help="太少它接不上话，太多每次都在烧 token。"),
+        _s(
+            "pet.nudge_schedule_minutes",
+            "催看消息的节奏（分钟）",
+            "str",
+            fallback="0,10,30",
+            help="逗号分隔。**递减而非递增**——催三次之后就不再提了，免得变成骚扰。留空表示不催。",
+        ),
+        _s(
+            "pet.standin_after_minutes",
+            "对方多久没回，它才替你说话（分钟）",
+            "int",
+            fallback=30,
+            minimum=1,
+            maximum=1_440,
+        ),
+        _s(
+            "pet.assist_context_messages",
+            "@它时带上最近几条聊天",
+            "int",
+            fallback=14,
+            minimum=2,
+            maximum=60,
+            help="太少它接不上话，太多每次都在烧 token。",
+        ),
     ),
     # ── 记忆 ───────────────────────────────────────────────────────────────
     *_group(
         "memory",
-        _s("memory.near_duplicate_threshold", "去重相似度阈值", "float",
-           fallback=0.55, minimum=0.1, maximum=0.99,
-           help="新记忆与旧记忆相似度超过它就并成一条。"
-                "调低会记得更少但更干净，调高会攒下很多重复。"),
-        _s("memory.near_duplicate_scan", "去重时比对最近几条", "int",
-           fallback=60, minimum=5, maximum=500),
-        _s("memory.recency_half_life_days", "新鲜度半衰期（天）", "float",
-           fallback=180.0, minimum=7.0, maximum=3_650.0,
-           help="越久远的记忆权重越低，这是衰减到一半所需的天数。"),
-        _s("memory.min_recency_weight", "最低权重", "float",
-           fallback=0.35, minimum=0.0, maximum=1.0,
-           help="再久远的记忆也不会低于这个权重——有些事就是不会过期。"),
+        _s(
+            "memory.reference_enabled",
+            "允许在回答中引用长期记忆",
+            "bool",
+            fallback=True,
+            help="全站总闸门。关闭后保留已有记忆和证据，但任何 Agent 都不能检索引用。"
+            "用户只能在这个上限内关闭自己的引用，不能反向开启。",
+        ),
+        _s(
+            "memory.private_extraction_enabled",
+            "允许从宠物私聊自动整理",
+            "bool",
+            fallback=True,
+            help="系统级总闸门；用户还可以在个人设置里拒绝整理自己的私聊。",
+        ),
+        _s(
+            "memory.shared_extraction_enabled",
+            "允许从两人聊天自动整理",
+            "bool",
+            fallback=True,
+            help="系统级总闸门；只处理同意自动整理的发送者消息，共同约定仍需双方证据。",
+        ),
+        _s(
+            "memory.min_candidate_confidence",
+            "候选最低可信度",
+            "float",
+            fallback=0.6,
+            minimum=0.5,
+            maximum=0.95,
+            help="低于此值直接丢弃，不进入待确认。",
+        ),
+        _s(
+            "memory.auto_activate_confidence",
+            "自动启用可信度",
+            "float",
+            fallback=0.8,
+            minimum=0.6,
+            maximum=1.0,
+            help="达到此值的自动记忆可直接参与检索；更低但合格的进入待确认。"
+            "用户明确要求记住的内容不受此阈值影响。",
+        ),
+        _s(
+            "memory.max_candidates_per_batch",
+            "每批最多写入候选",
+            "int",
+            fallback=10,
+            minimum=1,
+            maximum=50,
+            help="限制一次后台抽取能新增或合并多少条，防止长对话污染记忆。",
+        ),
+        _s(
+            "memory.retrieval_limit",
+            "每次最多引用几条",
+            "int",
+            fallback=8,
+            minimum=1,
+            maximum=20,
+            help="进入模型上下文的长期记忆上限；引用后会记录次数和最近引用时间。",
+        ),
+        _s(
+            "memory.near_duplicate_threshold",
+            "去重相似度阈值",
+            "float",
+            fallback=0.55,
+            minimum=0.1,
+            maximum=0.99,
+            help="新记忆与旧记忆相似度超过它就并成一条。"
+            "调低会记得更少但更干净，调高会攒下很多重复。",
+        ),
+        _s(
+            "memory.near_duplicate_scan",
+            "去重时比对最近几条",
+            "int",
+            fallback=60,
+            minimum=5,
+            maximum=500,
+        ),
+        _s(
+            "memory.recency_half_life_days",
+            "新鲜度半衰期（天）",
+            "float",
+            fallback=180.0,
+            minimum=7.0,
+            maximum=3_650.0,
+            help="越久远的记忆权重越低，这是衰减到一半所需的天数。",
+        ),
+        _s(
+            "memory.min_recency_weight",
+            "最低权重",
+            "float",
+            fallback=0.35,
+            minimum=0.0,
+            maximum=1.0,
+            help="再久远的记忆也不会低于这个权重——有些事就是不会过期。",
+        ),
     ),
     # ── 安全 ───────────────────────────────────────────────────────────────
     *_group(
         "security",
-        _s("security.session_ttl_days", "登录有效期（天）", "int",
-           env_attr="session_ttl_days", minimum=1, maximum=365,
-           help="改小不会踢掉已登录的会话，只影响之后新建的。"
-                "要立刻踢人请去「账号」页撤销会话。"),
-        _s("security.login_max_failures", "登录失败几次后锁定", "int",
-           fallback=10, minimum=3, maximum=100),
-        _s("security.login_window_minutes", "失败计数窗口（分钟）", "int",
-           fallback=15, minimum=1, maximum=1_440),
+        _s(
+            "security.session_ttl_days",
+            "登录有效期（天）",
+            "int",
+            env_attr="session_ttl_days",
+            minimum=1,
+            maximum=365,
+            help="改小不会踢掉已登录的会话，只影响之后新建的。要立刻踢人请去「账号」页撤销会话。",
+        ),
+        _s(
+            "security.login_max_failures",
+            "登录失败几次后锁定",
+            "int",
+            fallback=10,
+            minimum=3,
+            maximum=100,
+        ),
+        _s(
+            "security.login_window_minutes",
+            "失败计数窗口（分钟）",
+            "int",
+            fallback=15,
+            minimum=1,
+            maximum=1_440,
+        ),
     ),
     # ── 上传 ───────────────────────────────────────────────────────────────
     *_group(
         "upload",
-        _s("upload.max_bytes", "单个文件上限（字节）", "int",
-           env_attr="max_upload_bytes", minimum=1_048_576, maximum=2_147_483_648),
-        _s("upload.presign_seconds", "下载链接有效期（秒）", "int",
-           env_attr="minio_presign_seconds", minimum=60, maximum=86_400),
+        _s(
+            "upload.max_bytes",
+            "单个文件上限（字节）",
+            "int",
+            env_attr="max_upload_bytes",
+            minimum=1_048_576,
+            maximum=2_147_483_648,
+        ),
+        _s(
+            "upload.presign_seconds",
+            "下载链接有效期（秒）",
+            "int",
+            env_attr="minio_presign_seconds",
+            minimum=60,
+            maximum=86_400,
+        ),
     ),
     # ── 站点 ───────────────────────────────────────────────────────────────
     *_group(
         "site",
-        _s("site.timezone", "时区", "str", env_attr="site_timezone",
-           restart_required=True,
-           help="影响「今天」「深夜」的判断。**容器的 TZ 要一起改**，"
-                "否则定时任务的时间和这里对不上（见 docker-compose 里的注释）。"),
-        _s("site.hero_video_attachment", "首页视频", "str", fallback="",
-           help="留空表示用镜像里自带的那份。通过「首页素材」页上传。"),
+        _s(
+            "site.timezone",
+            "时区",
+            "str",
+            env_attr="site_timezone",
+            restart_required=True,
+            help="影响「今天」「深夜」的判断。**容器的 TZ 要一起改**，"
+            "否则定时任务的时间和这里对不上（见 docker-compose 里的注释）。",
+        ),
+        _s(
+            "site.hero_video_attachment",
+            "首页视频",
+            "str",
+            fallback="",
+            help="留空表示用镜像里自带的那份。通过「首页素材」页上传。",
+        ),
         _s("site.hero_poster_attachment", "首页静态图", "str", fallback=""),
-        _s("site.webauthn_rp_id", "Passkey 域名（RP ID）", "str",
-           env_attr="webauthn_rp_id", restart_required=True,
-           help="**必须和地址栏里的域名一致**（或是它的父域）。配错的表现是"
-                "弹窗一闪而过、什么都没发生。本地开发填 localhost。"),
+        _s(
+            "site.webauthn_rp_id",
+            "Passkey 域名（RP ID）",
+            "str",
+            env_attr="webauthn_rp_id",
+            restart_required=True,
+            help="**必须和地址栏里的域名一致**（或是它的父域）。配错的表现是"
+            "弹窗一闪而过、什么都没发生。本地开发填 localhost。",
+        ),
     ),
 )
 
@@ -269,6 +527,7 @@ assert set(GROUP_LABELS) == {item.group for item in REGISTRY}, "有分组没起�
 
 
 # ── 密钥的加解密 ──────────────────────────────────────────────────────────
+
 
 def _fernet(settings: Settings) -> Fernet:
     """从 `SESSION_SECRET` 派生一把 Fernet 密钥。
@@ -355,11 +614,11 @@ async def load_all(db: AsyncSession, settings: Settings | None = None) -> dict[s
 
     settings = settings or get_settings()
     rows = dict(
-        (await db.execute(
-            select(SiteConfig.key, SiteConfig.value).where(
-                SiteConfig.key.startswith(PREFIX)
+        (
+            await db.execute(
+                select(SiteConfig.key, SiteConfig.value).where(SiteConfig.key.startswith(PREFIX))
             )
-        )).all()
+        ).all()
     )
 
     resolved: dict[str, Any] = {}
@@ -413,6 +672,7 @@ def live(key: str) -> Any:
 
 # ── 写入 ──────────────────────────────────────────────────────────────────
 
+
 class ValidationError(ValueError):
     pass
 
@@ -420,6 +680,11 @@ class ValidationError(ValueError):
 def validate(setting: Setting, raw: str) -> str:
     """把前端传来的字符串校验一遍，返回**要落库的字符串**。"""
     raw = raw.strip()
+    if setting.kind == "bool":
+        normalized = raw.lower()
+        if normalized not in {"true", "false"}:
+            raise ValidationError(f"{setting.label} 只能开启或关闭")
+        return normalized
     if setting.kind == "choice":
         if raw not in setting.choices:
             raise ValidationError(f"{setting.label} 只能是 {'、'.join(setting.choices)}")
@@ -494,9 +759,7 @@ async def reset(db: AsyncSession, keys: Iterable[str]) -> list[str]:
     for key in keys:
         if key not in BY_KEY:
             raise ValidationError(f"未注册的配置项：{key}")
-        result = await db.execute(
-            delete(SiteConfig).where(SiteConfig.key == PREFIX + key)
-        )
+        result = await db.execute(delete(SiteConfig).where(SiteConfig.key == PREFIX + key))
         if result.rowcount:
             removed.append(key)
     if removed:
@@ -511,29 +774,31 @@ async def describe(db: AsyncSession, settings: Settings | None = None) -> list[d
     values = await load_all(db, settings)
     overridden = {
         row[0].removeprefix(PREFIX)
-        for row in (await db.execute(
-            select(SiteConfig.key).where(SiteConfig.key.startswith(PREFIX))
-        )).all()
+        for row in (
+            await db.execute(select(SiteConfig.key).where(SiteConfig.key.startswith(PREFIX)))
+        ).all()
     }
 
     out = []
     for setting in REGISTRY:
         value = values[setting.key]
-        out.append({
-            "key": setting.key,
-            "group": setting.group,
-            "groupLabel": GROUP_LABELS[setting.group],
-            "label": setting.label,
-            "kind": setting.kind,
-            "help": setting.help,
-            "minimum": setting.minimum,
-            "maximum": setting.maximum,
-            "choices": list(setting.choices),
-            "restartRequired": setting.restart_required,
-            "overridden": setting.key in overridden,
-            # 密钥只给遮罩。见模块文档。
-            "value": mask_secret(value) if setting.kind == "secret" else _as_json(value),
-        })
+        out.append(
+            {
+                "key": setting.key,
+                "group": setting.group,
+                "groupLabel": GROUP_LABELS[setting.group],
+                "label": setting.label,
+                "kind": setting.kind,
+                "help": setting.help,
+                "minimum": setting.minimum,
+                "maximum": setting.maximum,
+                "choices": list(setting.choices),
+                "restartRequired": setting.restart_required,
+                "overridden": setting.key in overridden,
+                # 密钥只给遮罩。见模块文档。
+                "value": mask_secret(value) if setting.kind == "secret" else _as_json(value),
+            }
+        )
     return out
 
 

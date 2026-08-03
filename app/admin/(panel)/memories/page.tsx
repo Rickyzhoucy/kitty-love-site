@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Search, Trash2 } from 'lucide-react';
+import { Search, ShieldAlert } from 'lucide-react';
 import Card from '../../../components/ui/Card';
-import Button from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { adminApi, type MemoryRow } from '@/lib/api/admin';
 
@@ -13,8 +12,8 @@ import { adminApi, type MemoryRow } from '@/lib/api/admin';
  * 在这之前记忆是**只写的**：宠物往里存，没有任何界面能看、能改、能删。它记错
  * 了一件事，你只能眼看着它一直记错。
  *
- * 删除会连带删掉向量（`MemoryEmbedding` 的外键是 CASCADE），不会在向量库里
- * 留下检索得到、却已经没有正文的孤儿。
+ * Admin 只能紧急撤回并让向量失效，不能静默替用户重写事实；正文纠正回到
+ * 记忆所属用户，所有操作都保留修订审计。
  */
 export default function MemoriesPage() {
     const [rows, setRows] = useState<MemoryRow[]>([]);
@@ -26,14 +25,13 @@ export default function MemoriesPage() {
     const [query, setQuery] = useState('');
     const [kind, setKind] = useState('');
     const [minImportance, setMinImportance] = useState(0);
-    const [editing, setEditing] = useState<Record<string, string>>({});
     const [busy, setBusy] = useState(false);
 
     const load = useCallback(async () => {
         setBusy(true);
         try {
             const [list, facetData] = await Promise.all([
-                adminApi.memories({ q: query, kind, min_importance: minImportance, limit: 200 }),
+                adminApi.memories({ q: query, memory_type: kind, min_importance: minImportance, limit: 200 }),
                 adminApi.memoryFacets(),
             ]);
             setRows(list);
@@ -51,21 +49,8 @@ export default function MemoriesPage() {
         return () => { cancelled = true; };
     }, [load]);
 
-    const saveOne = async (row: MemoryRow) => {
-        const content = editing[row.id];
-        if (content === undefined) return;
-        await adminApi.updateMemory(row.id, { content });
-        setEditing(current => {
-            const next = { ...current };
-            delete next[row.id];
-            return next;
-        });
-        await load();
-    };
-
     const remove = async (row: MemoryRow) => {
-        // 记忆删了就没了，而且这里删的是宠物「记得的事」——问一句不过分。
-        if (!window.confirm(`删掉这条记忆？\n\n${row.content.slice(0, 60)}…`)) return;
+        if (!window.confirm(`从全站撤回这条记忆？用户仍能在审计记录中看到它。\n\n${row.content.slice(0, 60)}…`)) return;
         await adminApi.deleteMemory(row.id);
         await load();
     };
@@ -75,7 +60,7 @@ export default function MemoriesPage() {
             <header>
                 <h1 className="m-0 font-display text-2xl text-ink">记忆</h1>
                 <p className="mb-0 mt-1 text-sm text-ink-muted">
-                    共 {facets?.total ?? 0} 条。改内容会即时影响宠物的回答，删除会连向量一起删。
+                    共 {facets?.total ?? 0} 条。这里负责系统审计和紧急撤回；内容纠正由记忆所属用户完成。
                 </p>
             </header>
 
@@ -118,41 +103,31 @@ export default function MemoriesPage() {
 
             <div className="flex flex-col gap-2">
                 {rows.map(row => {
-                    const draft = editing[row.id];
                     return (
                         <Card key={row.id} className="p-4">
                             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-                                <span className="rounded-full bg-sunken px-2 py-0.5">{row.kind}</span>
-                                <span className="rounded-full bg-sunken px-2 py-0.5">{row.scope}</span>
+                                <span className="rounded-full bg-sunken px-2 py-0.5">{row.memory_type}</span>
+                                <span className="rounded-full bg-sunken px-2 py-0.5">{row.visibility}</span>
+                                <span className="rounded-full bg-sunken px-2 py-0.5">{row.status}</span>
                                 <span className="tabular-nums">重要度 {row.importance}</span>
+                                <span className="tabular-nums">引用 {row.access_count} 次</span>
                                 <span className="ml-auto tabular-nums">
                                     {new Date(row.created_at).toLocaleString('zh-CN')}
                                 </span>
                             </div>
 
-                            <textarea
-                                value={draft ?? row.content}
-                                onChange={event => setEditing(current => ({
-                                    ...current, [row.id]: event.target.value,
-                                }))}
-                                rows={Math.min(6, Math.ceil((draft ?? row.content).length / 60) + 1)}
-                                className="w-full resize-y rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm leading-relaxed text-ink"
-                            />
+                            <p className="m-0 rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm leading-relaxed text-ink">
+                                {row.content}
+                            </p>
 
-                            <div className="mt-2 flex items-center gap-2">
-                                {draft !== undefined && (
-                                    <Button onClick={() => saveOne(row)}>
-                                        <Check size={15} />
-                                        保存
-                                    </Button>
-                                )}
+                            <div className="mt-2 flex items-center justify-end gap-2">
                                 <button
                                     type="button"
                                     onClick={() => remove(row)}
-                                    className="ml-auto flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-ink-muted transition-colors hover:bg-danger/10 hover:text-danger"
+                                    className="flex min-h-11 items-center gap-1 rounded-lg px-3 py-1 text-sm text-ink-muted transition-colors hover:bg-danger/10 hover:text-danger"
                                 >
-                                    <Trash2 size={15} />
-                                    删除
+                                    <ShieldAlert size={15} />
+                                    紧急撤回
                                 </button>
                             </div>
                         </Card>

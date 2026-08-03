@@ -15,9 +15,7 @@ class CrudService[ModelT: Base]:
 
     async def list(self, db: AsyncSession, limit: int = 500) -> list[ModelT]:
         result = await db.scalars(
-            select(self.model)
-            .order_by(self.model.created_at.desc())
-            .limit(max(1, min(limit, 500)))
+            select(self.model).order_by(self.model.created_at.desc()).limit(max(1, min(limit, 500)))
         )
         return list(result)
 
@@ -33,6 +31,8 @@ class CrudService[ModelT: Base]:
         data: BaseModel,
         created_by: str | None = None,
         created_by_companion: str | None = None,
+        *,
+        commit: bool = True,
     ) -> ModelT:
         values = data.model_dump()
         if hasattr(self.model, "created_by"):
@@ -42,25 +42,41 @@ class CrudService[ModelT: Base]:
         db.add(entity)
         await db.flush()
         await self._event(db, entity.id, "created")
-        await db.commit()
-        await db.refresh(entity)
+        if commit:
+            await db.commit()
+            await db.refresh(entity)
         return entity
 
-    async def update(self, db: AsyncSession, entity_id: str, data: BaseModel) -> ModelT:
+    async def update(
+        self,
+        db: AsyncSession,
+        entity_id: str,
+        data: BaseModel,
+        *,
+        commit: bool = True,
+    ) -> ModelT:
         entity = await self.get(db, entity_id)
         changes: dict[str, Any] = data.model_dump(exclude_unset=True)
         for key, value in changes.items():
             setattr(entity, key, value)
         await self._event(db, entity.id, "updated")
-        await db.commit()
-        await db.refresh(entity)
+        if commit:
+            await db.commit()
+            await db.refresh(entity)
         return entity
 
-    async def delete(self, db: AsyncSession, entity_id: str) -> None:
+    async def delete(
+        self,
+        db: AsyncSession,
+        entity_id: str,
+        *,
+        commit: bool = True,
+    ) -> None:
         entity = await self.get(db, entity_id)
         await db.delete(entity)
         await self._event(db, entity_id, "deleted")
-        await db.commit()
+        if commit:
+            await db.commit()
 
     async def _event(self, db: AsyncSession, entity_id: str, action: str) -> None:
         event = OutboxEvent(

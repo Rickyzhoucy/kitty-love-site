@@ -36,11 +36,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.anniversaries import parse_date, upcoming
 from app.direct_messages import list_thread
 from app.localtime import local_now, local_today
-from app.runtime_config import live
 from app.models import DirectMessage, EventTimer, User
+from app.runtime_config import live
 from app.site_config import get as site_config_get
 
 logger = logging.getLogger(__name__)
+
 
 def context_messages() -> int:
     """喂给模型的上下文长度。够回答「刚才说的那个」，又不至于把整段历史都送进去。
@@ -49,6 +50,7 @@ def context_messages() -> int:
     烧 token。
     """
     return int(live("pet.assist_context_messages"))
+
 
 #: 谁都能用的通用叫法，省得非要打对宠物的名字。
 GENERIC_MENTIONS = ("@宠物", "@pet")
@@ -70,6 +72,8 @@ SYSTEM_PROMPT = """你是这个双人小站里的宠物，两个人在私聊里 
   每日一问）用站内工具查，站外的事用搜索工具查。
 - 查不到、工具也没有的，就老实说不知道。**绝对不要编**——他们会拿你的话当真。
 - 你不知道他们此刻在忙什么、为什么这么说，除非记录里写了。不要推测原因。
+- 这是只读场景。你不能新增、修改、删除或记录任何东西，也绝不能说“已记录”或
+  “已经帮你存好”。如果对方要求写入，明确说需要回到与宠物的私人对话中操作。
 
 关于怎么说话：
 - 回答要短，一两句话。这是聊天不是写文档。
@@ -117,7 +121,7 @@ def build_transcript(
     **必须带名字**：不区分谁说的话，模型会把两个人的立场揉成一个人，回答出来
     的东西张冠李戴——在一段关系里，这比答不上来糟糕得多。
     """
-    recent = messages[-context_messages():]
+    recent = messages[-context_messages() :]
     lines = []
     for message in recent:
         speaker = names.get(message.sender_id, "某人")
@@ -226,11 +230,27 @@ def extract_text(response) -> str | None:
     if isinstance(content, list):
         # 有些兼容层把内容拆成 block 列表
         content = "".join(
-            part.get("text", "") if isinstance(part, dict) else str(part)
-            for part in content
+            part.get("text", "") if isinstance(part, dict) else str(part) for part in content
         )
     text = str(content).strip()
     return text or None
+
+
+WRITE_SUCCESS = re.compile(
+    r"(?:已|已经|帮你|替你).{0,10}(?:记录|记下|存好|保存|新增|修改|删除|创建)"
+)
+NEGATED_WRITE = re.compile(r"(?:没有|不能|无法|未).{0,8}(?:记录|记下|保存|创建)")
+
+
+def guard_read_only_reply(reply: str | None) -> str | None:
+    """A read-only agent cannot turn fluent text into a fake write receipt."""
+
+    if not reply or not WRITE_SUCCESS.search(reply) or NEGATED_WRITE.search(reply):
+        return reply
+    return (
+        "这条双人聊天里的宠物应答是只读的，我没有写入任何内容。"
+        "需要记录的话，请到和我的私人对话里明确告诉我。"
+    )
 
 
 async def answer(model, request: AssistRequest, pet_name: str) -> str | None:
@@ -245,7 +265,7 @@ async def answer(model, request: AssistRequest, pet_name: str) -> str | None:
     except Exception:
         logger.exception("宠物回答失败")
         return None
-    return extract_text(response)
+    return guard_read_only_reply(extract_text(response))
 
 
 async def answer_with_tools(
@@ -277,4 +297,4 @@ async def answer_with_tools(
     messages = result.get("messages") if isinstance(result, dict) else None
     if not messages:
         return None
-    return extract_text(messages[-1])
+    return guard_read_only_reply(extract_text(messages[-1]))

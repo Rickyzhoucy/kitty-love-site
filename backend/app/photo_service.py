@@ -41,31 +41,28 @@ class PhotoService:
     async def list(self, db: AsyncSession, limit: int = 500) -> list[PhotoRead]:
         rows = list(
             await db.scalars(
-                select(Photo)
-                .order_by(Photo.created_at.desc())
-                .limit(max(1, min(limit, 500)))
+                select(Photo).order_by(Photo.created_at.desc()).limit(max(1, min(limit, 500)))
             )
         )
         return [self.response(photo) for photo in rows]
 
     async def create(
-        self, db: AsyncSession, owner_id: str, data: PhotoCreate
+        self,
+        db: AsyncSession,
+        owner_id: str,
+        data: PhotoCreate,
+        *,
+        commit: bool = True,
     ) -> PhotoRead:
         attachment = await db.get(Attachment, data.attachment_id)
-        if (
-            attachment is None
-            or attachment.owner_id != owner_id
-            or attachment.status != "ready"
-        ):
+        if attachment is None or attachment.owner_id != owner_id or attachment.status != "ready":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "附件不存在")
         if attachment.content_type.lower() not in ALLOWED_PHOTO_TYPES:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "仅支持 JPG/PNG/WebP/GIF 图片",
             )
-        existing = await db.scalar(
-            select(Photo).where(Photo.attachment_id == attachment.id)
-        )
+        existing = await db.scalar(select(Photo).where(Photo.attachment_id == attachment.id))
         if existing is not None:
             raise HTTPException(status.HTTP_409_CONFLICT, "附件已加入相册")
         photo = Photo(
@@ -77,26 +74,40 @@ class PhotoService:
         db.add(photo)
         await db.flush()
         await self._event(db, photo.id, "created")
-        await db.commit()
-        await db.refresh(photo)
+        if commit:
+            await db.commit()
+            await db.refresh(photo)
         return self.response(photo)
 
     async def update(
-        self, db: AsyncSession, photo_id: str, data: PhotoUpdate
+        self,
+        db: AsyncSession,
+        photo_id: str,
+        data: PhotoUpdate,
+        *,
+        commit: bool = True,
     ) -> PhotoRead:
         photo = await self._get(db, photo_id)
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(photo, field, value)
         await self._event(db, photo.id, "updated")
-        await db.commit()
-        await db.refresh(photo)
+        if commit:
+            await db.commit()
+            await db.refresh(photo)
         return self.response(photo)
 
-    async def delete(self, db: AsyncSession, photo_id: str) -> None:
+    async def delete(
+        self,
+        db: AsyncSession,
+        photo_id: str,
+        *,
+        commit: bool = True,
+    ) -> None:
         photo = await self._get(db, photo_id)
         await db.delete(photo)
         await self._event(db, photo_id, "deleted")
-        await db.commit()
+        if commit:
+            await db.commit()
 
     @staticmethod
     async def _get(db: AsyncSession, photo_id: str) -> Photo:

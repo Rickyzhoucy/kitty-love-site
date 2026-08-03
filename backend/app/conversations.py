@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.couple_space import ensure_space
 from app.models import (
     ChatMessage,
     Companion,
@@ -68,6 +69,7 @@ class ConversationService:
         companion_id: str | None = None,
         title: str | None = None,
     ) -> Conversation:
+        space = await ensure_space(db, user_id)
         if companion_id is None:
             companion, _ = await self.ensure_companion(db, user_id)
         else:
@@ -75,6 +77,7 @@ class ConversationService:
             if companion is None or companion.owner_id != user_id:
                 raise ValueError("Companion 不存在")
         conversation = Conversation(
+            space_id=space.id,
             user_id=user_id,
             companion_id=companion.id,
             title=title,

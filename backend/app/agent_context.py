@@ -15,5 +15,9 @@ class AgentContext:
     user_profile: dict[str, Any]
     conversation_summary: str
     memory_context: str
+    source_message_id: str | None = None
+    page_context: dict[str, Any] = field(default_factory=dict)
+    active_task: str | None = None
+    memory_ids: list[str] = field(default_factory=list)
     skill_context: str = ""
     skill_versions: dict[str, str] = field(default_factory=dict)

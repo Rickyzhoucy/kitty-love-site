@@ -3,6 +3,7 @@
 import Card from '../components/ui/Card';
 import PasskeyManager from '../components/PasskeyManager';
 import DesktopSettingsPanel from '../components/DesktopSettingsPanel';
+import MemorySettingsPanel from '../components/MemorySettingsPanel';
 
 /**
  * 主站的账号设置。**目前只有一件事：passkey。**
@@ -16,7 +17,7 @@ import DesktopSettingsPanel from '../components/DesktopSettingsPanel';
  */
 export default function SettingsPage() {
     return (
-        <div className="mx-auto w-full max-w-lg p-4 md:p-6">
+        <div className="mx-auto w-full max-w-3xl p-4 md:p-6">
             <h1 className="m-0 mb-4 font-display text-2xl text-ink">账号设置</h1>
             <Card className="p-5">
                 <PasskeyManager base="/auth/passkey" />
@@ -24,6 +25,9 @@ export default function SettingsPage() {
             {/* 桌面版专属。浏览器里整块不渲染，所以这里不用再判一次。 */}
             <Card className="mt-4 p-5">
                 <DesktopSettingsPanel />
+            </Card>
+            <Card className="mt-4 p-5 md:p-6">
+                <MemorySettingsPanel />
             </Card>
         </div>
     );

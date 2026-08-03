@@ -113,6 +113,11 @@ export function usePetActivityBridge({
         const status = event.type.slice('agent.task.'.length) as AgentTaskStatus;
         const activity = TASK_ACTIVITY[status];
         suggestTask(activity);
+        window.dispatchEvent(new CustomEvent('kitty:perception-context', {
+            detail: {
+                activeTask: activity ? event.safeSummary : '',
+            },
+        }));
 
         const reaction = TASK_REACTION[status];
         const didSomething = (event.sequence ?? 0) > 0;

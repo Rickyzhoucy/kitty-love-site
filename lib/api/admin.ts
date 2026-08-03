@@ -41,10 +41,13 @@ export interface ConfigPayload {
 
 export interface MemoryRow {
     id: string;
-    scope: string;
-    kind: string;
+    visibility: string;
+    memory_type: string;
     content: string;
     importance: number;
+    confidence: number;
+    status: string;
+    access_count: number;
     created_at: string;
     occurred_at: string | null;
 }
@@ -134,8 +137,6 @@ export const adminApi = {
         scopes: { value: string; count: number }[];
         total: number;
     }>(`${base}/memories/facets`),
-    updateMemory: (id: string, patch: { content?: string; importance?: number }) =>
-        api.patch<MemoryRow>(`${base}/memories/${id}`, patch),
     deleteMemory: (id: string) => api.delete<void>(`${base}/memories/${id}`),
 
     skills: () => api.get<SkillRow[]>(`${base}/skills`),

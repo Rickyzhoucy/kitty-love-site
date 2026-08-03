@@ -14,7 +14,7 @@ from app.memory import (
     DEFAULT_NEAR_DUPLICATE_THRESHOLD,
     MemoryService,
 )
-from app.models import Companion, MemoryItem, User
+from app.models import Companion, MemoryRecord, User
 from app.schemas import MemoryCreate
 
 
@@ -42,8 +42,8 @@ async def _companion(session_maker) -> tuple[str, str]:
 
 def _memory(content: str, **overrides) -> MemoryCreate:
     payload = {
-        "scope": "companion",
-        "kind": "experience",
+        "visibility": "companion_relationship",
+        "memory_type": "episode",
         "content": content,
         "importance": 60,
     }
@@ -59,13 +59,9 @@ async def test_reworded_memory_does_not_create_a_second_row(session_maker):
     owner, companion_id = await _companion(session_maker)
     service = _service()
     async with session_maker() as db:
-        await service.create(
-            db, owner, _memory("他们今天一起看了电影", companionId=companion_id)
-        )
-        await service.create(
-            db, owner, _memory("今天他们一起看了电影", companionId=companion_id)
-        )
-        rows = list(await db.scalars(select(MemoryItem)))
+        await service.create(db, owner, _memory("他们今天一起看了电影", companionId=companion_id))
+        await service.create(db, owner, _memory("今天他们一起看了电影", companionId=companion_id))
+        rows = list(await db.scalars(select(MemoryRecord)))
     assert len(rows) == 1
 
 
@@ -93,13 +89,9 @@ async def test_genuinely_different_events_are_both_kept(session_maker):
     owner, companion_id = await _companion(session_maker)
     service = _service()
     async with session_maker() as db:
-        await service.create(
-            db, owner, _memory("他们一起看了电影", companionId=companion_id)
-        )
-        await service.create(
-            db, owner, _memory("他们一起吃了火锅", companionId=companion_id)
-        )
-        rows = list(await db.scalars(select(MemoryItem)))
+        await service.create(db, owner, _memory("他们一起看了电影", companionId=companion_id))
+        await service.create(db, owner, _memory("他们一起吃了火锅", companionId=companion_id))
+        rows = list(await db.scalars(select(MemoryRecord)))
     assert len(rows) == 2
 
 
@@ -112,22 +104,22 @@ async def test_same_words_different_kind_stay_separate(session_maker):
         await service.create(
             db,
             owner,
-            _memory("他喜欢吃辣", companionId=companion_id, kind="preference"),
+            _memory("他喜欢吃辣", companionId=companion_id, memory_type="preference"),
         )
         await service.create(
             db,
             owner,
-            _memory("他喜欢吃辣", companionId=companion_id, kind="experience"),
+            _memory("他喜欢吃辣", companionId=companion_id, memory_type="episode"),
         )
-        rows = list(await db.scalars(select(MemoryItem)))
+        rows = list(await db.scalars(select(MemoryRecord)))
     assert len(rows) == 2
 
 
 @pytest.mark.parametrize(
     ("left", "right"),
     [
-        ("他们今天一起看了电影", "今天他们一起看了电影"),   # 只换语序
-        ("他们一起去了海边", "他们一起去了海边呀"),         # 加了个语气词
+        ("他们今天一起看了电影", "今天他们一起看了电影"),  # 只换语序
+        ("他们一起去了海边", "他们一起去了海边呀"),  # 加了个语气词
     ],
 )
 def test_threshold_catches_rewording(left, right):
@@ -137,9 +129,9 @@ def test_threshold_catches_rewording(left, right):
 @pytest.mark.parametrize(
     ("left", "right"),
     [
-        ("他们一起看了电影", "他们一起吃了火锅"),   # 同句式换宾语
-        ("他喜欢吃辣", "他讨厌吃辣"),               # 同句式反义
-        ("他们一起看了电影", "她今天心情不好"),      # 完全无关
+        ("他们一起看了电影", "他们一起吃了火锅"),  # 同句式换宾语
+        ("他喜欢吃辣", "他讨厌吃辣"),  # 同句式反义
+        ("他们一起看了电影", "她今天心情不好"),  # 完全无关
         ("他们今天一起看了电影", "今天两个人一起看了场电影"),  # 语义改写，词面差得远
     ],
 )
@@ -157,22 +149,21 @@ def test_trigram_cannot_do_this_job_on_chinese():
 
     这条不是测功能，是防止有人「统一一下」把去重换回 _trigram_similarity。
     """
-    reworded = MemoryService._trigram_similarity(
-        "他们今天一起看了电影", "今天他们一起看了电影"
-    )
-    different = MemoryService._trigram_similarity(
-        "他们一起看了电影", "他们一起吃了火锅"
-    )
+    reworded = MemoryService._trigram_similarity("他们今天一起看了电影", "今天他们一起看了电影")
+    different = MemoryService._trigram_similarity("他们一起看了电影", "他们一起吃了火锅")
     assert abs(reworded - different) < 0.05  # 分不开
 
 
 # ---- 时间衰减 ----
 
 
-def _item(days_ago: float, importance: int = 50) -> MemoryItem:
-    return MemoryItem(
-        scope="companion",
-        kind="experience",
+def _item(days_ago: float, importance: int = 50) -> MemoryRecord:
+    return MemoryRecord(
+        space_id="space",
+        visibility="companion_relationship",
+        owner_id="owner",
+        companion_id="companion",
+        memory_type="episode",
         content="x",
         importance=importance,
         content_hash="h",
@@ -198,7 +189,7 @@ def test_importance_only_nudges_the_ranking():
     critical = MemoryService._freshness(_item(1, importance=100))
     assert critical > trivial
     # 最多 1.5 倍，不是数量级差异
-    assert critical / trivial <= 1.5
+    assert critical / trivial == pytest.approx(1.5)
 
 
 @pytest.mark.parametrize("days", [0, 30, 180, 720])
@@ -208,9 +199,15 @@ def test_freshness_is_always_positive(days):
 
 def test_missing_timestamps_do_not_crash_ranking():
     """老数据可能没有 occurredAt，不能因此排不了序。"""
-    item = MemoryItem(
-        scope="companion", kind="experience", content="x",
-        importance=50, content_hash="h",
+    item = MemoryRecord(
+        space_id="space",
+        visibility="companion_relationship",
+        owner_id="owner",
+        companion_id="companion",
+        memory_type="episode",
+        content="x",
+        importance=50,
+        content_hash="h",
     )
     assert MemoryService._freshness(item) == 1.0
 

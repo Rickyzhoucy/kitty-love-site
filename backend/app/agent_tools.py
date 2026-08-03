@@ -6,8 +6,12 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.couple_space import ensure_space
+from app.embeddings import UnavailableEmbeddingProvider
 from app.future_letters import redact as redact_letter
+from app.memory import MemoryService
 from app.models import (
+    ActionReceipt,
     DailyAnswer,
     DailyQuestion,
     EventTimer,
@@ -18,11 +22,14 @@ from app.models import (
     OutboxEvent,
     Plan,
     Wish,
+    utcnow,
 )
 from app.moods import describe as describe_mood
 from app.pet_state import resolve_pet
 from app.photo_service import PhotoService
 from app.schemas import (
+    MemoryCorrect,
+    MemoryCreate,
     MessageCreate,
     MessageUpdate,
     MilestoneCreate,
@@ -59,9 +66,7 @@ RESOURCE_DEFINITIONS: dict[str, ResourceDefinition] = {
 #: `resource_create/update/delete` 查的是 RESOURCE_DEFINITIONS，天然够不到它们。
 READ_ONLY_RESOURCES = frozenset({"mood", "letter", "dailyQuestion"})
 
-LISTABLE_RESOURCES = (
-    sorted(RESOURCE_DEFINITIONS) + ["photo"] + sorted(READ_ONLY_RESOURCES)
-)
+LISTABLE_RESOURCES = sorted(RESOURCE_DEFINITIONS) + ["photo"] + sorted(READ_ONLY_RESOURCES)
 
 
 def serialize_model(model: Any) -> dict[str, Any]:
@@ -75,9 +80,7 @@ def serialize_model(model: Any) -> dict[str, Any]:
     return result
 
 
-async def read_only_resource(
-    db: AsyncSession, resource: str
-) -> list[dict[str, Any]]:
+async def read_only_resource(db: AsyncSession, resource: str) -> list[dict[str, Any]]:
     """取那三样有额外规则的资源，**规则在这里重新执行一遍**。
 
     绝不能图省事直接 serialize_model：未来情书的正文在解锁前不该存在于任何
@@ -85,11 +88,7 @@ async def read_only_resource(
     绕过它们等于这个工具成了后门——模型问一句就能读到锁着的信。
     """
     if resource == "mood":
-        rows = list(
-            await db.scalars(
-                select(MoodEntry).order_by(MoodEntry.date.desc()).limit(60)
-            )
-        )
+        rows = list(await db.scalars(select(MoodEntry).order_by(MoodEntry.date.desc()).limit(60)))
         return [
             {
                 "userId": row.user_id,
@@ -103,9 +102,7 @@ async def read_only_resource(
 
     if resource == "letter":
         rows = list(
-            await db.scalars(
-                select(FutureLetter).order_by(FutureLetter.unlock_at).limit(60)
-            )
+            await db.scalars(select(FutureLetter).order_by(FutureLetter.unlock_at).limit(60))
         )
         # redact 是那个锁的唯一出口，这里必须走它
         return [
@@ -122,16 +119,12 @@ async def read_only_resource(
 
     # dailyQuestion：题目本身随便看，答案要两人都答完
     questions = list(
-        await db.scalars(
-            select(DailyQuestion).order_by(DailyQuestion.date.desc()).limit(30)
-        )
+        await db.scalars(select(DailyQuestion).order_by(DailyQuestion.date.desc()).limit(30))
     )
     result: list[dict[str, Any]] = []
     for question in questions:
         answers = list(
-            await db.scalars(
-                select(DailyAnswer).where(DailyAnswer.question_id == question.id)
-            )
+            await db.scalars(select(DailyAnswer).where(DailyAnswer.question_id == question.id))
         )
         revealed = len(answers) >= 2
         result.append(
@@ -141,10 +134,7 @@ async def read_only_resource(
                 "category": question.category,
                 "bothAnswered": revealed,
                 "answers": (
-                    [
-                        {"userId": answer.user_id, "body": answer.body}
-                        for answer in answers
-                    ]
+                    [{"userId": answer.user_id, "body": answer.body} for answer in answers]
                     if revealed
                     # 没揭晓时连是谁答的都不给：知道「只有一个人答了」没问题，
                     # 但那个人是谁本身就是信息。
@@ -156,15 +146,41 @@ async def read_only_resource(
 
 
 def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
+    memory = MemoryService(UnavailableEmbeddingProvider(1024))
+
+    async def committed_receipt(
+        db: AsyncSession,
+        runtime: ToolRuntime,
+        action_type: str,
+        resource_type: str,
+        resource_id: str | None,
+        safe_summary: str,
+    ) -> dict[str, Any]:
+        space = await ensure_space(db, runtime.context.user_id)
+        receipt = ActionReceipt(
+            space_id=space.id,
+            user_id=runtime.context.user_id,
+            conversation_id=runtime.context.conversation_id,
+            source_message_id=runtime.context.source_message_id,
+            action_type=action_type,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            status="committed",
+            safe_summary=safe_summary,
+            committed_at=utcnow(),
+        )
+        db.add(receipt)
+        await db.commit()
+        await db.refresh(receipt)
+        return serialize_model(receipt)
+
     def definition(resource: str) -> ResourceDefinition:
         if resource not in RESOURCE_DEFINITIONS:
             raise ValueError(f"不支持的资源：{resource}")
         return RESOURCE_DEFINITIONS[resource]
 
     @tool("site_resource_list")
-    async def resource_list(
-        resource: str, runtime: ToolRuntime
-    ) -> list[dict[str, Any]]:
+    async def resource_list(resource: str, runtime: ToolRuntime) -> list[dict[str, Any]]:
         """查询站内资源。
 
         resource 可选：plan（计划）/ wish（心愿）/ photo（照片）/
@@ -182,8 +198,7 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
                 return await read_only_resource(db, resource)
             model, _, _ = definition(resource)
             return [
-                serialize_model(entity)
-                for entity in await CrudService(model, resource).list(db)
+                serialize_model(entity) for entity in await CrudService(model, resource).list(db)
             ]
 
     @tool("site_resource_create")
@@ -199,8 +214,18 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
                     db,
                     runtime.context.user_id,
                     PhotoCreate.model_validate(payload),
+                    commit=False,
                 )
-                return result.model_dump(by_alias=True, mode="json")
+                serialized = result.model_dump(by_alias=True, mode="json")
+                receipt = await committed_receipt(
+                    db,
+                    runtime,
+                    "resource.create",
+                    resource,
+                    result.id,
+                    f"已创建照片：{result.caption[:80]}",
+                )
+                return {"resource": serialized, "actionReceipt": receipt}
             model, create_schema, _ = definition(resource)
             data = create_schema.model_validate(payload)
             entity = await CrudService(model, resource).create(
@@ -208,8 +233,20 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
                 data,
                 created_by=runtime.context.user_id,
                 created_by_companion=runtime.context.companion_id,
+                commit=False,
             )
-            return serialize_model(entity)
+            serialized = serialize_model(entity)
+            receipt = await committed_receipt(
+                db,
+                runtime,
+                "resource.create",
+                resource,
+                entity.id,
+                "已创建"
+                f"{resource}："
+                f"{str(serialized.get('title') or serialized.get('content') or entity.id)[:80]}",
+            )
+            return {"resource": serialized, "actionReceipt": receipt}
 
     @tool("site_resource_update")
     async def resource_update(
@@ -222,28 +259,154 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         async with session_maker() as db:
             if resource == "photo":
                 result = await PhotoService().update(
-                    db, entity_id, PhotoUpdate.model_validate(payload)
+                    db,
+                    entity_id,
+                    PhotoUpdate.model_validate(payload),
+                    commit=False,
                 )
-                return result.model_dump(by_alias=True, mode="json")
+                serialized = result.model_dump(by_alias=True, mode="json")
+                receipt = await committed_receipt(
+                    db,
+                    runtime,
+                    "resource.update",
+                    resource,
+                    entity_id,
+                    "已修改照片",
+                )
+                return {"resource": serialized, "actionReceipt": receipt}
             model, _, update_schema = definition(resource)
             data = update_schema.model_validate(payload)
-            entity = await CrudService(model, resource).update(db, entity_id, data)
-            return serialize_model(entity)
+            entity = await CrudService(model, resource).update(db, entity_id, data, commit=False)
+            serialized = serialize_model(entity)
+            receipt = await committed_receipt(
+                db,
+                runtime,
+                "resource.update",
+                resource,
+                entity_id,
+                f"已修改{resource}",
+            )
+            return {"resource": serialized, "actionReceipt": receipt}
 
     @tool("site_resource_delete")
     async def resource_delete(
         resource: str,
         entity_id: str,
         runtime: ToolRuntime,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """删除指定站内资源。"""
         async with session_maker() as db:
             if resource == "photo":
-                await PhotoService().delete(db, entity_id)
+                await PhotoService().delete(db, entity_id, commit=False)
             else:
                 model, _, _ = definition(resource)
-                await CrudService(model, resource).delete(db, entity_id)
-        return {"id": entity_id, "status": "deleted"}
+                await CrudService(model, resource).delete(db, entity_id, commit=False)
+            receipt = await committed_receipt(
+                db,
+                runtime,
+                "resource.delete",
+                resource,
+                entity_id,
+                f"已删除{resource}",
+            )
+        return {
+            "resource": {"id": entity_id, "status": "deleted"},
+            "actionReceipt": receipt,
+        }
+
+    @tool("memory_upsert")
+    async def memory_upsert(
+        content: str,
+        memory_type: str,
+        visibility: str,
+        runtime: ToolRuntime,
+        importance: int = 70,
+    ) -> dict[str, Any]:
+        """明确记住长期事实/偏好/约定。不要用它代替计划、心愿或文档工具。"""
+
+        companion_id = (
+            runtime.context.companion_id if visibility == "companion_relationship" else None
+        )
+        async with session_maker() as db:
+            item, receipt = await memory.create_with_receipt(
+                db,
+                runtime.context.user_id,
+                MemoryCreate(
+                    visibility=visibility,
+                    memory_type=memory_type,
+                    content=content,
+                    importance=importance,
+                    companion_id=companion_id,
+                    subject_type=(
+                        "companion"
+                        if visibility == "companion_relationship"
+                        else "couple"
+                        if visibility == "couple_shared"
+                        else "user"
+                    ),
+                    subject_id=(
+                        companion_id
+                        if visibility == "companion_relationship"
+                        else runtime.context.user_id
+                        if visibility == "user_private"
+                        else None
+                    ),
+                    source_type="chat_message",
+                    source_ids=(
+                        [runtime.context.source_message_id]
+                        if runtime.context.source_message_id
+                        else []
+                    ),
+                    source_excerpt=content,
+                ),
+                conversation_id=runtime.context.conversation_id,
+                source_message_id=runtime.context.source_message_id,
+            )
+            return {
+                "memory": serialize_model(item),
+                "actionReceipt": serialize_model(receipt),
+            }
+
+    @tool("memory_correct")
+    async def memory_correct(
+        memory_id: str,
+        content: str,
+        runtime: ToolRuntime,
+        reason: str = "用户纠正",
+    ) -> dict[str, Any]:
+        """纠正一条现有长期记忆，保留旧值和修订历史。"""
+
+        async with session_maker() as db:
+            item, receipt = await memory.correct(
+                db,
+                runtime.context.user_id,
+                memory_id,
+                MemoryCorrect(content=content, reason=reason),
+            )
+            return {
+                "memory": serialize_model(item),
+                "actionReceipt": serialize_model(receipt),
+            }
+
+    @tool("memory_retract")
+    async def memory_retract(
+        memory_id: str,
+        runtime: ToolRuntime,
+        reason: str = "用户要求忘记",
+    ) -> dict[str, Any]:
+        """删除/忘记一条长期记忆，并立即停止检索。"""
+
+        async with session_maker() as db:
+            item, receipt = await memory.retract(
+                db,
+                runtime.context.user_id,
+                memory_id,
+                reason=reason,
+            )
+            return {
+                "memory": serialize_model(item),
+                "actionReceipt": serialize_model(receipt),
+            }
 
     @tool("site_pet_action")
     async def pet_action(
@@ -281,5 +444,8 @@ def build_domain_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         resource_create,
         resource_update,
         resource_delete,
+        memory_upsert,
+        memory_correct,
+        memory_retract,
         pet_action,
     ]

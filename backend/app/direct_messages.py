@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.couple_space import CoupleSpaceUnavailable, ensure_space, member_ids, require_same_space
 from app.models import Attachment, DirectMessage, PetInterjection, User, utcnow
 
 logger = logging.getLogger(__name__)
@@ -34,24 +35,23 @@ class Partner:
 
 
 async def resolve_partner(db: AsyncSession, user_id: str) -> Partner:
-    """另一个 enabled 用户。"""
-    others = list(
-        await db.scalars(
-            select(User)
-            .where(User.id != user_id, User.enabled.is_(True))
-            .order_by(User.created_at)
-        )
-    )
-    if not others:
+    """同一 CoupleSpace 中的另一位 enabled 用户。"""
+    try:
+        space = await ensure_space(db, user_id)
+    except CoupleSpaceUnavailable as error:
+        raise PartnerUnavailable(str(error)) from error
+    ids = [item for item in await member_ids(db, space.id) if item != user_id]
+    if not ids:
         raise PartnerUnavailable(
             "还没有第二个人。去后台建一个账号，或者跑 `python -m app.cli seed-users`。"
         )
-    if len(others) > 1:
-        # 这个站的前提就是两个人。出现第三个是配置问题，不要猜。
+    if len(ids) > 1:
         raise PartnerUnavailable(
-            f"站里有 {len(others) + 1} 个账号，超出这个站的设计（两个人）。"
+            f"当前情侣空间有 {len(ids) + 1} 个账号，超出这个站的设计（两个人）。"
         )
-    partner = others[0]
+    partner = await db.get(User, ids[0])
+    if partner is None or not partner.enabled:
+        raise PartnerUnavailable("情侣空间里的另一位账号当前不可用。")
     return Partner(
         id=partner.id,
         username=partner.username,
@@ -93,7 +93,9 @@ async def send_message(
     body: str,
     attachment_ids: list[str],
 ) -> DirectMessage:
+    space = await require_same_space(db, sender_id, recipient_id)
     message = DirectMessage(
+        space_id=space.id,
         sender_id=sender_id,
         recipient_id=recipient_id,
         body=body.strip(),
@@ -204,7 +206,5 @@ async def list_interjections(
         query = query.where(PetInterjection.created_at >= since)
     else:
         # 默认只看最近一天的：更早的插话已经没有语境了
-        query = query.where(
-            PetInterjection.created_at >= utcnow() - timedelta(days=1)
-        )
+        query = query.where(PetInterjection.created_at >= utcnow() - timedelta(days=1))
     return list(await db.scalars(query.order_by(PetInterjection.created_at)))

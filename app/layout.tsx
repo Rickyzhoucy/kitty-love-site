@@ -8,6 +8,7 @@ import DesktopCompanionMode from './components/DesktopCompanionMode';
 import DesktopPetBridge from './components/DesktopPetBridge';
 import DesktopExecutorLoop from './components/DesktopExecutorLoop';
 import ChatMediationProvider from './components/ChatMediationProvider';
+import PerceptionBridge from './components/PerceptionBridge';
 
 const nunito = Nunito({
   subsets: ['latin'],
@@ -48,6 +49,7 @@ export default function RootLayout({
           <DesktopPetBridge />
           {/* 本地执行器。挂在宠物窗口上——主界面关了它还得继续干活。 */}
           <DesktopExecutorLoop />
+          <PerceptionBridge />
           <ChatMediationProvider>
             <main className="relative min-h-dvh pb-24">{children}</main>
             <BottomNav />

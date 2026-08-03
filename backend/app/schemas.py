@@ -268,19 +268,234 @@ class PersonaRead(Entity):
     version: int
 
 
+MemoryVisibility = Literal[
+    "user_private",
+    "couple_shared",
+    "companion_relationship",
+]
+MemoryType = Literal[
+    "fact",
+    "preference",
+    "commitment",
+    "episode",
+    "interaction_preference",
+    "relationship",
+]
+MemorySensitivity = Literal["normal", "sensitive", "restricted"]
+MemoryStatus = Literal[
+    "active",
+    "superseded",
+    "retracted",
+    "contested",
+    "pending_review",
+]
+
+
 class MemoryCreate(ApiModel):
-    scope: Literal["owner", "companion", "shared"]
-    kind: str = Field(min_length=1, max_length=40)
+    visibility: MemoryVisibility
+    memory_type: MemoryType
     content: str = Field(min_length=1, max_length=50_000)
     importance: int = Field(default=50, ge=0, le=100)
+    confidence: float = Field(default=1.0, ge=0, le=1)
+    sensitivity: MemorySensitivity = "normal"
     companion_id: str | None = None
+    subject_type: str = Field(default="other", min_length=1, max_length=32)
+    subject_id: str | None = Field(default=None, max_length=32)
+    predicate: str | None = Field(default=None, max_length=120)
+    object_json: dict[str, Any] | None = None
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
     occurred_at: datetime | None = None
-    source_message_ids: list[str] = Field(default_factory=list, max_length=50)
+    source_type: Literal[
+        "chat_message",
+        "direct_message",
+        "resource_event",
+        "pet_event",
+        "explicit_user",
+        "admin",
+    ] = "explicit_user"
+    source_ids: list[str] = Field(default_factory=list, max_length=50)
+    source_excerpt: str | None = Field(default=None, max_length=240)
+    extractor_version: str = Field(default="explicit-v1", max_length=80)
 
 
-class MemoryRead(Entity, MemoryCreate):
+class MemoryRead(ApiModel):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+    space_id: str
     owner_id: str | None
+    companion_id: str | None
+    visibility: MemoryVisibility
+    memory_type: MemoryType
+    content: str
+    subject_type: str
+    subject_id: str | None
+    predicate: str | None
+    object_json: dict[str, Any] | None
+    confidence: float
+    importance: int
+    sensitivity: MemorySensitivity
+    status: MemoryStatus
     content_hash: str
+    normalized_key: str | None
+    valid_from: datetime | None
+    valid_to: datetime | None
+    occurred_at: datetime | None
+    last_confirmed_at: datetime | None
+    last_accessed_at: datetime | None
+    access_count: int
+    supersedes_id: str | None
+    extractor_version: str
+    created_by_kind: str
+
+
+class MemoryCorrect(ApiModel):
+    content: str = Field(min_length=1, max_length=50_000)
+    importance: int | None = Field(default=None, ge=0, le=100)
+    sensitivity: MemorySensitivity | None = None
+    valid_from: datetime | None = None
+    reason: str = Field(default="用户纠正", max_length=500)
+
+
+class MemoryVisibilityUpdate(ApiModel):
+    visibility: MemoryVisibility
+    companion_id: str | None = None
+
+
+class MemoryEvidenceRead(ApiModel):
+    id: str
+    created_at: datetime
+    memory_id: str
+    source_type: str
+    source_id: str
+    actor_user_id: str | None
+    excerpt: str | None
+    excerpt_hash: str
+    observed_at: datetime
+    extractor_version: str
+
+
+class MemoryRevisionRead(ApiModel):
+    id: str
+    created_at: datetime
+    memory_id: str
+    operation: str
+    before_json: dict[str, Any] | None
+    after_json: dict[str, Any] | None
+    actor_type: str
+    actor_id: str | None
+    reason: str
+
+
+class ActionReceiptRead(ApiModel):
+    id: str
+    created_at: datetime
+    updated_at: datetime
+    action_type: str
+    resource_type: str
+    resource_id: str | None
+    status: Literal[
+        "proposed",
+        "confirmation_required",
+        "committed",
+        "failed",
+        "cancelled",
+    ]
+    safe_summary: str
+    error_code: str | None
+    committed_at: datetime | None
+
+
+class MemoryMutationRead(ApiModel):
+    memory: MemoryRead
+    receipt: ActionReceiptRead
+
+
+class MemoryPreferenceRead(ApiModel):
+    paused: bool
+    reference_enabled: bool
+    conversation_enabled: bool
+    direct_message_enabled: bool
+    mood_enabled: bool
+    daily_question_enabled: bool
+    future_letter_enabled: bool
+    reference_available: bool
+    private_extraction_available: bool
+    shared_extraction_available: bool
+
+
+class MemoryPreferenceUpdate(ApiModel):
+    paused: bool | None = None
+    reference_enabled: bool | None = None
+    conversation_enabled: bool | None = None
+    direct_message_enabled: bool | None = None
+    mood_enabled: bool | None = None
+    daily_question_enabled: bool | None = None
+    future_letter_enabled: bool | None = None
+
+
+class PerceptionSessionWrite(ApiModel):
+    device_session_id: str = Field(min_length=8, max_length=120)
+    surface: Literal["web", "tauri_main", "tauri_pet"] = "web"
+    route: str = Field(default="/", max_length=255)
+    page_kind: str = Field(default="home", max_length=40)
+    page_context: dict[str, Any] = Field(default_factory=dict)
+    active_conversation_id: str | None = None
+    foreground: bool = True
+    revision: int = Field(default=1, ge=1)
+
+
+class PerceptionSessionRead(ApiModel):
+    id: str
+    created_at: datetime
+    space_id: str
+    user_id: str
+    device_session_id: str
+    surface: Literal["web", "tauri_main", "tauri_pet"]
+    route: str
+    page_kind: str
+    page_context: dict[str, Any]
+    active_conversation_id: str | None
+    foreground: bool
+    revision: int
+    last_seen_at: datetime
+    expires_at: datetime
+
+
+class PerceptionEventWrite(ApiModel):
+    source: str = Field(default="kitty-love.web", max_length=120)
+    type: str = Field(min_length=1, max_length=120)
+    subject_type: str | None = Field(default=None, max_length=80)
+    subject_id: str | None = Field(default=None, max_length=64)
+    data: dict[str, Any] = Field(default_factory=dict)
+    sensitivity: Literal["normal", "sensitive", "restricted"] = "normal"
+    retention: Literal["ephemeral", "working", "episodic", "audit"] = "working"
+    correlation_id: str | None = Field(default=None, max_length=64)
+    causation_id: str | None = Field(default=None, max_length=64)
+    dedupe_key: str = Field(min_length=8, max_length=255)
+    occurred_at: datetime | None = None
+
+
+class PerceptionEventRead(ApiModel):
+    id: str
+    spec_version: str
+    schema_version: int
+    space_id: str
+    actor_user_id: str | None
+    companion_id: str | None
+    source: str
+    type: str
+    subject_type: str | None
+    subject_id: str | None
+    occurred_at: datetime
+    observed_at: datetime
+    data: dict[str, Any]
+    sensitivity: Literal["normal", "sensitive", "restricted"]
+    retention: Literal["ephemeral", "working", "episodic", "audit"]
+    correlation_id: str | None
+    causation_id: str | None
+    dedupe_key: str
 
 
 class PetUpdate(ApiModel):

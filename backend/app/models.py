@@ -5,9 +5,9 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
-    CheckConstraint,
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -121,21 +121,15 @@ class AdminSession(StringIdMixin, CreatedAtMixin, Base):
     """
 
     __tablename__ = "AdminSession"
-    admin_id: Mapped[str] = mapped_column(
-        "adminId", ForeignKey("Admin.id", ondelete="CASCADE")
-    )
+    admin_id: Mapped[str] = mapped_column("adminId", ForeignKey("Admin.id", ondelete="CASCADE"))
     token_hash: Mapped[bytes] = mapped_column("tokenHash", LargeBinary(32), unique=True)
     expires_at: Mapped[datetime] = mapped_column("expiresAt", DateTime(timezone=True))
     last_seen_at: Mapped[datetime] = mapped_column("lastSeenAt", DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(
         "revokedAt", DateTime(timezone=True), nullable=True
     )
-    device_name: Mapped[str | None] = mapped_column(
-        "deviceName", String(120), nullable=True
-    )
-    __table_args__ = (
-        Index("AdminSession_adminId_expiresAt_idx", "adminId", "expiresAt"),
-    )
+    device_name: Mapped[str | None] = mapped_column("deviceName", String(120), nullable=True)
+    __table_args__ = (Index("AdminSession_adminId_expiresAt_idx", "adminId", "expiresAt"),)
 
 
 class SecurityQuestion(StringIdMixin, CreatedAtMixin, Base):
@@ -205,9 +199,7 @@ class Plan(StringIdMixin, CreatedAtMixin, AttributionMixin, Base):
     __tablename__ = "Plan"
     title: Mapped[str] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    due_at: Mapped[datetime | None] = mapped_column(
-        "dueAt", DateTime(timezone=True), nullable=True
-    )
+    due_at: Mapped[datetime | None] = mapped_column("dueAt", DateTime(timezone=True), nullable=True)
     # 用时间而不是布尔：心愿页要显示「我们在去年 3 月做到了这件事」，
     # 布尔值给不出这个信息。Plan 保持同一形状，两者才好统一处理。
     completed_at: Mapped[datetime | None] = mapped_column(
@@ -244,6 +236,28 @@ class User(StringIdMixin, CreatedAtMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class CoupleSpace(StringIdMixin, CreatedAtMixin, Base):
+    """两个人与双方宠物共享内容的唯一租户边界。"""
+
+    __tablename__ = "CoupleSpace"
+    name: Mapped[str] = mapped_column(String(120), default="我们的小世界")
+
+
+class CoupleSpaceMember(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "CoupleSpaceMember"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[str] = mapped_column(
+        "userId", ForeignKey("User.id", ondelete="CASCADE"), unique=True
+    )
+    role: Mapped[str] = mapped_column(String(20), default="member")
+    __table_args__ = (
+        UniqueConstraint("spaceId", "userId"),
+        Index("CoupleSpaceMember_spaceId_idx", "spaceId"),
+    )
+
+
 class UserSession(StringIdMixin, CreatedAtMixin, Base):
     __tablename__ = "UserSession"
     user_id: Mapped[str] = mapped_column("userId", ForeignKey("User.id", ondelete="CASCADE"))
@@ -275,9 +289,7 @@ class WebAuthnCredential(StringIdMixin, CreatedAtMixin, Base):
     admin_id: Mapped[str | None] = mapped_column(
         "adminId", ForeignKey("Admin.id", ondelete="CASCADE"), nullable=True
     )
-    credential_id: Mapped[bytes] = mapped_column(
-        "credentialId", LargeBinary(256), unique=True
-    )
+    credential_id: Mapped[bytes] = mapped_column("credentialId", LargeBinary(256), unique=True)
     public_key: Mapped[bytes] = mapped_column("publicKey", LargeBinary(512))
     sign_count: Mapped[int] = mapped_column("signCount", Integer, default=0)
     transports: Mapped[list[str]] = mapped_column(JsonType, default=list)
@@ -314,12 +326,8 @@ class WebAuthnChallenge(StringIdMixin, CreatedAtMixin, Base):
     #: "user" 或 "admin"。**两套账号体系的挑战不能混用。**
     audience: Mapped[str] = mapped_column(String(20))
     #: 注册时是「给谁注册」，登录时为空（用可发现凭据，登录前不知道是谁）。
-    subject_id: Mapped[str | None] = mapped_column(
-        "subjectId", String(32), nullable=True
-    )
-    expires_at: Mapped[datetime] = mapped_column(
-        "expiresAt", DateTime(timezone=True)
-    )
+    subject_id: Mapped[str | None] = mapped_column("subjectId", String(32), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column("expiresAt", DateTime(timezone=True))
 
 
 class Companion(StringIdMixin, CreatedAtMixin, Base):
@@ -354,6 +362,9 @@ class UserProfile(StringIdMixin, CreatedAtMixin, Base):
 
 class Conversation(StringIdMixin, CreatedAtMixin, Base):
     __tablename__ = "Conversation"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
     user_id: Mapped[str] = mapped_column("userId", ForeignKey("User.id", ondelete="CASCADE"))
     companion_id: Mapped[str] = mapped_column(
         "companionId", ForeignKey("Companion.id", ondelete="CASCADE")
@@ -373,6 +384,7 @@ class ChatMessage(StringIdMixin, CreatedAtMixin, Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JsonType, default=dict)
+    memory_excluded: Mapped[bool] = mapped_column("memoryExcluded", Boolean, default=False)
 
 
 class ConversationSummary(StringIdMixin, CreatedAtMixin, Base):
@@ -393,33 +405,160 @@ class ConversationSummary(StringIdMixin, CreatedAtMixin, Base):
     )
 
 
-class MemoryItem(StringIdMixin, CreatedAtMixin, Base):
-    __tablename__ = "MemoryItem"
+class MemoryRecord(StringIdMixin, CreatedAtMixin, Base):
+    """有来源、时间、权限和修订状态的长期记忆。"""
+
+    __tablename__ = "MemoryRecord"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    visibility: Mapped[str] = mapped_column(String(32))
     owner_id: Mapped[str | None] = mapped_column(
         "ownerId", ForeignKey("User.id", ondelete="CASCADE"), nullable=True
     )
     companion_id: Mapped[str | None] = mapped_column(
         "companionId", ForeignKey("Companion.id", ondelete="CASCADE"), nullable=True
     )
-    scope: Mapped[str] = mapped_column(String(20))
-    kind: Mapped[str] = mapped_column(String(40))
+    memory_type: Mapped[str] = mapped_column("memoryType", String(40))
     content: Mapped[str] = mapped_column(Text)
+    subject_type: Mapped[str] = mapped_column("subjectType", String(32), default="other")
+    subject_id: Mapped[str | None] = mapped_column("subjectId", String(32), nullable=True)
+    predicate: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    object_json: Mapped[dict[str, Any] | None] = mapped_column(
+        "objectJson", JsonType, nullable=True
+    )
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
     importance: Mapped[int] = mapped_column(Integer, default=50)
+    sensitivity: Mapped[str] = mapped_column(String(20), default="normal")
+    status: Mapped[str] = mapped_column(String(24), default="active")
     content_hash: Mapped[str] = mapped_column("contentHash", String(64))
+    normalized_key: Mapped[str | None] = mapped_column("normalizedKey", String(255), nullable=True)
+    valid_from: Mapped[datetime | None] = mapped_column(
+        "validFrom", DateTime(timezone=True), nullable=True
+    )
+    valid_to: Mapped[datetime | None] = mapped_column(
+        "validTo", DateTime(timezone=True), nullable=True
+    )
     occurred_at: Mapped[datetime | None] = mapped_column(
         "occurredAt", DateTime(timezone=True), nullable=True
     )
-    source_message_ids: Mapped[list[str]] = mapped_column(
-        "sourceMessageIds", JsonType, default=list
+    last_confirmed_at: Mapped[datetime | None] = mapped_column(
+        "lastConfirmedAt", DateTime(timezone=True), nullable=True
+    )
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        "lastAccessedAt", DateTime(timezone=True), nullable=True
+    )
+    access_count: Mapped[int] = mapped_column("accessCount", Integer, default=0)
+    supersedes_id: Mapped[str | None] = mapped_column(
+        "supersedesId",
+        ForeignKey("MemoryRecord.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    extractor_version: Mapped[str] = mapped_column(
+        "extractorVersion", String(80), default="explicit-v1"
+    )
+    created_by_kind: Mapped[str] = mapped_column("createdByKind", String(20), default="user")
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
     __table_args__ = (
+        CheckConstraint(
+            "visibility IN ('user_private', 'couple_shared', 'companion_relationship')",
+            name="MemoryRecord_visibility_check",
+        ),
+        CheckConstraint(
+            "\"memoryType\" IN ('fact', 'preference', 'commitment', 'episode', "
+            "'interaction_preference', 'relationship')",
+            name="MemoryRecord_type_check",
+        ),
+        CheckConstraint(
+            "sensitivity IN ('normal', 'sensitive', 'restricted')",
+            name="MemoryRecord_sensitivity_check",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'superseded', 'retracted', 'contested', 'pending_review')",
+            name="MemoryRecord_status_check",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="MemoryRecord_confidence_check",
+        ),
+        CheckConstraint(
+            "importance >= 0 AND importance <= 100",
+            name="MemoryRecord_importance_check",
+        ),
+        CheckConstraint(
+            "(visibility != 'user_private') OR (\"ownerId\" IS NOT NULL)",
+            name="MemoryRecord_private_owner_check",
+        ),
+        CheckConstraint(
+            "(visibility != 'couple_shared') OR (\"ownerId\" IS NULL)",
+            name="MemoryRecord_shared_owner_check",
+        ),
+        CheckConstraint(
+            "(visibility != 'companion_relationship') OR "
+            '("ownerId" IS NOT NULL AND "companionId" IS NOT NULL)',
+            name="MemoryRecord_companion_owner_check",
+        ),
         Index(
-            "MemoryItem_content_trgm_idx",
+            "MemoryRecord_content_trgm_idx",
             "content",
             postgresql_using="gin",
             postgresql_ops={"content": "gin_trgm_ops"},
         ),
+        Index(
+            "MemoryRecord_scope_status_idx",
+            "spaceId",
+            "visibility",
+            "status",
+        ),
+        Index(
+            "MemoryRecord_subject_idx",
+            "spaceId",
+            "subjectType",
+            "subjectId",
+            "predicate",
+        ),
     )
+
+
+class MemoryEvidence(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "MemoryEvidence"
+    memory_id: Mapped[str] = mapped_column(
+        "memoryId", ForeignKey("MemoryRecord.id", ondelete="CASCADE")
+    )
+    source_type: Mapped[str] = mapped_column("sourceType", String(40))
+    source_id: Mapped[str] = mapped_column("sourceId", String(64))
+    actor_user_id: Mapped[str | None] = mapped_column(
+        "actorUserId", ForeignKey("User.id", ondelete="SET NULL"), nullable=True
+    )
+    excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    excerpt_hash: Mapped[str] = mapped_column("excerptHash", String(64))
+    observed_at: Mapped[datetime] = mapped_column(
+        "observedAt", DateTime(timezone=True), default=utcnow
+    )
+    extractor_version: Mapped[str] = mapped_column(
+        "extractorVersion", String(80), default="explicit-v1"
+    )
+    __table_args__ = (
+        UniqueConstraint("memoryId", "sourceType", "sourceId"),
+        Index("MemoryEvidence_source_idx", "sourceType", "sourceId"),
+    )
+
+
+class MemoryRevision(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "MemoryRevision"
+    memory_id: Mapped[str] = mapped_column(
+        "memoryId", ForeignKey("MemoryRecord.id", ondelete="CASCADE")
+    )
+    operation: Mapped[str] = mapped_column(String(24))
+    before_json: Mapped[dict[str, Any] | None] = mapped_column(
+        "beforeJson", JsonType, nullable=True
+    )
+    after_json: Mapped[dict[str, Any] | None] = mapped_column("afterJson", JsonType, nullable=True)
+    actor_type: Mapped[str] = mapped_column("actorType", String(20))
+    actor_id: Mapped[str | None] = mapped_column("actorId", String(32), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
 
 
 class EmbeddingProfile(StringIdMixin, CreatedAtMixin, Base):
@@ -432,19 +571,19 @@ class EmbeddingProfile(StringIdMixin, CreatedAtMixin, Base):
     __table_args__ = (UniqueConstraint("provider", "model", "version"),)
 
 
-class MemoryEmbedding(StringIdMixin, CreatedAtMixin, Base):
-    __tablename__ = "MemoryEmbedding"
-    memory_item_id: Mapped[str] = mapped_column(
-        "memoryItemId", ForeignKey("MemoryItem.id", ondelete="CASCADE")
+class MemoryRecordEmbedding(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "MemoryRecordEmbedding"
+    memory_id: Mapped[str] = mapped_column(
+        "memoryId", ForeignKey("MemoryRecord.id", ondelete="CASCADE")
     )
     profile_id: Mapped[str] = mapped_column(
         "profileId", ForeignKey("EmbeddingProfile.id", ondelete="CASCADE")
     )
     embedding: Mapped[list[float]] = mapped_column(VectorType)
     __table_args__ = (
-        UniqueConstraint("memoryItemId", "profileId"),
+        UniqueConstraint("memoryId", "profileId"),
         Index(
-            "MemoryEmbedding_embedding_hnsw_idx",
+            "MemoryRecordEmbedding_embedding_hnsw_idx",
             "embedding",
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
@@ -463,21 +602,11 @@ class Attachment(StringIdMixin, CreatedAtMixin, Base):
     size: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(20), default="ready")
-    parse_status: Mapped[str] = mapped_column(
-        "parseStatus", String(20), default="pending"
-    )
-    extracted_text: Mapped[str | None] = mapped_column(
-        "extractedText", Text, nullable=True
-    )
-    parse_error: Mapped[str | None] = mapped_column(
-        "parseError", Text, nullable=True
-    )
-    derived_bucket: Mapped[str | None] = mapped_column(
-        "derivedBucket", String(80), nullable=True
-    )
-    thumbnail_key: Mapped[str | None] = mapped_column(
-        "thumbnailKey", Text, nullable=True
-    )
+    parse_status: Mapped[str] = mapped_column("parseStatus", String(20), default="pending")
+    extracted_text: Mapped[str | None] = mapped_column("extractedText", Text, nullable=True)
+    parse_error: Mapped[str | None] = mapped_column("parseError", Text, nullable=True)
+    derived_bucket: Mapped[str | None] = mapped_column("derivedBucket", String(80), nullable=True)
+    thumbnail_key: Mapped[str | None] = mapped_column("thumbnailKey", Text, nullable=True)
     __table_args__ = (UniqueConstraint("bucket", "objectKey"),)
 
 
@@ -517,6 +646,44 @@ class ToolRun(StringIdMixin, CreatedAtMixin, Base):
     )
 
 
+class ActionReceipt(StringIdMixin, CreatedAtMixin, Base):
+    """写操作提交证明；模型文本本身永远不算成功。"""
+
+    __tablename__ = "ActionReceipt"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[str] = mapped_column("userId", ForeignKey("User.id", ondelete="CASCADE"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        "conversationId", ForeignKey("Conversation.id", ondelete="SET NULL"), nullable=True
+    )
+    source_message_id: Mapped[str | None] = mapped_column(
+        "sourceMessageId", String(32), nullable=True
+    )
+    action_type: Mapped[str] = mapped_column("actionType", String(80))
+    resource_type: Mapped[str] = mapped_column("resourceType", String(80))
+    resource_id: Mapped[str | None] = mapped_column("resourceId", String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32))
+    safe_summary: Mapped[str] = mapped_column("safeSummary", Text, default="")
+    error_code: Mapped[str | None] = mapped_column("errorCode", String(80), nullable=True)
+    tool_run_id: Mapped[str | None] = mapped_column(
+        "toolRunId", ForeignKey("ToolRun.id", ondelete="SET NULL"), nullable=True
+    )
+    committed_at: Mapped[datetime | None] = mapped_column(
+        "committedAt", DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('proposed', 'confirmation_required', 'committed', 'failed', 'cancelled')",
+            name="ActionReceipt_status_check",
+        ),
+        Index("ActionReceipt_user_createdAt_idx", "userId", "createdAt"),
+    )
+
+
 class OutboxEvent(StringIdMixin, CreatedAtMixin, Base):
     __tablename__ = "OutboxEvent"
     topic: Mapped[str] = mapped_column(String(100))
@@ -527,6 +694,143 @@ class OutboxEvent(StringIdMixin, CreatedAtMixin, Base):
         "publishedAt", DateTime(timezone=True), nullable=True
     )
     __table_args__ = (Index("OutboxEvent_createdAt_idx", "createdAt"),)
+
+
+class PerceptionSession(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "PerceptionSession"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[str] = mapped_column("userId", ForeignKey("User.id", ondelete="CASCADE"))
+    surface: Mapped[str] = mapped_column(String(24))
+    device_session_id: Mapped[str] = mapped_column("deviceSessionId", String(120))
+    active_conversation_id: Mapped[str | None] = mapped_column(
+        "activeConversationId",
+        ForeignKey("Conversation.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    route: Mapped[str] = mapped_column(String(255), default="/")
+    page_kind: Mapped[str] = mapped_column("pageKind", String(40), default="home")
+    page_context: Mapped[dict[str, Any]] = mapped_column("pageContext", JsonType, default=dict)
+    foreground: Mapped[bool] = mapped_column(Boolean, default=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        "lastSeenAt", DateTime(timezone=True), default=utcnow
+    )
+    expires_at: Mapped[datetime] = mapped_column("expiresAt", DateTime(timezone=True))
+    __table_args__ = (
+        UniqueConstraint("userId", "deviceSessionId", "surface"),
+        CheckConstraint(
+            "surface IN ('web', 'tauri_main', 'tauri_pet')",
+            name="PerceptionSession_surface_check",
+        ),
+        Index(
+            "PerceptionSession_user_foreground_idx",
+            "userId",
+            "foreground",
+            "lastSeenAt",
+        ),
+    )
+
+
+class PerceptionEvent(StringIdMixin, Base):
+    __tablename__ = "PerceptionEvent"
+    spec_version: Mapped[str] = mapped_column("specVersion", String(10), default="1.0")
+    schema_version: Mapped[int] = mapped_column("schemaVersion", Integer, default=1)
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    actor_user_id: Mapped[str | None] = mapped_column(
+        "actorUserId", ForeignKey("User.id", ondelete="SET NULL"), nullable=True
+    )
+    companion_id: Mapped[str | None] = mapped_column(
+        "companionId", ForeignKey("Companion.id", ondelete="SET NULL"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(String(120))
+    type: Mapped[str] = mapped_column(String(120))
+    subject_type: Mapped[str | None] = mapped_column("subjectType", String(80), nullable=True)
+    subject_id: Mapped[str | None] = mapped_column("subjectId", String(64), nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        "occurredAt", DateTime(timezone=True), default=utcnow
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        "observedAt", DateTime(timezone=True), default=utcnow
+    )
+    data: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    sensitivity: Mapped[str] = mapped_column(String(20), default="normal")
+    retention: Mapped[str] = mapped_column(String(20), default="working")
+    correlation_id: Mapped[str | None] = mapped_column("correlationId", String(64), nullable=True)
+    causation_id: Mapped[str | None] = mapped_column("causationId", String(64), nullable=True)
+    dedupe_key: Mapped[str] = mapped_column("dedupeKey", String(255), unique=True)
+    processed_at: Mapped[datetime | None] = mapped_column(
+        "processedAt", DateTime(timezone=True), nullable=True
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "sensitivity IN ('normal', 'sensitive', 'restricted')",
+            name="PerceptionEvent_sensitivity_check",
+        ),
+        CheckConstraint(
+            "retention IN ('ephemeral', 'working', 'episodic', 'audit')",
+            name="PerceptionEvent_retention_check",
+        ),
+        Index("PerceptionEvent_space_occurredAt_idx", "spaceId", "occurredAt"),
+        Index("PerceptionEvent_type_processedAt_idx", "type", "processedAt"),
+    )
+
+
+class MemoryIngestionCursor(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "MemoryIngestionCursor"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    source_type: Mapped[str] = mapped_column("sourceType", String(32))
+    source_id: Mapped[str] = mapped_column("sourceId", String(64))
+    last_message_id: Mapped[str | None] = mapped_column("lastMessageId", String(32), nullable=True)
+    last_processed_at: Mapped[datetime | None] = mapped_column(
+        "lastProcessedAt", DateTime(timezone=True), nullable=True
+    )
+    extractor_version: Mapped[str] = mapped_column(
+        "extractorVersion", String(80), default="memory-v1"
+    )
+    __table_args__ = (UniqueConstraint("sourceType", "sourceId"),)
+
+
+class MemoryExclusion(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "MemoryExclusion"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    actor_user_id: Mapped[str] = mapped_column(
+        "actorUserId", ForeignKey("User.id", ondelete="CASCADE")
+    )
+    source_type: Mapped[str] = mapped_column("sourceType", String(32))
+    source_id: Mapped[str] = mapped_column("sourceId", String(64))
+    reason: Mapped[str] = mapped_column(Text, default="user_excluded")
+    __table_args__ = (UniqueConstraint("sourceType", "sourceId"),)
+
+
+class MemoryPreference(StringIdMixin, CreatedAtMixin, Base):
+    __tablename__ = "MemoryPreference"
+    user_id: Mapped[str] = mapped_column(
+        "userId", ForeignKey("User.id", ondelete="CASCADE"), unique=True
+    )
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    reference_enabled: Mapped[bool] = mapped_column("referenceEnabled", Boolean, default=True)
+    conversation_enabled: Mapped[bool] = mapped_column("conversationEnabled", Boolean, default=True)
+    direct_message_enabled: Mapped[bool] = mapped_column(
+        "directMessageEnabled", Boolean, default=True
+    )
+    mood_enabled: Mapped[bool] = mapped_column("moodEnabled", Boolean, default=False)
+    daily_question_enabled: Mapped[bool] = mapped_column(
+        "dailyQuestionEnabled", Boolean, default=True
+    )
+    future_letter_enabled: Mapped[bool] = mapped_column(
+        "futureLetterEnabled", Boolean, default=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updatedAt", DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 # 宠物核心（架构文档 §11）。Companion 是宠物的统一身份，下面三张表分别承载
@@ -541,9 +845,7 @@ class CompanionPetProfile(StringIdMixin, CreatedAtMixin, Base):
     species: Mapped[str] = mapped_column(String(40), default="dog")
     body_asset_id: Mapped[str] = mapped_column("bodyAssetId", String(120), default="kitty")
     traits: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
-    birthday: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
-    )
+    birthday: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     relationship_level: Mapped[int] = mapped_column("relationshipLevel", Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(
         "updatedAt", DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -614,9 +916,7 @@ class AgentTaskStep(StringIdMixin, CreatedAtMixin, Base):
     """任务里的一次工具调用。toolRunId 指向执行层审计记录。"""
 
     __tablename__ = "AgentTaskStep"
-    task_id: Mapped[str] = mapped_column(
-        "taskId", ForeignKey("AgentTask.id", ondelete="CASCADE")
-    )
+    task_id: Mapped[str] = mapped_column("taskId", ForeignKey("AgentTask.id", ondelete="CASCADE"))
     tool_run_id: Mapped[str | None] = mapped_column(
         "toolRunId", ForeignKey("ToolRun.id", ondelete="SET NULL"), nullable=True
     )
@@ -637,16 +937,16 @@ class DirectMessage(StringIdMixin, CreatedAtMixin, Base):
     """一条私信。`readAt` 是宠物中介的全部依据。"""
 
     __tablename__ = "DirectMessage"
-    sender_id: Mapped[str] = mapped_column(
-        "senderId", ForeignKey("User.id", ondelete="CASCADE")
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
     )
+    sender_id: Mapped[str] = mapped_column("senderId", ForeignKey("User.id", ondelete="CASCADE"))
     recipient_id: Mapped[str] = mapped_column(
         "recipientId", ForeignKey("User.id", ondelete="CASCADE")
     )
     body: Mapped[str] = mapped_column(Text, default="")
-    attachment_ids: Mapped[list[str]] = mapped_column(
-        "attachmentIds", JsonType, default=list
-    )
+    attachment_ids: Mapped[list[str]] = mapped_column("attachmentIds", JsonType, default=list)
+    memory_excluded: Mapped[bool] = mapped_column("memoryExcluded", Boolean, default=False)
     #: NULL 表示还没被打开。宠物只知道这一个事实——它**不知道**你在不在忙，
     #: 所以永远不许编造原因（计划文档 §3.2）。
     read_at: Mapped[datetime | None] = mapped_column(
@@ -679,9 +979,7 @@ class PetInterjection(StringIdMixin, CreatedAtMixin, Base):
     #: unread_nudge（催你看）/ standin（替你答）/ company（转移陪伴）
     kind: Mapped[str] = mapped_column(String(30))
     body: Mapped[str] = mapped_column(Text)
-    __table_args__ = (
-        Index("PetInterjection_audience_createdAt_idx", "audienceId", "createdAt"),
-    )
+    __table_args__ = (Index("PetInterjection_audience_createdAt_idx", "audienceId", "createdAt"),)
 
 
 # 每日一问（计划文档 §2.1）。
@@ -711,13 +1009,9 @@ class DailyAnswer(StringIdMixin, CreatedAtMixin, Base):
     question_id: Mapped[str] = mapped_column(
         "questionId", ForeignKey("DailyQuestion.id", ondelete="CASCADE")
     )
-    user_id: Mapped[str] = mapped_column(
-        "userId", ForeignKey("User.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column("userId", ForeignKey("User.id", ondelete="CASCADE"))
     body: Mapped[str] = mapped_column(Text)
-    __table_args__ = (
-        UniqueConstraint("questionId", "userId"),
-    )
+    __table_args__ = (UniqueConstraint("questionId", "userId"),)
 
 
 class MoodEntry(StringIdMixin, CreatedAtMixin, Base):
@@ -729,9 +1023,7 @@ class MoodEntry(StringIdMixin, CreatedAtMixin, Base):
     """
 
     __tablename__ = "MoodEntry"
-    user_id: Mapped[str] = mapped_column(
-        "userId", ForeignKey("User.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column("userId", ForeignKey("User.id", ondelete="CASCADE"))
     #: YYYY-MM-DD。用字符串而不是 date：与 DailyQuestion 一致，也避免时区把
     #: 「今天」挪到前一天——打卡这件事的「今天」是用户本地的今天。
     date: Mapped[str] = mapped_column(String(10))
@@ -757,13 +1049,9 @@ class FutureLetter(StringIdMixin, CreatedAtMixin, Base):
     """
 
     __tablename__ = "FutureLetter"
-    author_id: Mapped[str] = mapped_column(
-        "authorId", ForeignKey("User.id", ondelete="CASCADE")
-    )
+    author_id: Mapped[str] = mapped_column("authorId", ForeignKey("User.id", ondelete="CASCADE"))
     body: Mapped[str] = mapped_column(Text)
-    attachment_ids: Mapped[list[str]] = mapped_column(
-        "attachmentIds", JsonType, default=list
-    )
+    attachment_ids: Mapped[list[str]] = mapped_column("attachmentIds", JsonType, default=list)
     unlock_at: Mapped[datetime] = mapped_column("unlockAt", DateTime(timezone=True))
     #: 第一次被读到的时刻。解锁当天宠物来送信，这个字段是「送过了」的依据。
     opened_at: Mapped[datetime | None] = mapped_column(
@@ -804,9 +1092,7 @@ class DesktopExecutor(StringIdMixin, CreatedAtMixin, Base):
     """
 
     __tablename__ = "DesktopExecutor"
-    user_id: Mapped[str] = mapped_column(
-        "userId", ForeignKey("User.id", ondelete="CASCADE")
-    )
+    user_id: Mapped[str] = mapped_column("userId", ForeignKey("User.id", ondelete="CASCADE"))
     #: 给人看的名字，比如「Ricky 的 MacBook」。
     name: Mapped[str] = mapped_column(String(120))
     #: 最后一次心跳。挑执行者时只看还活着的。
@@ -816,13 +1102,9 @@ class DesktopExecutor(StringIdMixin, CreatedAtMixin, Base):
     #: 这台机器允许宠物读哪些目录。**服务端这份只用于展示**——真正的校验在
     #: 本地做（见 src-tauri）。放在服务端校验等于把闸门交给一个可能被
     #: 提示注入影响的系统，那不叫闸门。
-    allowed_roots: Mapped[list[str]] = mapped_column(
-        "allowedRoots", JsonType, default=list
-    )
+    allowed_roots: Mapped[list[str]] = mapped_column("allowedRoots", JsonType, default=list)
     enabled: Mapped[bool] = mapped_column(default=True)
-    __table_args__ = (
-        Index("DesktopExecutor_userId_lastSeenAt_idx", "userId", "lastSeenAt"),
-    )
+    __table_args__ = (Index("DesktopExecutor_userId_lastSeenAt_idx", "userId", "lastSeenAt"),)
 
 
 class LocalToolCall(StringIdMixin, CreatedAtMixin, Base):

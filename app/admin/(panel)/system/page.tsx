@@ -173,14 +173,19 @@ function Field({
             </div>
 
             <div>
-                {setting.kind === 'choice' ? (
+                {setting.kind === 'choice' || setting.kind === 'bool' ? (
                     <select
                         id={setting.key}
                         value={shown}
                         onChange={event => onChange(event.target.value)}
                         className="w-full rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm text-ink"
                     >
-                        {setting.choices.map(choice => (
+                        {setting.kind === 'bool' ? (
+                            <>
+                                <option value="true">开启</option>
+                                <option value="false">关闭</option>
+                            </>
+                        ) : setting.choices.map(choice => (
                             <option key={choice} value={choice}>{choice}</option>
                         ))}
                     </select>

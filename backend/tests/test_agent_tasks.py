@@ -4,9 +4,10 @@ from sqlalchemy import func, select
 from app.conversations import ConversationService
 from app.memory import MemoryService
 from app.models import (
+    ChatMessage,
     ConversationSummary,
-    MemoryEmbedding,
-    MemoryItem,
+    MemoryRecord,
+    MemoryRecordEmbedding,
     User,
 )
 from app.queue import job_handlers
@@ -34,7 +35,12 @@ class FakeEmbeddingProvider:
 
 def test_worker_entrypoint_registers_background_handlers():
     assert procrastinate_app
-    assert {"conversation.summarize", "memory.extract", "profile.refresh"} <= job_handlers.keys()
+    assert {
+        "conversation.summarize",
+        "memory.extract",
+        "memory.extract.direct",
+        "profile.refresh",
+    } <= job_handlers.keys()
 
 
 def test_importance_accepts_model_labels_and_invalid_values():
@@ -60,6 +66,12 @@ async def test_summary_and_memory_extraction_handlers(session_maker):
         conversation = await service.create(db, user_id, title="test")
         await service.append_message(db, conversation, "user", "我最喜欢草莓蛋糕")
         await service.append_message(db, conversation, "assistant", "我记住了")
+        source_id = await db.scalar(
+            select(ChatMessage.id).where(
+                ChatMessage.conversation_id == conversation.id,
+                ChatMessage.role == "user",
+            )
+        )
 
     payload = {"conversation_id": conversation.id, "user_id": user_id}
     await handle_conversation_summary(
@@ -70,7 +82,10 @@ async def test_summary_and_memory_extraction_handlers(session_maker):
     await handle_memory_extraction(
         payload,
         FakeModel(
-            '[{"kind":"preference","content":"用户喜欢草莓蛋糕","importance":80}]'
+            '[{"memoryType":"preference",'
+            '"content":"用户喜欢草莓蛋糕",'
+            '"confidence":0.95,"importance":80,'
+            f'"sourceMessageIds":["{source_id}"]}}]'
         ),
         MemoryService(FakeEmbeddingProvider()),
         session_maker,
@@ -87,10 +102,8 @@ async def test_summary_and_memory_extraction_handlers(session_maker):
                 ConversationSummary.conversation_id == conversation.id
             )
         )
-        memory_count = await db.scalar(select(func.count()).select_from(MemoryItem))
-        embedding_count = await db.scalar(
-            select(func.count()).select_from(MemoryEmbedding)
-        )
+        memory_count = await db.scalar(select(func.count()).select_from(MemoryRecord))
+        embedding_count = await db.scalar(select(func.count()).select_from(MemoryRecordEmbedding))
         profile = await service.get_or_create_profile(db, user_id)
     assert summary.summary == "用户喜欢草莓蛋糕。"
     assert memory_count == 1

@@ -93,8 +93,8 @@ async def test_memory_service_embeds_and_retrieves(session_maker):
             db,
             user_id,
             MemoryCreate(
-                scope="owner",
-                kind="preference",
+                visibility="user_private",
+                memory_type="preference",
                 content="喜欢草莓蛋糕",
                 importance=80,
             ),
@@ -122,9 +122,9 @@ async def test_memory_service_rejects_another_users_companion(session_maker):
                 db,
                 owner_id,
                 MemoryCreate(
-                    scope="companion",
-                    companionId=other_companion.id,
-                    kind="fact",
+                    visibility="companion_relationship",
+                    companion_id=other_companion.id,
+                    memory_type="fact",
                     content="不应跨用户写入",
                 ),
             )
@@ -169,9 +169,7 @@ async def test_chat_stream_persists_messages_and_emits_contract(
 
     conversations = (await authenticated_client.get("/api/v1/conversations")).json()
     messages = (
-        await authenticated_client.get(
-            f"/api/v1/conversations/{conversations[0]['id']}/messages"
-        )
+        await authenticated_client.get(f"/api/v1/conversations/{conversations[0]['id']}/messages")
     ).json()
     assert [(message["role"], message["content"]) for message in messages] == [
         ("user", "你好"),
@@ -220,7 +218,8 @@ async def test_interrupted_agent_reply_is_persisted(session_maker):
     async with session_maker() as db:
         conversation = (await conversations.list(db, user_id))[0]
         messages = await conversations.messages(db, user_id, conversation.id)
-    assert "event: text.delta" in "".join(chunks)
+    # 未完成的一轮不会把未经回执校验的半句话流给用户。
+    assert "event: text.delta" not in "".join(chunks)
     assert "event: agent.task.failed" in "".join(chunks)
     assert [(message.role, message.content) for message in messages] == [
         ("user", "请回答"),
@@ -262,7 +261,12 @@ async def test_domain_tools_share_crud_services(session_maker):
     async with session_maker() as db:
         user_id = await db.scalar(select(User.id))
     runtime = SimpleNamespace(
-        context=SimpleNamespace(user_id=user_id, companion_id=None)
+        context=SimpleNamespace(
+            user_id=user_id,
+            companion_id=None,
+            conversation_id=None,
+            source_message_id=None,
+        )
     )
     created = await tools["site_resource_create"].coroutine(
         "plan",
@@ -272,16 +276,15 @@ async def test_domain_tools_share_crud_services(session_maker):
         },
         runtime,
     )
-    assert created["dueAt"].startswith("2026-07-28T20:00:00")
+    assert created["resource"]["dueAt"].startswith("2026-07-28T20:00:00")
+    assert created["actionReceipt"]["status"] == "committed"
     listed = await tools["site_resource_list"].coroutine("plan", runtime)
-    assert listed[0]["id"] == created["id"]
+    assert listed[0]["id"] == created["resource"]["id"]
     updated = await tools["site_resource_update"].coroutine(
         "plan",
-        created["id"],
+        created["resource"]["id"],
         {"completedAt": "2026-07-29T08:00:00+08:00"},
         runtime,
     )
-    assert updated["completedAt"] is not None
-    await tools["site_resource_delete"].coroutine(
-        "plan", created["id"], runtime
-    )
+    assert updated["resource"]["completedAt"] is not None
+    await tools["site_resource_delete"].coroutine("plan", created["resource"]["id"], runtime)

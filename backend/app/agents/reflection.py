@@ -1,7 +1,7 @@
 """Memory Reflection Agent —— 把经历沉淀成记忆（架构文档 §4.3 / §9）。
 
 后台低频消费 `CompanionPetEvent` 里 `processedAt IS NULL` 且重要度够高的记录，
-聚合去重后提炼成 `MemoryItem`。
+聚合去重后提炼成有证据链的 `MemoryRecord`。
 
 两条硬约束（架构文档 §7.3 / §9）：
 
@@ -37,12 +37,12 @@ logger = logging.getLogger(__name__)
 #: 同时有生产者和白名单条目，缺一样它就不会进记忆。
 MEANINGFUL_TYPES = frozenset(
     {
-        "interaction.milestone",     # 关系等级变化（usePetBrain）
-        "proactive.accepted",        # 主动搭话被接住了（FloatingPet）
-        "proactive.dismissed",       # 主动搭话被推开了（FloatingPet）
-        "task.highRisk",             # 高风险操作完成（agents/conversation）
-        "dailyQuestion.completed",   # 两人都答完了每日一问（api）
-        "wish.completed",            # 一起做到了一件想做的事（plan/WishSection）
+        "interaction.milestone",  # 关系等级变化（usePetBrain）
+        "proactive.accepted",  # 主动搭话被接住了（FloatingPet）
+        "proactive.dismissed",  # 主动搭话被推开了（FloatingPet）
+        "task.highRisk",  # 高风险操作完成（agents/conversation）
+        "dailyQuestion.completed",  # 两人都答完了每日一问（api）
+        "wish.completed",  # 一起做到了一件想做的事（plan/WishSection）
     }
 )
 
@@ -62,9 +62,7 @@ MEANINGFUL_TYPES = frozenset(
 #:   它的价值在**当下**（给 Cognition 一个关心的理由），不在回顾。
 #: - `chat.*` / `pet.action`：私聊内容属于两个人，不该被宠物二次转述成
 #:   「我记得你们那天吵架了」；宠物动作则是执行细节，不是经历。
-DELIBERATELY_FORGOTTEN = frozenset(
-    {"anniversary.due", "mood.checkIn", "pet.action"}
-)
+DELIBERATELY_FORGOTTEN = frozenset({"anniversary.due", "mood.checkIn", "pet.action"})
 
 #: 攒到这么多条待反思事件就触发一次反思。
 #: 太小会让每次反思只看到孤立的一两件事，提炼不出关系层面的东西；
@@ -108,13 +106,8 @@ def _message_text(response) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "".join(
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict)
-        )
+        return "".join(block.get("text", "") for block in content if isinstance(block, dict))
     return str(content)
-
 
 
 async def pending_events(
@@ -209,11 +202,24 @@ class ReflectionAgent:
             return []
 
         transcript = "\n".join(_describe(event) for event in events)
+        existing = await self.memory.list(
+            db,
+            companion.owner_id,
+            companion.id,
+            visibility="companion_relationship",
+            limit=8,
+        )
+        existing_context = await self.memory.format_context(db, existing)
         try:
             response = await self.model.ainvoke(
                 [
                     SystemMessage(content=SYSTEM_PROMPT),
-                    HumanMessage(content=transcript),
+                    HumanMessage(
+                        content=(
+                            f"已有关系记忆（用于避免重复和识别变化）：\n"
+                            f"{existing_context or '暂无'}\n\n新事件：\n{transcript}"
+                        )
+                    ),
                 ]
             )
             candidates = json.loads(_strip_fence(_message_text(response)))
@@ -233,15 +239,27 @@ class ReflectionAgent:
             content = str(candidate.get("content", "")).strip()
             if not content:
                 continue
+            kind = str(candidate.get("kind", "experience"))
+            memory_type = {
+                "experience": "episode",
+                "preference": "interaction_preference",
+                "relationship": "relationship",
+            }.get(kind, "episode")
             item = await self.memory.create(
                 db,
                 companion.owner_id,
                 MemoryCreate(
-                    scope="companion",
-                    companionId=companion.id,
-                    kind=str(candidate.get("kind", "experience"))[:40],
+                    visibility="companion_relationship",
+                    companion_id=companion.id,
+                    memory_type=memory_type,
                     content=content[:400],
                     importance=_clamp_importance(candidate.get("importance", 50)),
+                    confidence=0.9,
+                    subject_type="companion",
+                    subject_id=companion.id,
+                    source_type="pet_event",
+                    source_ids=[event.id for event in events],
+                    extractor_version="reflection-v2",
                 ),
                 embed=False,
             )
@@ -257,9 +275,7 @@ class ReflectionAgent:
         for event in events:
             event.processed_at = processed_at
         await db.commit()
-        logger.info(
-            "Reflection 消费 %s 条事件，写入 %s 条记忆", len(events), len(written)
-        )
+        logger.info("Reflection 消费 %s 条事件，写入 %s 条记忆", len(events), len(written))
         return written
 
 

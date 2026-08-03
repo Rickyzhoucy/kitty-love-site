@@ -3,7 +3,7 @@ import logging
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import Field as PydanticField
 from sqlalchemy import delete, func, or_, select
@@ -45,6 +45,10 @@ from app.direct_messages import (
     unread_count,
     verify_attachments,
 )
+from app.embeddings import (
+    OpenAICompatibleEmbeddingProvider,
+    UnavailableEmbeddingProvider,
+)
 from app.events import SSE_HEADERS, stream_outbox
 from app.future_letters import (
     create as create_letter,
@@ -55,7 +59,9 @@ from app.future_letters import (
     redact,
 )
 from app.localtime import local_today
+from app.memory import MemoryService
 from app.models import (
+    ActionReceipt,
     Attachment,
     AuthAttempt,
     ChatMessage,
@@ -64,7 +70,6 @@ from app.models import (
     CompanionPetProfile,
     DesktopExecutor,
     EventTimer,
-    MemoryItem,
     Message,
     Milestone,
     OutboxEvent,
@@ -86,6 +91,8 @@ from app.moods import (
 from app.moods import (
     upsert as upsert_mood,
 )
+from app.perception import current_session, upsert_session
+from app.perception import record_event as record_perception_event
 from app.pet_cognition import PetCognitionService
 from app.pet_mediation import run_mediation
 from app.pet_state import (
@@ -118,8 +125,14 @@ from app.schemas import (
     FutureLetterRead,
     LoginRequest,
     LoginResponse,
+    MemoryCorrect,
     MemoryCreate,
+    MemoryEvidenceRead,
+    MemoryMutationRead,
+    MemoryPreferenceRead,
+    MemoryPreferenceUpdate,
     MemoryRead,
+    MemoryRevisionRead,
     MessageCreate,
     MessageRead,
     MessageUpdate,
@@ -128,6 +141,10 @@ from app.schemas import (
     MilestoneUpdate,
     MoodBoardRead,
     MoodWrite,
+    PerceptionEventRead,
+    PerceptionEventWrite,
+    PerceptionSessionRead,
+    PerceptionSessionWrite,
     PersonaRead,
     PersonaUpdate,
     PetActionRead,
@@ -182,17 +199,11 @@ INLINE_ATTACHMENT_TYPES = ALLOWED_PHOTO_TYPES
 
 
 def attachment_response_headers(attachment: Attachment) -> dict[str, str]:
-    safe_filename = (
-        attachment.filename.replace("\r", "")
-        .replace("\n", "")
-        .replace('"', "'")
-    )
+    safe_filename = attachment.filename.replace("\r", "").replace("\n", "").replace('"', "'")
     inline = attachment.content_type.lower() in INLINE_ATTACHMENT_TYPES
     disposition = "inline" if inline else "attachment"
     return {
-        "response-content-disposition": (
-            f'{disposition}; filename="{safe_filename}"'
-        ),
+        "response-content-disposition": (f'{disposition}; filename="{safe_filename}"'),
         "response-content-type": (
             attachment.content_type if inline else "application/octet-stream"
         ),
@@ -221,9 +232,7 @@ async def attachment_response(
         parse_error=attachment.parse_error,
         download_url=f"/api/v1/attachments/{attachment.id}/content",
         thumbnail_url=(
-            f"/api/v1/attachments/{attachment.id}/thumbnail"
-            if attachment.thumbnail_key
-            else None
+            f"/api/v1/attachments/{attachment.id}/thumbnail" if attachment.thumbnail_key else None
         ),
     )
 
@@ -741,37 +750,259 @@ async def update_persona(data: PersonaUpdate, db: Db, user: CurrentUser):
     return persona
 
 
+def get_memory_service() -> MemoryService:
+    settings = get_settings()
+    provider = (
+        OpenAICompatibleEmbeddingProvider(settings)
+        if settings.embedding_api_key
+        else UnavailableEmbeddingProvider(settings.embedding_dimensions)
+    )
+    return MemoryService(provider)
+
+
+MemoryRuntime = Annotated[MemoryService, Depends(get_memory_service)]
+
+
 @router.get("/memories", response_model=list[MemoryRead])
 async def list_memories(
     db: Db,
     user: CurrentUser,
-    runtime: Runtime,
+    memory: MemoryRuntime,
     companion_id: str | None = None,
+    visibility: str | None = None,
+    memory_type: str | None = None,
+    status_filter: str = Query(default="active", alias="status"),
+    q: str = "",
 ):
-    return await runtime.memory.list(db, user.id, companion_id)
+    items = await memory.list(
+        db,
+        user.id,
+        companion_id,
+        visibility=visibility,
+        status=status_filter,
+    )
+    if memory_type:
+        items = [item for item in items if item.memory_type == memory_type]
+    if q:
+        normalized = q.casefold()
+        items = [item for item in items if normalized in item.content.casefold()]
+    return items
 
 
-@router.post("/memories", response_model=MemoryRead, status_code=status.HTTP_201_CREATED)
-async def create_memory(
+@router.post(
+    "/memories/explicit",
+    response_model=MemoryMutationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_explicit_memory(
     data: MemoryCreate,
     db: Db,
     user: CurrentUser,
-    runtime: Runtime,
+    memory: MemoryRuntime,
 ):
     try:
-        item = await runtime.memory.create(db, user.id, data, embed=False)
-        if runtime.job_queue is not None and runtime.embedding_enabled:
-            try:
-                await runtime.job_queue.enqueue(
-                    "memory.embed",
-                    {"memory_id": item.id},
-                    idempotency_key=item.id,
-                )
-            except Exception:
-                pass
-        return item
+        item, receipt = await memory.create_with_receipt(db, user.id, data)
+        return {"memory": item, "receipt": receipt}
     except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+
+@router.post("/memories/{memory_id}/correct", response_model=MemoryMutationRead)
+async def correct_memory(
+    memory_id: str,
+    data: MemoryCorrect,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    try:
+        item, receipt = await memory.correct(db, user.id, memory_id, data)
+        return {"memory": item, "receipt": receipt}
+    except LookupError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+
+@router.post("/memories/{memory_id}/retract", response_model=MemoryMutationRead)
+async def retract_memory(
+    memory_id: str,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    try:
+        item, receipt = await memory.retract(db, user.id, memory_id)
+        return {"memory": item, "receipt": receipt}
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
+
+@router.post("/memories/{memory_id}/restore", response_model=MemoryMutationRead)
+async def restore_memory(
+    memory_id: str,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    try:
+        item, receipt = await memory.restore(db, user.id, memory_id)
+        return {"memory": item, "receipt": receipt}
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+
+@router.post("/memories/{memory_id}/approve", response_model=MemoryMutationRead)
+async def approve_memory(
+    memory_id: str,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    try:
+        item, receipt = await memory.approve(db, user.id, memory_id)
+        return {"memory": item, "receipt": receipt}
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+
+@router.get("/memories/{memory_id}/evidence", response_model=list[MemoryEvidenceRead])
+async def memory_evidence(
+    memory_id: str,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    try:
+        return await memory.evidence(db, user.id, memory_id)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
+
+@router.get("/memories/{memory_id}/history", response_model=list[MemoryRevisionRead])
+async def memory_history(
+    memory_id: str,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    try:
+        return await memory.history(db, user.id, memory_id)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
+
+@router.post(
+    "/memories/{memory_id}/evidence/{evidence_id}/exclude",
+    response_model=MemoryMutationRead,
+)
+async def exclude_memory_evidence(
+    memory_id: str,
+    evidence_id: str,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    try:
+        item, receipt = await memory.exclude_evidence(db, user.id, memory_id, evidence_id)
+        return {"memory": item, "receipt": receipt}
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+
+
+@router.get("/memory-preferences", response_model=MemoryPreferenceRead)
+async def get_memory_preferences(
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    item = await memory.preference(db, user.id)
+    policy = await runtime_config.load_all(db)
+    return {
+        **MemoryPreferenceRead.model_validate(
+            {
+                "paused": item.paused,
+                "reference_enabled": item.reference_enabled,
+                "conversation_enabled": item.conversation_enabled,
+                "direct_message_enabled": item.direct_message_enabled,
+                "mood_enabled": item.mood_enabled,
+                "daily_question_enabled": item.daily_question_enabled,
+                "future_letter_enabled": item.future_letter_enabled,
+                "reference_available": policy["memory.reference_enabled"],
+                "private_extraction_available": policy["memory.private_extraction_enabled"],
+                "shared_extraction_available": policy["memory.shared_extraction_enabled"],
+            }
+        ).model_dump(),
+    }
+
+
+@router.patch("/memory-preferences", response_model=MemoryPreferenceRead)
+async def update_memory_preferences(
+    data: MemoryPreferenceUpdate,
+    db: Db,
+    user: CurrentUser,
+    memory: MemoryRuntime,
+):
+    item = await memory.preference(db, user.id)
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(item, key, value)
+    await db.commit()
+    await db.refresh(item)
+    policy = await runtime_config.load_all(db)
+    return {
+        "paused": item.paused,
+        "reference_enabled": item.reference_enabled,
+        "conversation_enabled": item.conversation_enabled,
+        "direct_message_enabled": item.direct_message_enabled,
+        "mood_enabled": item.mood_enabled,
+        "daily_question_enabled": item.daily_question_enabled,
+        "future_letter_enabled": item.future_letter_enabled,
+        "reference_available": policy["memory.reference_enabled"],
+        "private_extraction_available": policy["memory.private_extraction_enabled"],
+        "shared_extraction_available": policy["memory.shared_extraction_enabled"],
+    }
+
+
+@router.get("/actions/{receipt_id}")
+async def get_action_receipt(receipt_id: str, db: Db, user: CurrentUser):
+    receipt = await db.get(ActionReceipt, receipt_id)
+    if receipt is None or receipt.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "操作回执不存在")
+    return receipt
+
+
+@router.put("/perception/session", response_model=PerceptionSessionRead)
+async def write_perception_session(
+    data: PerceptionSessionWrite,
+    db: Db,
+    user: CurrentUser,
+):
+    return await upsert_session(db, user.id, data)
+
+
+@router.get("/perception/session/current", response_model=PerceptionSessionRead | None)
+async def read_current_perception_session(db: Db, user: CurrentUser):
+    return await current_session(db, user.id)
+
+
+@router.post(
+    "/perception/events",
+    response_model=PerceptionEventRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def write_perception_event(
+    data: PerceptionEventWrite,
+    db: Db,
+    user: CurrentUser,
+):
+    try:
+        return await record_perception_event(db, user.id, data)
+    except ValueError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
 
 
 def pet_view(companion: Companion, profile: CompanionPetProfile) -> dict[str, Any]:
@@ -884,6 +1115,7 @@ async def run_pet_cognition(
     data: PetCognitionRequest,
     db: Db,
     user: CurrentUser,
+    runtime: Runtime,
     service: Annotated[PetCognitionService, Depends(get_cognition_service)],
     response: Response,
 ):
@@ -901,6 +1133,28 @@ async def run_pet_cognition(
         partner_mood = await mood_of_partner(db, partner.id)
     except PartnerUnavailable:
         partner_mood = None
+    try:
+        assembled = await runtime.context_assembler.assemble(
+            db,
+            user.id,
+            companion.id,
+            query="\n".join(
+                part
+                for part in (
+                    data.page,
+                    data.active_task or "",
+                    " ".join(data.recent_interactions[-5:]),
+                )
+                if part
+            )
+            or "当前状态",
+            role="cognition",
+            limit=6,
+        )
+        await db.commit()
+    except Exception:
+        logger.info("Cognition 上下文组装失败，降级为空记忆", exc_info=True)
+        assembled = None
     proposal, rejection = await service.think(
         db,
         companion,
@@ -909,23 +1163,20 @@ async def run_pet_cognition(
             needs=data.needs,
             mood=data.mood,
             relationship=data.relationship,
-            page=data.page,
+            page=(assembled.page if assembled and assembled.page else data.page),
             local_time=data.local_time,
-            recent_interactions=data.recent_interactions,
-            # 直接查表而不是走 MemoryService：这里只要文本，不需要 embedding
-            # 检索，为此构造一个 provider 反而会把这条路径绑到 embedding 可用性上。
-            memories=list(
-                await db.scalars(
-                    select(MemoryItem.content)
-                    .where(
-                        MemoryItem.companion_id == companion.id,
-                        MemoryItem.owner_id == user.id,
+            recent_interactions=(
+                list(
+                    dict.fromkeys(
+                        [
+                            *data.recent_interactions,
+                            *(assembled.recent_interactions if assembled else []),
+                        ]
                     )
-                    .order_by(MemoryItem.importance.desc())
-                    .limit(6)
-                )
+                )[-8:]
             ),
-            active_task=data.active_task,
+            memories=([item.content for item in assembled.memories] if assembled else []),
+            active_task=(assembled.active_task if assembled else None) or data.active_task,
             proactive_budget_left=daily_proactive_budget(),
             partner_mood=partner_mood,
             # 近期纪念日。查一次表就有，宠物却因此能在纪念日前一周说人话，
@@ -977,9 +1228,7 @@ async def record_pet_event(
     # 队列锁按 companionId，已经排着的不会重复排；另有每日兜底扫描兜住
     # 那些永远攒不满一批的不活跃用户。
     queue = getattr(request.app.state, "job_queue", None)
-    if queue is not None and await pending_count(db, companion.id) >= (
-        REFLECTION_BATCH_TRIGGER
-    ):
+    if queue is not None and await pending_count(db, companion.id) >= (REFLECTION_BATCH_TRIGGER):
         try:
             await queue.enqueue(
                 "pet.reflect",
@@ -1075,6 +1324,16 @@ async def send_direct_message(
     )
     await db.commit()
     await db.refresh(message)
+    try:
+        queue = getattr(request.app.state, "job_queue", None)
+        if queue is not None:
+            await queue.enqueue(
+                "memory.extract.direct",
+                {"message_id": message.id},
+                idempotency_key=message.id,
+            )
+    except Exception:
+        logger.exception("私聊记忆提取没能排上队，消息照常发出")
     return message
 
 
@@ -1162,9 +1421,7 @@ async def answer_daily_question(
         me_companion, _ = await resolve_pet(db, user.id)
         partner_companion, _ = await resolve_pet(db, partner.id)
         payload = {"questionId": question.id, "prompt": question.prompt}
-        await record_event(
-            db, me_companion.id, "dailyQuestion.completed", payload, importance=65
-        )
+        await record_event(db, me_companion.id, "dailyQuestion.completed", payload, importance=65)
         await record_event(
             db, partner_companion.id, "dailyQuestion.completed", payload, importance=65
         )
@@ -1253,9 +1510,7 @@ async def write_letter(data: FutureLetterCreate, db: Db, user: CurrentUser):
         attachments = await verify_attachments(db, user.id, data.attachment_ids)
     except PartnerUnavailable as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
-    letter = await create_letter(
-        db, user.id, data.body.strip(), attachments, data.unlock_at
-    )
+    letter = await create_letter(db, user.id, data.body.strip(), attachments, data.unlock_at)
     await db.commit()
     await db.refresh(letter)
     # 刚写完必然是锁着的，所以这里返回的也没有正文——接口行为保持一致。
@@ -1344,6 +1599,7 @@ async def complete_upload(
     actual_sha256 = await storage.sha256(data.bucket, data.object_key)
     if actual_sha256.lower() != data.sha256.lower():
         raise HTTPException(status.HTTP_409_CONFLICT, "对象摘要与申报不一致")
+
     def metadata_matches(candidate: Attachment) -> bool:
         return (
             candidate.owner_id == user.id
@@ -1442,9 +1698,7 @@ async def attachment_content(
     attachment = await db.get(Attachment, attachment_id)
     if attachment is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "附件不存在")
-    linked_photo = await db.scalar(
-        select(Photo.id).where(Photo.attachment_id == attachment_id)
-    )
+    linked_photo = await db.scalar(select(Photo.id).where(Photo.attachment_id == attachment_id))
     if attachment.owner_id != user.id and linked_photo is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "附件不存在")
     return RedirectResponse(
@@ -1467,15 +1721,9 @@ async def attachment_thumbnail(
     storage: Storage,
 ) -> RedirectResponse:
     attachment = await db.get(Attachment, attachment_id)
-    if (
-        attachment is None
-        or attachment.derived_bucket is None
-        or attachment.thumbnail_key is None
-    ):
+    if attachment is None or attachment.derived_bucket is None or attachment.thumbnail_key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "缩略图不存在")
-    linked_photo = await db.scalar(
-        select(Photo.id).where(Photo.attachment_id == attachment_id)
-    )
+    linked_photo = await db.scalar(select(Photo.id).where(Photo.attachment_id == attachment_id))
     if attachment.owner_id != user.id and linked_photo is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "缩略图不存在")
     return RedirectResponse(
@@ -1526,7 +1774,9 @@ async def read_hero(db: Db, _: CurrentUser) -> dict[str, str | None]:
     """首页该用哪份素材。没配过就返回 null，前端回落到镜像自带的那份。"""
     values = await runtime_config.load_all(db)
     return {
-        slot: (f"/api/v1/site/hero/{slot}/content" if values[f"site.hero_{slot}_attachment"] else None)
+        slot: (
+            f"/api/v1/site/hero/{slot}/content" if values[f"site.hero_{slot}_attachment"] else None
+        )
         for slot in HERO_SLOTS
     }
 
@@ -1563,6 +1813,7 @@ async def read_hero_content(
 # ── Passkey（主站）──────────────────────────────────────────────────────
 #
 # 密码登录保留，这是加法。理由和大陆各平台的实际情况见 app/passkeys.py。
+
 
 class PasskeyFinish(ApiModel):
     challenge_id: str
@@ -1674,9 +1925,7 @@ class ExecutorResult(ApiModel):
 
 
 @router.post("/desktop/executors")
-async def register_executor(
-    data: ExecutorRegister, db: Db, user: CurrentUser
-) -> dict[str, Any]:
+async def register_executor(data: ExecutorRegister, db: Db, user: CurrentUser) -> dict[str, Any]:
     """注册这台电脑，或者续一次心跳。
 
     按 (用户, 机器名) 认同一台机器。用名字而不是随机 id，是为了让重装、
@@ -1697,9 +1946,7 @@ async def register_executor(
 
 
 @router.post("/desktop/executors/{executor_id}/claim")
-async def claim_local_call(
-    executor_id: str, db: Db, user: CurrentUser
-) -> dict[str, Any] | None:
+async def claim_local_call(executor_id: str, db: Db, user: CurrentUser) -> dict[str, Any] | None:
     """认领一条待办，**同时拿到参数**。
 
     参数只在这里给，不走 SSE：那条流是全局广播，没有按用户过滤，
@@ -1725,9 +1972,7 @@ async def submit_local_result(
     executor = await db.get(DesktopExecutor, executor_id)
     if executor is None or executor.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这台机器")
-    if not await local_executor.resolve(
-        db, executor_id, data.call_id, data.result, data.error
-    ):
+    if not await local_executor.resolve(db, executor_id, data.call_id, data.result, data.error):
         # 多半是已经超时被判失败了。不当成错误——桌面端晚回来一步很正常，
         # 它没有做错什么，只是这条已经不需要了。
         raise HTTPException(status.HTTP_409_CONFLICT, "这次调用已经结束了")

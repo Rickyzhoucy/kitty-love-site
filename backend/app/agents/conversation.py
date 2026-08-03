@@ -9,6 +9,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 from typing import Any, Protocol
 
 from langchain.agents import create_agent
@@ -34,10 +35,12 @@ from app.agent_tools import build_domain_tools
 from app.agents.reflection import record_event
 from app.agents.roles import AgentRole, filter_tools, spec_for, thread_id
 from app.config import Settings, get_settings
+from app.context_assembler import ContextAssembler
 from app.conversations import ConversationService
 from app.doc_tools import build_document_tools
 from app.embeddings import EmbeddingProvider
 from app.ids import new_id
+from app.local_tools import build_local_tools
 from app.memory import MemoryService
 from app.models import Attachment, ChatMessage
 from app.queue import JobQueue
@@ -47,23 +50,46 @@ from app.storage import ObjectStorage
 from app.tool_audit import build_tool_audit_middleware
 from app.web_search import build_search_provider
 from app.web_tools import build_web_tools
-from app.local_tools import build_local_tools
 from app.workspace_tools import build_workspace_tools
 
 logger = logging.getLogger(__name__)
+
+SUCCESS_CLAIM_PATTERN = re.compile(
+    r"(?:已经|已|帮你|替你).{0,10}(?:记录|记下|存档|保存|创建|新增|修改|删除|发送|完成)"
+)
+NEGATED_CLAIM_PATTERN = re.compile(
+    r"(?:没有|尚未|还没|不能|无法|未能).{0,12}(?:记录|记下|存档|保存|创建|新增|修改|删除|发送|完成)"
+)
+
+
+def guard_action_claims(answer: str, *, has_committed_receipt: bool) -> str:
+    """没有数据库提交回执时，完成式文本不得离开服务端。"""
+
+    if has_committed_receipt or not SUCCESS_CLAIM_PATTERN.search(answer):
+        return answer
+    if NEGATED_CLAIM_PATTERN.search(answer):
+        return answer
+    return "这次没有产生成功写入回执，所以我没有把它当成已完成。请确认后再试一次。"
 
 
 @dynamic_prompt
 def companion_prompt(request: ModelRequest) -> str:
     context: AgentContext = request.runtime.context
     profile = json.dumps(context.user_profile, ensure_ascii=False)
+    page_context = json.dumps(context.page_context, ensure_ascii=False)
     base_prompt = (
         f"{context.persona_prompt}\n\n"
         f"你的名字：{context.persona_name}\n"
         f"用户画像：{profile}\n"
         f"此前对话滚动摘要：{context.conversation_summary or '暂无'}\n"
         f"可用长期记忆：\n{context.memory_context or '暂无'}\n\n"
-        "只在确实需要查询或修改站内数据时调用工具；工具成功后直接说明结果。"
+        f"当前网站语义上下文：{page_context or '{}'}\n"
+        f"当前任务：{context.active_task or '暂无'}\n"
+        "长期记忆行里的 memory/source 标记是可追溯依据；不要编造不在其中的记忆。"
+        "用户问为什么记得时，按 source 类型和日期说明，不暴露内部 ID。\n"
+        "只在确实需要查询或修改站内数据时调用工具。"
+        "只有工具结果包含 status=committed 的 ActionReceipt 时，才能说已经记录、"
+        "已创建、已修改、已删除、已发送或已完成；没有回执就必须明确说尚未写入。"
     )
     return f"{base_prompt}{context.skill_context}"
 
@@ -268,6 +294,7 @@ class AgentRuntime:
         self.agent = agent
         self.session_maker = session_maker
         self.memory = MemoryService(embedding_provider)
+        self.context_assembler = ContextAssembler(self.memory)
         self.conversations = ConversationService()
         self.job_queue = job_queue
         self.settings = settings or get_settings()
@@ -332,7 +359,13 @@ class AgentRuntime:
         answer_parts: list[str],
         reason: str,
     ) -> None:
-        answer = "".join(answer_parts).strip() or "回复生成中断，请重试。"
+        answer = (
+            guard_action_claims(
+                "".join(answer_parts).strip(),
+                has_committed_receipt=False,
+            )
+            or "回复生成中断，请重试。"
+        )
         await self._persist_assistant(
             user_id,
             conversation_id,
@@ -357,18 +390,22 @@ class AgentRuntime:
                 conversation = await self.conversations.get(db, user_id, conversation_id)
             else:
                 conversation = await self.conversations.create(db, user_id)
-            attachments = list(
-                await db.scalars(
-                    select(Attachment).where(
-                        Attachment.id.in_(attachment_ids),
-                        Attachment.owner_id == user_id,
-                        Attachment.status == "ready",
+            attachments = (
+                list(
+                    await db.scalars(
+                        select(Attachment).where(
+                            Attachment.id.in_(attachment_ids),
+                            Attachment.owner_id == user_id,
+                            Attachment.status == "ready",
+                        )
                     )
                 )
-            ) if attachment_ids else []
+                if attachment_ids
+                else []
+            )
             if len(attachments) != len(attachment_ids):
                 raise ValueError("附件不存在或不属于当前用户")
-            await self.conversations.append_message(
+            user_message = await self.conversations.append_message(
                 db,
                 conversation,
                 "user",
@@ -378,16 +415,16 @@ class AgentRuntime:
             persona, profile = await self.conversations.context(db, conversation)
             summary = await self.conversations.summary(db, conversation.id)
             try:
-                memories = await self.memory.search(
+                assembled = await self.context_assembler.assemble(
                     db,
                     user_id,
-                    message,
                     conversation.companion_id,
+                    query=message,
+                    role="conversation",
                 )
             except Exception:
-                memories = (await self.memory.list(
-                    db, user_id, conversation.companion_id
-                ))[:8]
+                logger.info("上下文组装失败，降级为无长期记忆", exc_info=True)
+                assembled = None
             skill_metadata = await SkillRegistry(self.storage).active_metadata(db)
             context = AgentContext(
                 user_id=user_id,
@@ -397,13 +434,13 @@ class AgentRuntime:
                 persona_prompt=persona.prompt,
                 user_profile=profile,
                 conversation_summary=summary.summary if summary else "",
-                memory_context="\n".join(f"- {item.content}" for item in memories),
-                skill_context=skill_prompt(
-                    skill_metadata
-                ),
-                skill_versions={
-                    item["name"]: item["versionId"] for item in skill_metadata
-                },
+                memory_context=assembled.memory_context if assembled else "",
+                source_message_id=user_message.id,
+                page_context=assembled.page_context if assembled else {},
+                active_task=assembled.active_task if assembled else None,
+                memory_ids=([item.id for item in assembled.memories] if assembled else []),
+                skill_context=skill_prompt(skill_metadata),
+                skill_versions={item["name"]: item["versionId"] for item in skill_metadata},
             )
 
         answer_parts: list[str] = []
@@ -412,9 +449,7 @@ class AgentRuntime:
             "configurable": {
                 # 角色前缀不能省：三个角色共用一个 checkpointer，前缀相同
                 # 就会读到彼此的历史。
-                "thread_id": thread_id(
-                    AgentRole.CONVERSATION, conversation.id, checkpoint_segment
-                ),
+                "thread_id": thread_id(AgentRole.CONVERSATION, conversation.id, checkpoint_segment),
             }
         }
         model_content: str | list[dict[str, Any]] = message
@@ -429,9 +464,7 @@ class AgentRuntime:
                 )
                 blocks.append({"type": "text", "text": metadata_text})
                 if attachment.size > self.settings.chat_attachment_inline_bytes:
-                    blocks.append(
-                        {"type": "text", "text": "附件过大，仅提供以上元数据。"}
-                    )
+                    blocks.append({"type": "text", "text": "附件过大，仅提供以上元数据。"})
                     continue
                 content = await self.storage.get_bytes(
                     attachment.bucket,
@@ -443,16 +476,14 @@ class AgentRuntime:
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": (
-                                    f"data:{attachment.content_type};base64,{encoded}"
-                                )
+                                "url": (f"data:{attachment.content_type};base64,{encoded}")
                             },
                         }
                     )
                 elif attachment.content_type.startswith("text/"):
-                    text_content = content[
-                        : self.settings.chat_text_attachment_bytes
-                    ].decode("utf-8", errors="replace")
+                    text_content = content[: self.settings.chat_text_attachment_bytes].decode(
+                        "utf-8", errors="replace"
+                    )
                     blocks.append(
                         {
                             "type": "text",
@@ -460,13 +491,13 @@ class AgentRuntime:
                         }
                     )
                 elif attachment.extracted_text:
+                    extracted_content = attachment.extracted_text[
+                        : self.settings.chat_text_attachment_bytes
+                    ]
                     blocks.append(
                         {
                             "type": "text",
-                            "text": (
-                                "已解析附件内容：\n"
-                                f"{attachment.extracted_text[:self.settings.chat_text_attachment_bytes]}"
-                            ),
+                            "text": (f"已解析附件内容：\n{extracted_content}"),
                         }
                     )
                 else:
@@ -474,8 +505,7 @@ class AgentRuntime:
                         {
                             "type": "text",
                             "text": (
-                                f"附件解析状态：{attachment.parse_status}。"
-                                "如仍在处理，请稍后重试。"
+                                f"附件解析状态：{attachment.parse_status}。如仍在处理，请稍后重试。"
                             ),
                         }
                     )
@@ -499,6 +529,7 @@ class AgentRuntime:
         # 否则它只活在工具返回值里——前端翻历史时看不到，只能指望模型
         # 恰好把链接写进正文。
         produced_attachments: list[str] = []
+        committed_receipt_ids: list[str] = []
         try:
             yield task_sse("created")
             async for event in self.agent.astream_events(
@@ -516,7 +547,6 @@ class AgentRuntime:
                     delta = _text_content(event.get("data", {}).get("chunk"))
                     if delta:
                         answer_parts.append(delta)
-                        yield sse("text.delta", {"delta": delta})
                 elif event_name == "on_tool_start":
                     tool_name = event.get("name", "")
                     tool_input = event.get("data", {}).get("input")
@@ -533,6 +563,14 @@ class AgentRuntime:
                     output = _tool_output(event.get("data", {}).get("output"))
                     tool_name = event.get("name", "")
                     yield sse("tool.completed", {"name": tool_name, "output": output})
+                    if isinstance(output, dict):
+                        receipt = output.get("actionReceipt")
+                        if (
+                            isinstance(receipt, dict)
+                            and receipt.get("status") == "committed"
+                            and isinstance(receipt.get("id"), str)
+                        ):
+                            committed_receipt_ids.append(receipt["id"])
                     step = active_steps.pop(str(event.get("run_id", tool_name)), None)
                     attachment_id = _produced_attachment_id(tool_name, output)
                     if attachment_id:
@@ -546,7 +584,7 @@ class AgentRuntime:
                     yield task_sse("progress", step, step_sequence)
                     if step is not None and step.risk_level == "high":
                         # 高风险操作真的执行完了，这是值得记住的经历
-                        #（架构文档 §9）。只记语义摘要，不记 payload。
+                        # （架构文档 §9）。只记语义摘要，不记 payload。
                         high_risk_steps.append(step.safe_summary)
             stream_completed = True
         except asyncio.CancelledError:
@@ -586,13 +624,25 @@ class AgentRuntime:
                             extra={"conversation_id": conversation.id},
                         )
 
-        answer = "".join(answer_parts).strip()
+        answer = guard_action_claims(
+            "".join(answer_parts).strip(),
+            has_committed_receipt=bool(committed_receipt_ids),
+        )
+        if answer:
+            yield sse("text.delta", {"delta": answer})
         assistant_message, message_count = await self._persist_assistant(
             user_id,
             conversation.id,
             answer,
             metadata=(
-                {"attachmentIds": produced_attachments} if produced_attachments else None
+                {
+                    **({"attachmentIds": produced_attachments} if produced_attachments else {}),
+                    **(
+                        {"actionReceiptIds": committed_receipt_ids} if committed_receipt_ids else {}
+                    ),
+                }
+                if produced_attachments or committed_receipt_ids
+                else None
             ),
         )
         if high_risk_steps:
@@ -600,8 +650,7 @@ class AgentRuntime:
         if self.job_queue is not None:
             user_turn = (message_count + 1) // 2
             tasks = []
-            if self.embedding_enabled and (user_turn == 1 or user_turn % 5 == 0):
-                tasks.append(("memory.extract", user_turn // 5))
+            tasks.append(("memory.extract", user_message.id))
             if user_turn % 20 == 0:
                 tasks.extend(
                     [

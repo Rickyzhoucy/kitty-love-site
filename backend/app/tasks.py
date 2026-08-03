@@ -7,25 +7,32 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app import runtime_config
 from app.agents.conversation import build_agent, build_chat_model
 from app.agents.reflection import ReflectionAgent, companions_with_pending
 from app.agents.roles import AgentRole
 from app.anniversaries import ANNIVERSARY_EVENT, deliver_due, scan_anniversaries
 from app.attachment_processing import extract_text, thumbnail_webp
 from app.config import get_settings
+from app.context_assembler import ContextAssembler
 from app.db import session_factory
-from app.embeddings import OpenAICompatibleEmbeddingProvider
+from app.embeddings import OpenAICompatibleEmbeddingProvider, UnavailableEmbeddingProvider
 from app.future_letters import LETTER_EVENT, announce_unlocked
 from app.memory import MemoryService
+from app.memory_extraction import extract_with_langmem
 from app.models import (
     Attachment,
     ChatMessage,
     Companion,
     Conversation,
     ConversationSummary,
-    MemoryItem,
+    DirectMessage,
+    MemoryIngestionCursor,
+    MemoryPreference,
+    MemoryRecord,
     User,
     UserProfile,
+    utcnow,
 )
 from app.queue import ProcrastinateJobQueue, procrastinate_app, register_job
 from app.schemas import MemoryCreate
@@ -39,11 +46,7 @@ def _message_text(response) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "".join(
-            block.get("text", "")
-            for block in content
-            if isinstance(block, dict)
-        )
+        return "".join(block.get("text", "") for block in content if isinstance(block, dict))
     return str(content)
 
 
@@ -100,19 +103,12 @@ async def handle_conversation_summary(
                     tuple_(ChatMessage.created_at, ChatMessage.id)
                     > tuple_(previous_message.created_at, previous_message.id)
                 )
-        messages = list(
-            await db.scalars(query)
-        )
+        messages = list(await db.scalars(query))
         previous_summary = summary.summary if summary else ""
     if not messages:
         return
-    transcript = "\n".join(
-        f"{message.role}: {message.content}" for message in messages
-    )
-    prompt = (
-        f"现有摘要：\n{previous_summary or '暂无'}\n\n"
-        f"新增对话：\n{transcript}"
-    )
+    transcript = "\n".join(f"{message.role}: {message.content}" for message in messages)
+    prompt = f"现有摘要：\n{previous_summary or '暂无'}\n\n新增对话：\n{transcript}"
     response = await model.ainvoke(
         [
             SystemMessage(
@@ -177,9 +173,7 @@ async def handle_profile_refresh(
         current_profile = profile.profile if profile else {}
     if not messages:
         return
-    transcript = "\n".join(
-        f"{message.role}: {message.content}" for message in reversed(messages)
-    )
+    transcript = "\n".join(f"{message.role}: {message.content}" for message in reversed(messages))
     response = await model.ainvoke(
         [
             SystemMessage(
@@ -232,55 +226,406 @@ async def handle_memory_extraction(
     conversation_id = str(payload["conversation_id"])
     user_id = str(payload["user_id"])
     async with maker() as db:
-        messages = list(
-            await db.scalars(
-                select(ChatMessage)
-                .where(ChatMessage.conversation_id == conversation_id)
-                .order_by(ChatMessage.created_at.desc())
-                .limit(12)
+        conversation = await db.get(Conversation, conversation_id)
+        if conversation is None or conversation.user_id != user_id:
+            return
+        preference = await db.scalar(
+            select(MemoryPreference).where(MemoryPreference.user_id == user_id)
+        )
+        memory_policy = await runtime_config.load_all(db)
+        cursor = await db.scalar(
+            select(MemoryIngestionCursor).where(
+                MemoryIngestionCursor.source_type == "conversation",
+                MemoryIngestionCursor.source_id == conversation_id,
             )
         )
-        conversation = await db.get(Conversation, conversation_id)
-    if not messages or conversation is None:
+        query = (
+            select(ChatMessage)
+            .where(
+                ChatMessage.conversation_id == conversation_id,
+                ChatMessage.memory_excluded.is_(False),
+            )
+            .order_by(ChatMessage.created_at, ChatMessage.id)
+            .limit(40)
+        )
+        if cursor and cursor.last_message_id:
+            previous = await db.get(ChatMessage, cursor.last_message_id)
+            if previous is not None:
+                query = query.where(
+                    tuple_(ChatMessage.created_at, ChatMessage.id)
+                    > tuple_(previous.created_at, previous.id)
+                )
+        messages = list(await db.scalars(query))
+    if not messages:
+        return
+    user_messages = [message for message in messages if message.role == "user"]
+    if not user_messages:
+        return
+    if not memory_policy["memory.private_extraction_enabled"] or (
+        preference and (preference.paused or not preference.conversation_enabled)
+    ):
+        await _advance_memory_cursor(
+            maker,
+            conversation.space_id,
+            "conversation",
+            conversation_id,
+            messages[-1].id,
+        )
         return
     transcript = "\n".join(
-        f"{message.role}: {message.content}" for message in reversed(messages)
+        f"[{message.id}][{message.role}] {message.content}" for message in messages
     )
-    response = await model.ainvoke(
-        [
-            SystemMessage(
-                content=(
-                    "从对话提取值得长期记住的稳定事实。仅输出 JSON 数组，"
-                    "元素格式为 {kind,content,importance}；没有则输出 []。"
-                )
-            ),
-            HumanMessage(content=transcript),
-        ]
+    candidates = await extract_with_langmem(
+        model,
+        transcript,
+        instructions=(
+            "Private user-to-companion conversation. Extract facts only from user "
+            "messages. All accepted memories will be user_private."
+        ),
     )
-    raw = _message_text(response).strip().removeprefix("```json").removesuffix("```").strip()
-    try:
-        candidates = json.loads(raw)
-    except json.JSONDecodeError:
+    if candidates is None:
+        response = await model.ainvoke(
+            [
+                SystemMessage(
+                    content=(
+                        "从私人宠物对话中提取值得跨会话使用的长期记忆候选。"
+                        "只把 user 消息当事实证据，assistant 只帮助理解指代。"
+                        "绝不提取本机路径、授权目录、工作区、文件全文、命令输出、"
+                        "密码、token、工具状态或模型自己声称已完成的事。"
+                        "只输出 JSON 数组；每项格式为 "
+                        "{memoryType,content,confidence,importance,sensitivity,"
+                        "subjectType,subjectId,predicate,objectJson,sourceMessageIds}。"
+                        "memoryType 只能是 fact/preference/commitment/episode/"
+                        "interaction_preference/relationship；没有则输出 []。"
+                    )
+                ),
+                HumanMessage(content=transcript),
+            ]
+        )
+        raw = _message_text(response).strip().removeprefix("```json").removesuffix("```").strip()
+        try:
+            candidates = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+    if not isinstance(candidates, list):
         return
+    allowed_sources = {message.id for message in user_messages}
     async with maker() as db:
-        for candidate in candidates[:10]:
+        for candidate in candidates[: int(memory_policy["memory.max_candidates_per_batch"])]:
             if not isinstance(candidate, dict) or not candidate.get("content"):
                 continue
-            item = await memory.create(
-                db,
-                user_id,
-                MemoryCreate(
-                    scope="owner",
-                    companion_id=conversation.companion_id,
-                    kind=str(candidate.get("kind", "fact"))[:40],
-                    content=str(candidate["content"]),
-                    importance=_importance(candidate.get("importance", 50)),
-                    source_message_ids=[message.id for message in messages],
-                ),
-                embed=False,
+            confidence = _confidence(candidate.get("confidence", 0.0))
+            if confidence < float(memory_policy["memory.min_candidate_confidence"]):
+                continue
+            source_ids = [
+                str(item)
+                for item in candidate.get("sourceMessageIds", [])
+                if str(item) in allowed_sources
+            ]
+            if not source_ids:
+                continue
+            try:
+                item = await memory.create(
+                    db,
+                    user_id,
+                    MemoryCreate(
+                        visibility="user_private",
+                        companion_id=None,
+                        memory_type=str(candidate.get("memoryType", "fact")),
+                        content=str(candidate["content"]),
+                        confidence=confidence,
+                        importance=_importance(candidate.get("importance", 50)),
+                        sensitivity=str(candidate.get("sensitivity", "normal")),
+                        subject_type=str(candidate.get("subjectType", "user"))[:32],
+                        subject_id=(
+                            str(candidate["subjectId"])[:32]
+                            if candidate.get("subjectId")
+                            else user_id
+                        ),
+                        predicate=(
+                            str(candidate["predicate"])[:120]
+                            if candidate.get("predicate")
+                            else None
+                        ),
+                        object_json=(
+                            candidate.get("objectJson")
+                            if isinstance(candidate.get("objectJson"), dict)
+                            else None
+                        ),
+                        source_type="chat_message",
+                        source_ids=source_ids,
+                        extractor_version="conversation-v2",
+                    ),
+                    embed=False,
+                )
+                try:
+                    await memory.embed_item(db, item)
+                except Exception:
+                    logger.info("记忆向量生成失败，保留词法记忆", exc_info=True)
+                await db.commit()
+            except (ValueError, TypeError):
+                logger.info("记忆候选被策略或 Schema 拒绝", exc_info=True)
+                await db.rollback()
+        await _upsert_cursor(
+            db,
+            conversation.space_id,
+            "conversation",
+            conversation_id,
+            messages[-1].id,
+        )
+        await db.commit()
+
+
+def _confidence(value: Any) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def _upsert_cursor(
+    db: AsyncSession,
+    space_id: str,
+    source_type: str,
+    source_id: str,
+    last_message_id: str,
+) -> None:
+    cursor = await db.scalar(
+        select(MemoryIngestionCursor).where(
+            MemoryIngestionCursor.source_type == source_type,
+            MemoryIngestionCursor.source_id == source_id,
+        )
+    )
+    if cursor is None:
+        db.add(
+            MemoryIngestionCursor(
+                space_id=space_id,
+                source_type=source_type,
+                source_id=source_id,
+                last_message_id=last_message_id,
+                last_processed_at=utcnow(),
+                extractor_version="memory-v2",
             )
-            await memory.embed_item(db, item)
-            await db.commit()
+        )
+    else:
+        cursor.last_message_id = last_message_id
+        cursor.last_processed_at = utcnow()
+        cursor.extractor_version = "memory-v2"
+
+
+async def _advance_memory_cursor(
+    maker: async_sessionmaker[AsyncSession],
+    space_id: str,
+    source_type: str,
+    source_id: str,
+    last_message_id: str,
+) -> None:
+    async with maker() as db:
+        await _upsert_cursor(db, space_id, source_type, source_id, last_message_id)
+        await db.commit()
+
+
+@register_job("memory.extract.direct")
+async def extract_direct_message_memories(payload: dict) -> None:
+    await handle_direct_message_memory_extraction(
+        payload,
+        build_chat_model(get_settings()),
+        MemoryService(OpenAICompatibleEmbeddingProvider(get_settings())),
+        session_factory,
+    )
+
+
+async def handle_direct_message_memory_extraction(
+    payload: dict,
+    model: Any,
+    memory: MemoryService,
+    maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """Extract shared memories only from attributable, eligible direct messages."""
+
+    message_id = str(payload["message_id"])
+    async with maker() as db:
+        trigger = await db.get(DirectMessage, message_id)
+        if trigger is None:
+            return
+        memory_policy = await runtime_config.load_all(db)
+        cursor = await db.scalar(
+            select(MemoryIngestionCursor).where(
+                MemoryIngestionCursor.source_type == "direct_thread",
+                MemoryIngestionCursor.source_id == trigger.space_id,
+            )
+        )
+        query = (
+            select(DirectMessage)
+            .where(
+                DirectMessage.space_id == trigger.space_id,
+                DirectMessage.memory_excluded.is_(False),
+            )
+            .order_by(DirectMessage.created_at, DirectMessage.id)
+            .limit(60)
+        )
+        if cursor and cursor.last_message_id:
+            previous = await db.get(DirectMessage, cursor.last_message_id)
+            if previous is not None:
+                query = query.where(
+                    tuple_(DirectMessage.created_at, DirectMessage.id)
+                    > tuple_(previous.created_at, previous.id)
+                )
+        messages = list(await db.scalars(query))
+        participant_ids = {
+            participant
+            for message in messages
+            for participant in (message.sender_id, message.recipient_id)
+        }
+        preferences = {
+            item.user_id: item
+            for item in await db.scalars(
+                select(MemoryPreference).where(MemoryPreference.user_id.in_(participant_ids))
+            )
+        }
+    if not messages:
+        return
+
+    if not memory_policy["memory.shared_extraction_enabled"]:
+        await _advance_memory_cursor(
+            maker,
+            trigger.space_id,
+            "direct_thread",
+            trigger.space_id,
+            messages[-1].id,
+        )
+        return
+
+    eligible = [
+        message
+        for message in messages
+        if not (
+            (preference := preferences.get(message.sender_id))
+            and (preference.paused or not preference.direct_message_enabled)
+        )
+    ]
+    if not eligible:
+        await _advance_memory_cursor(
+            maker,
+            trigger.space_id,
+            "direct_thread",
+            trigger.space_id,
+            messages[-1].id,
+        )
+        return
+
+    transcript = "\n".join(
+        f"[{message.id}][speaker:{message.sender_id}] {message.body}"
+        for message in eligible
+        if message.body.strip()
+    )
+    if not transcript:
+        return
+    candidates = await extract_with_langmem(
+        model,
+        transcript,
+        instructions=(
+            "Two-person direct-message thread. All accepted memories are "
+            "couple_shared. speaker_user_id is required. A commitment requires "
+            "source messages authored by both participants."
+        ),
+    )
+    if candidates is None:
+        response = await model.ainvoke(
+            [
+                SystemMessage(
+                    content=(
+                        "从两个人的私聊中提取值得长期共享的事实、偏好、共同约定和经历。"
+                        "每项必须能追溯到真实发送者；不要把宠物或模型的话当证据。"
+                        "commitment 必须有双方各自的消息证据，否则不要提取。"
+                        "绝不提取本机路径、授权目录、工作区、文件全文、命令输出、密码、"
+                        "token 或工具状态。只输出 JSON 数组；每项格式为 "
+                        "{memoryType,content,confidence,importance,sensitivity,"
+                        "subjectType,subjectId,predicate,objectJson,speakerUserId,"
+                        "sourceMessageIds}。"
+                    )
+                ),
+                HumanMessage(content=transcript),
+            ]
+        )
+        raw = _message_text(response).strip().removeprefix("```json").removesuffix("```").strip()
+        try:
+            candidates = json.loads(raw)
+        except json.JSONDecodeError:
+            return
+    if not isinstance(candidates, list):
+        return
+
+    by_id = {message.id: message for message in eligible}
+    async with maker() as db:
+        for candidate in candidates[: int(memory_policy["memory.max_candidates_per_batch"])]:
+            if not isinstance(candidate, dict) or not candidate.get("content"):
+                continue
+            confidence = _confidence(candidate.get("confidence"))
+            if confidence < float(memory_policy["memory.min_candidate_confidence"]):
+                continue
+            source_ids = list(
+                dict.fromkeys(
+                    str(source_id)
+                    for source_id in candidate.get("sourceMessageIds", [])
+                    if str(source_id) in by_id
+                )
+            )
+            speaker_id = str(candidate.get("speakerUserId") or "")
+            source_speakers = {by_id[source_id].sender_id for source_id in source_ids}
+            if not source_ids or speaker_id not in source_speakers:
+                continue
+            memory_type = str(candidate.get("memoryType", "fact"))
+            if memory_type == "commitment" and len(source_speakers) < 2:
+                continue
+            try:
+                item = await memory.create(
+                    db,
+                    speaker_id,
+                    MemoryCreate(
+                        visibility="couple_shared",
+                        memory_type=memory_type,
+                        content=str(candidate["content"]),
+                        confidence=confidence,
+                        importance=_importance(candidate.get("importance", 50)),
+                        sensitivity=str(candidate.get("sensitivity", "normal")),
+                        subject_type=str(candidate.get("subjectType", "couple"))[:32],
+                        subject_id=(
+                            str(candidate["subjectId"])[:32] if candidate.get("subjectId") else None
+                        ),
+                        predicate=(
+                            str(candidate["predicate"])[:120]
+                            if candidate.get("predicate")
+                            else None
+                        ),
+                        object_json=(
+                            candidate.get("objectJson")
+                            if isinstance(candidate.get("objectJson"), dict)
+                            else None
+                        ),
+                        source_type="direct_message",
+                        source_ids=source_ids,
+                        extractor_version="direct-message-v2",
+                    ),
+                    embed=False,
+                )
+                if item.status == "active":
+                    try:
+                        await memory.embed_item(db, item)
+                    except Exception:
+                        logger.info("共享记忆向量生成失败，保留词法记忆", exc_info=True)
+                await db.commit()
+            except (ValueError, TypeError):
+                logger.info("共享记忆候选被策略或 Schema 拒绝", exc_info=True)
+                await db.rollback()
+        await _upsert_cursor(
+            db,
+            trigger.space_id,
+            "direct_thread",
+            trigger.space_id,
+            messages[-1].id,
+        )
+        await db.commit()
 
 
 @register_job("pet.reflect")
@@ -387,7 +732,7 @@ async def sweep_pending_reflections(timestamp: int) -> None:
 async def embed_memory(payload: dict) -> None:
     memory = MemoryService(OpenAICompatibleEmbeddingProvider(get_settings()))
     async with session_factory() as db:
-        item = await db.get(MemoryItem, str(payload["memory_id"]))
+        item = await db.get(MemoryRecord, str(payload["memory_id"]))
         if item is None:
             return
         await memory.embed_item(db, item)
@@ -410,9 +755,7 @@ async def process_attachment(payload: dict) -> None:
                 attachment.filename,
                 max_chars=settings.attachment_extracted_text_chars,
                 max_pdf_pages=settings.attachment_max_pdf_pages,
-                max_office_uncompressed_bytes=(
-                    settings.attachment_max_office_uncompressed_bytes
-                ),
+                max_office_uncompressed_bytes=(settings.attachment_max_office_uncompressed_bytes),
                 max_workbook_sheets=settings.attachment_max_workbook_sheets,
                 max_workbook_rows=settings.attachment_max_workbook_rows,
                 max_workbook_cells=settings.attachment_max_workbook_cells,
@@ -423,14 +766,10 @@ async def process_attachment(payload: dict) -> None:
             attachment.parse_error = str(error)[:2000]
             await db.commit()
             return
-        attachment.extracted_text = (
-            extracted if extracted is not None else None
-        )
+        attachment.extracted_text = extracted if extracted is not None else None
         if thumbnail is not None:
             attachment.derived_bucket = settings.minio_derived_bucket
-            attachment.thumbnail_key = (
-                f"{attachment.owner_id}/{attachment.id}/thumbnail.webp"
-            )
+            attachment.thumbnail_key = f"{attachment.owner_id}/{attachment.id}/thumbnail.webp"
             await storage.put_bytes(
                 attachment.derived_bucket,
                 attachment.thumbnail_key,
@@ -438,9 +777,7 @@ async def process_attachment(payload: dict) -> None:
                 "image/webp",
             )
         attachment.parse_status = (
-            "ready"
-            if extracted is not None or thumbnail is not None
-            else "unsupported"
+            "ready" if extracted is not None or thumbnail is not None else "unsupported"
         )
         attachment.parse_error = None
         await db.commit()
@@ -486,9 +823,19 @@ async def handle_chat_assist(
         if asker is None:
             return
         request = await prepare(db, asker, partner_id, pet_name, body)
+        companion, _ = await resolve_pet(db, asker_id)
+        assembled = await ContextAssembler(
+            MemoryService(UnavailableEmbeddingProvider(1024))
+        ).assemble(
+            db,
+            asker_id,
+            companion.id,
+            query=request.question,
+            role="assist",
+            limit=6,
+        )
 
         if agent is not None:
-            companion, _ = await resolve_pet(db, asker_id)
             await db.commit()
             context = AgentContext(
                 user_id=asker_id,
@@ -502,7 +849,10 @@ async def handle_chat_assist(
                 persona_prompt="",
                 user_profile={},
                 conversation_summary="",
-                memory_context="",
+                memory_context=assembled.memory_context,
+                page_context=assembled.page,
+                active_task=assembled.active_task,
+                memory_ids=[item.id for item in assembled.memories],
             )
             reply = await answer_with_tools(agent, request, pet_name, context)
         else:
