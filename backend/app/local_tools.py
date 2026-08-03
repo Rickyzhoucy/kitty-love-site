@@ -1,14 +1,21 @@
-"""让宠物读用户自己电脑上的文件。**只读。**
+"""让宠物读写用户自己电脑上的文件，以及在授权目录里跑命令。
 
 ## 和工作区工具的区别
 
 `workspace_*` 操作的是服务器沙箱里那块草稿纸——写坏了最多丢掉草稿。
 `local_*` 碰的是**用户真实的家目录**，所以规矩完全不同：
 
-- 只有读，没有写、没有执行（那是三期，要带审批）
-- 白名单**在用户那台电脑上校验**，不在这里。服务端这份名单只用于展示。
+- 白名单**在用户那台电脑上校验**，不在这里。服务端那份名单只用于展示。
   把闸门放在可能被提示注入影响的一侧，那不叫闸门
+- 读可以自动；**写和执行每次都会在用户机器上弹系统确认框**，
+  他同意了才真的发生，而且写之前会先备份
 - 电脑不在线是常态，不是错误——文案要能直接给模型看
+
+## 改文件优先用 edit / append，不要整个覆盖
+
+`local_write` 会把原内容整个换掉。「读出来 → 改几个字 → 整份写回去」
+这条路很容易在中间丢掉原文的某些部分，而那种丢失事后很难发现。
+工具描述里也是这么写的——模型选哪个工具，基本上就取决于那几句话。
 
 ## 为什么工具描述里要写清"用户自己的电脑"
 
@@ -72,7 +79,11 @@ def build_local_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
 
     @tool("local_write")
     async def local_write(path: str, content: str, runtime: ToolRuntime) -> Any:
-        """在**用户自己电脑上**写一个文本文件（新建或覆盖）。
+        """在**用户自己电脑上**写一个文本文件（新建或**整个覆盖**）。
+
+        **改已有文件优先用 local_edit（精确替换）或 local_append（追加）。**
+        这个工具会把原内容整个换掉——读出来、改几个字、再整份写回去的做法，
+        很容易在中间把原文的某些部分弄丢，而那种丢失很难被发现。
 
         **每一次都会弹出系统确认框给用户看**，显示完整路径和内容开头——
         你写的东西他会先过目。被拒绝时直接说明，不要换个路径重试。
@@ -80,6 +91,36 @@ def build_local_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         覆盖已有文件时原文件会自动备份，可以找回。只能写在授权目录里。
         """
         return await run(runtime, "local_write", path=path, content=content)
+
+    @tool("local_append")
+    async def local_append(path: str, content: str, runtime: ToolRuntime) -> Any:
+        """在**用户自己电脑上**某个文件的末尾追加内容。
+
+        原文件不以换行结尾时会自动补一个，追加的内容不会黏在最后一行后面。
+        文件不存在就等同于新建。
+
+        记流水账、往清单里加一条，用这个——比读出来再整个写回去安全得多，
+        中间不会把原有内容弄丢。
+        """
+        return await run(runtime, "local_append", path=path, content=content)
+
+    @tool("local_edit")
+    async def local_edit(
+        path: str, old_text: str, new_text: str, runtime: ToolRuntime
+    ) -> Any:
+        """改**用户自己电脑上**某个文件里的一段内容（精确替换）。
+
+        **先用 local_read 看过原文再改，不要凭印象。**
+        `old_text` 必须和文件里的原文一字不差，而且**在整个文件里只能出现一次**
+        ——出现多次会被拒绝，那时候把 `old_text` 取长一点（多带上下几行），
+        让它只匹配你要改的那一处。
+
+        这是改文件的**首选方式**：只动该动的那几行，文件其余部分原样不动。
+        整个覆盖（local_write）只在重写整份内容时才用。
+        """
+        return await run(
+            runtime, "local_edit", path=path, old_text=old_text, new_text=new_text
+        )
 
     @tool("local_run")
     async def local_run(
@@ -119,6 +160,8 @@ def build_local_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         local_search,
         local_info,
         local_write,
+        local_append,
+        local_edit,
         local_run,
         local_roots,
     ]

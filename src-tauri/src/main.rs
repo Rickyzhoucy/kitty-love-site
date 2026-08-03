@@ -241,7 +241,16 @@ fn run_local_tool(
         "local_info" => {
             local_fs::info(&roots, &arg("path")).map(|item| serde_json::json!({ "info": item }))
         }
-        "local_write" => write_with_consent(&app, &roots, &arg("path"), &arg("content")),
+        "local_write" => change_with_consent(
+            &app, &roots, &arg("path"), local_fs::Change::Overwrite, &arg("content"), "",
+        ),
+        "local_append" => change_with_consent(
+            &app, &roots, &arg("path"), local_fs::Change::Append, &arg("content"), "",
+        ),
+        "local_edit" => change_with_consent(
+            &app, &roots, &arg("path"), local_fs::Change::Edit,
+            &arg("old_text"), &arg("new_text"),
+        ),
         "local_run" => {
             // argv 数组，不是一个命令行字符串——见 run_command_with_consent。
             let args: Vec<String> = arguments
@@ -265,52 +274,46 @@ fn run_local_tool(
     outcome
 }
 
-/// 写文件。**每一次都弹系统确认框，没有「永久允许」。**
+/// 改一个文件——覆盖、追加、或按内容精确替换。
 ///
-/// 这是整个本地能力里唯一不可逆的一步，所以三道闸：
+/// **三种改法走同一条路**：算出新内容 → 弹系统确认框 → 备份 → 写。
+/// 分成三个函数的话，「备份」和「确认」这两道闸就有了三份实现，
+/// 而漏掉其中一处不会有任何报错，只会在某天悄悄少备份一次。
 ///
-/// 1. **路径**：父目录必须在白名单里，文件名不许带分隔符（见 resolve_for_write）；
-/// 2. **人**：系统原生确认框，显示完整路径和内容开头。用原生而不是网页弹窗，
-///    是因为发起方就是那个网页层——让被审查的一方自己画审查界面没有意义；
-/// 3. **可撤销**：覆盖前先把原文件备份到本机回收站。
-///
-/// 没做「10 分钟内允许」那类会话授权：读可以自动，写每次都该看一眼。
-/// 一个能连写二十个文件而只问一次的宠物，和没有闸门差别不大。
-fn write_with_consent(
+/// 确认框用系统原生的：发起方就是那个网页层，让被审查的一方自己画审查界面
+/// 没有意义。没有「10 分钟内允许」——改文件每次都该看一眼。
+fn change_with_consent(
     app: &AppHandle,
     roots: &[String],
     path: &str,
-    content: &str,
+    change: local_fs::Change,
+    a: &str,
+    b: &str,
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-    let target = local_fs::resolve_for_write(roots, path)?;
-    let existed = target.exists();
-    let preview: String = content.chars().take(400).collect();
-    let ellipsis = if content.chars().count() > 400 { "\n…" } else { "" };
-    let headline = if existed { "覆盖这个文件？" } else { "新建这个文件？" };
+    let (target, planned) = local_fs::plan_change(roots, path, change, a, b)?;
 
     let approved = app
         .dialog()
         .message(format!(
-            "{}\n\n{}\n\n{} 字符{}\n\n内容开头：\n{preview}{ellipsis}",
+            "{}\n\n{}\n\n{}",
             target.display(),
-            if existed { "原文件会先备份到回收站，可以找回。" } else { "这是一个新文件。" },
-            content.chars().count(),
-            if existed { "（覆盖）" } else { "" },
+            if planned.existed {
+                "原文件会先备份到回收站，可以找回。"
+            } else {
+                "这是一个新文件。"
+            },
+            planned.preview,
         ))
-        .title(headline)
+        .title(planned.title)
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(
-            (if existed { "覆盖" } else { "创建" }).into(),
-            "取消".into(),
-        ))
+        .buttons(MessageDialogButtons::OkCancelCustom("执行".into(), "取消".into()))
         .blocking_show();
 
     if !approved {
-        // 拒绝要让模型明确知道是**人**拒绝的，不是路径不对——
-        // 否则它会换个路径反复试。
-        return Err("你拒绝了这次写入。".into());
+        // 让模型明确知道是**人**拒绝的，不是路径不对——否则它会换个写法反复试。
+        return Err("你拒绝了这次改动。".into());
     }
 
     let backup = app
@@ -319,10 +322,10 @@ fn write_with_consent(
         .ok()
         .and_then(|dir| local_fs::backup_before_write(&dir, &target));
 
-    std::fs::write(&target, content).map_err(|e| format!("写不进去：{e}"))?;
+    std::fs::write(&target, &planned.content).map_err(|e| format!("写不进去：{e}"))?;
     Ok(serde_json::json!({
         "path": target.to_string_lossy(),
-        "bytes": content.len(),
+        "bytes": planned.content.len(),
         "backedUpTo": backup.map(|p| p.to_string_lossy().into_owned()),
     }))
 }

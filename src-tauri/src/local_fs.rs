@@ -1,4 +1,4 @@
-//! 只读的本地文件操作，带路径白名单。
+//! 本地文件操作（读 / 写 / 追加 / 精确替换 / 执行命令），带路径白名单。
 //!
 //! ## 闸门为什么在这里，而不在服务端
 //!
@@ -14,6 +14,16 @@
 //! 服务器本身不拦。既然闸门无论如何都要自己写，那多一个进程和一个运行时依赖
 //! 就不值当了。
 //!
+//! ## 改文件有三种形态，但只有一条闸门路径
+//!
+//! 覆盖、追加、精确替换都经 `plan_change` 算出新内容，然后走同一个
+//! 「确认 → 备份 → 写」。分成三条路的话，那两道闸就有三份实现，
+//! 而漏掉其中一处不会报错，只会某天悄悄少备份一次。
+//!
+//! **精确替换要求原文在文件里只出现一次。** 出现多次时不猜——
+//! 「改第一处」和「全都改」都可能是对的，猜错的代价是悄悄改坏一个
+//! 你没在看的地方。
+//!
 //! ## 读和写用的是两条不同的夹取逻辑
 //!
 //! **读**（`resolve_within`）：`canonicalize()` + `starts_with()`。前者会解析
@@ -24,7 +34,7 @@
 //! 父目录过了之后，一个 `../../etc/passwd` 的「文件名」照样能落到白名单外，
 //! 所以文件名里不许出现分隔符。有测试专门钉这一条。
 //!
-//! 写还多两道闸，都在 main.rs 的 `write_with_consent` 里：每次弹**系统原生**
+//! 写还多两道闸，都在 main.rs 的 `change_with_consent` 里：每次弹**系统原生**
 //! 确认框（发起方就是网页层，让被审查的一方自己画审查界面没有意义），
 //! 以及覆盖前备份到本机回收站。
 //!
@@ -440,6 +450,108 @@ pub fn backup_before_write(app_dir: &Path, target: &Path) -> Option<PathBuf> {
     Some(backup)
 }
 
+/// 一次改动的三种形态。都落到「算出新内容 → 确认 → 备份 → 写」这一条路上，
+/// 只是算法和给人看的预览不同。
+pub enum Change {
+    /// 整个替换。
+    Overwrite,
+    /// 追加到末尾。
+    Append,
+    /// 精确替换一段文字。
+    Edit,
+}
+
+#[derive(Debug)]
+pub struct Planned {
+    /// 写下去的完整内容。
+    pub content: String,
+    /// 确认框标题。
+    pub title: &'static str,
+    /// 给人看的改动预览。
+    pub preview: String,
+    pub existed: bool,
+}
+
+/// 读出现有内容。文件不存在时给空串——追加到一个还不存在的文件上
+/// 等同于新建，这比报错更符合直觉。
+fn read_existing(path: &Path) -> Result<(String, bool), String> {
+    if !path.exists() {
+        return Ok((String::new(), false));
+    }
+    let bytes = fs::read(path).map_err(|e| format!("读不了原文件：{e}"))?;
+    let text = String::from_utf8(bytes)
+        .map_err(|_| "这是个二进制文件，改不了".to_string())?;
+    Ok((text, true))
+}
+
+/// 算出这次改动写下去会变成什么样，以及给人看的预览。
+///
+/// **`Edit` 要求 `old` 在文件里恰好出现一次。**
+/// 出现多次时不猜——「改第一处」和「全都改」都可能是对的，而猜错的代价是
+/// 悄悄改坏一个你没在看的地方。出现零次也直接说，通常意味着模型记错了原文。
+pub fn plan_change(
+    roots: &[String],
+    requested: &str,
+    change: Change,
+    a: &str,
+    b: &str,
+) -> Result<(PathBuf, Planned), String> {
+    let target = resolve_for_write(roots, requested)?;
+    let (existing, existed) = read_existing(&target)?;
+
+    let planned = match change {
+        Change::Overwrite => Planned {
+            content: a.to_string(),
+            title: if existed { "覆盖这个文件？" } else { "新建这个文件？" },
+            preview: format!("新内容开头：\n{}", head(a, 400)),
+            existed,
+        },
+        Change::Append => {
+            // 原文件不以换行结尾时补一个，否则追加的内容会黏在最后一行后面。
+            let joiner = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
+            Planned {
+                content: format!("{existing}{joiner}{a}"),
+                title: "在文件末尾追加？",
+                preview: format!("要追加的内容：\n{}", head(a, 400)),
+                existed,
+            }
+        }
+        Change::Edit => {
+            if !existed {
+                return Err(format!("「{requested}」还不存在，没法改。要新建就用写入。"));
+            }
+            let hits = existing.matches(a).count();
+            if hits == 0 {
+                return Err(
+                    "文件里找不到要替换的那段原文。先读一遍确认原文，别凭印象改。".into(),
+                );
+            }
+            if hits > 1 {
+                return Err(format!(
+                    "要替换的那段在文件里出现了 {hits} 次，不知道该改哪一处。\
+                     把原文取长一点，让它只匹配你要改的那一处。"
+                ));
+            }
+            Planned {
+                content: existing.replacen(a, b, 1),
+                title: "修改这个文件？",
+                preview: format!("把这段：\n{}\n\n换成：\n{}", head(a, 240), head(b, 240)),
+                existed,
+            }
+        }
+    };
+    Ok((target, planned))
+}
+
+fn head(text: &str, limit: usize) -> String {
+    let clipped: String = text.chars().take(limit).collect();
+    if text.chars().count() > limit {
+        format!("{clipped}\n…")
+    } else {
+        clipped
+    }
+}
+
 /// 命令输出的截断上限。跑一个 `find /` 的输出能有几百兆，
 /// 塞进模型上下文既没用又烧钱。
 pub const MAX_OUTPUT_BYTES: usize = 32 * 1024;
@@ -680,6 +792,72 @@ mod tests {
         .unwrap();
         // 带空格的参数在预览里要被引起来，否则确认框里看不出这是**一个**参数。
         assert!(display.contains("\"hi; rm -rf ~\""), "预览没引号：{display}");
+    }
+
+
+    /// **精确替换要求原文只出现一次。**
+    ///
+    /// 出现多次时不猜——「改第一处」和「全都改」都可能是对的，而猜错的代价是
+    /// 悄悄改坏一个你没在看的地方。这条是这个工具最重要的性质。
+    #[test]
+    fn edit_refuses_ambiguous_and_missing_matches() {
+        let tmp = std::env::temp_dir().join("kitty-edit-test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let file = tmp.join("日记.md");
+        fs::write(&file, "今天很开心\n明天也要开心\n").unwrap();
+        let roots = vec![tmp.to_string_lossy().into_owned()];
+        let path = file.to_str().unwrap();
+
+        // 唯一匹配 → 只动那一处，其余原样
+        let (_, planned) =
+            plan_change(&roots, path, Change::Edit, "今天很开心", "今天很累").unwrap();
+        assert_eq!(planned.content, "今天很累\n明天也要开心\n");
+
+        // 出现多次 → 拒绝，并说清楚怎么办
+        let ambiguous = plan_change(&roots, path, Change::Edit, "开心", "累");
+        assert!(ambiguous.is_err(), "多处匹配应该被拒");
+        assert!(ambiguous.unwrap_err().contains("2 次"));
+
+        // 找不到 → 拒绝（通常是模型凭印象改）
+        assert!(plan_change(&roots, path, Change::Edit, "不存在的原文", "x").is_err());
+
+        // 文件不存在 → 拒绝，而不是当成新建
+        let missing = tmp.join("还没有.md");
+        assert!(
+            plan_change(&roots, missing.to_str().unwrap(), Change::Edit, "a", "b").is_err()
+        );
+    }
+
+    /// 追加：原文件不以换行结尾时补一个，否则新内容会黏在最后一行后面。
+    #[test]
+    fn append_adds_a_newline_when_needed() {
+        let tmp = std::env::temp_dir().join("kitty-append-test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let roots = vec![tmp.to_string_lossy().into_owned()];
+
+        let no_newline = tmp.join("a.md");
+        fs::write(&no_newline, "第一行").unwrap();
+        let (_, planned) =
+            plan_change(&roots, no_newline.to_str().unwrap(), Change::Append, "第二行", "")
+                .unwrap();
+        assert_eq!(planned.content, "第一行\n第二行");
+
+        // 已经以换行结尾就不再补
+        let with_newline = tmp.join("b.md");
+        fs::write(&with_newline, "第一行\n").unwrap();
+        let (_, planned) =
+            plan_change(&roots, with_newline.to_str().unwrap(), Change::Append, "第二行", "")
+                .unwrap();
+        assert_eq!(planned.content, "第一行\n第二行");
+
+        // 文件不存在 = 新建，不报错
+        let fresh = tmp.join("c.md");
+        let (_, planned) =
+            plan_change(&roots, fresh.to_str().unwrap(), Change::Append, "开头", "").unwrap();
+        assert_eq!(planned.content, "开头");
+        assert!(!planned.existed);
     }
 
     /// 符号链接指向白名单外时也要拒绝——这是 canonicalize 存在的理由。

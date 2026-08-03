@@ -58,7 +58,7 @@ WORKSPACE_TOOLS = frozenset(
 )
 
 
-#: 读用户**真实电脑**上的文件。二期只有读。
+#: 读写用户**真实电脑**上的文件，以及在授权目录里执行命令。
 #:
 #: **只给 CONVERSATION，不给 ASSIST，更不给 COGNITION。** 三档各有理由，
 #: 而且每一条都不是保守，是有具体攻击路径的：
@@ -75,8 +75,8 @@ WORKSPACE_TOOLS = frozenset(
 #:
 #: 与 WORKSPACE_TOOLS 的对比很说明问题：工作区**给了 ASSIST**，因为那是沙箱里
 #: 一块隔离的草稿纸，写坏了只丢草稿；本地文件是用户的真实家目录，读出去就收不回。
-#: `local_write` 也在这一档里，而且**只该在这一档**。
-#: 它每次都会在用户机器上弹系统确认框（见 src-tauri 的 write_with_consent），
+#: 写类工具（write / append / edit）也在这一档，而且**只该在这一档**。
+#: 它们每次都会在用户机器上弹系统确认框（见 src-tauri 的 change_with_consent），
 #: 但那道闸的前提是「用户此刻就在电脑前」——只有 CONVERSATION 满足这一点。
 #: 给 COGNITION 的话，会变成没人在的时候弹一个框，然后一直挂在那儿。
 LOCAL_FILE_TOOLS = frozenset(
@@ -86,6 +86,8 @@ LOCAL_FILE_TOOLS = frozenset(
         "local_search",
         "local_info",
         "local_write",
+        "local_append",
+        "local_edit",
         # `local_run` 在用户机器上执行命令。它和 local_write 一样每次弹系统
         # 确认框，而那道闸的前提同样是「用户此刻就在电脑前」。
         #
