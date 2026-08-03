@@ -213,6 +213,20 @@ export default function FloatingPet() {
     const [unreadAlert, setUnreadAlert] = useState<UnreadPeek | null>(null);
     /** 已经报过的那条。同一条消息不重复弹，除非催促计时器又催了一遍。 */
     const alertedRef = useRef<string | null>(null);
+    /**
+     * 主界面焦点变化的计数器。变一次就让下面那个 effect 重跑一次。
+     *
+     * 判断「该不该提醒」发生在消息到达那一刻。如果那时主界面正开着且有焦点，
+     * 宠物不吭声——对的。但人接着切去别的应用办公，这条消息就永远停在
+     * 「当时不用提醒」的结论上，而现在他已经看不到它了。焦点一变就再问一次。
+     */
+    const [focusTick, setFocusTick] = useState(0);
+    useEffect(() => {
+        if (!isPetWindow) return;
+        const bump = () => setFocusTick(tick => tick + 1);
+        window.addEventListener('kitty-main-focus', bump);
+        return () => window.removeEventListener('kitty-main-focus', bump);
+    }, [isPetWindow]);
 
     /**
      * 由宠物转达新消息。
@@ -250,7 +264,7 @@ export default function FloatingPet() {
             if (repeat) consumeNudge();
         })();
         return () => { cancelled = true; };
-    }, [latestUnread, nudge, consumeNudge, isPetWindow, shouldSkip, showSpeech]);
+    }, [latestUnread, nudge, consumeNudge, isPetWindow, shouldSkip, showSpeech, focusTick]);
 
     /** 把话送给对方，并且**这时才**算已读——你回了，说明你确实看见了。 */
     const replyToPartner = useCallback((body: string) => {

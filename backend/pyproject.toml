@@ -35,6 +35,8 @@ dependencies = [
   # 很容易错得很隐蔽，而错了的表现是「看起来能登」。
   "webauthn>=2.5.0",
   "langmem==0.0.30",
+  "mcp>=1.27,<2",
+  "jsonschema>=4.26,<5",
 ]
 
 [dependency-groups]

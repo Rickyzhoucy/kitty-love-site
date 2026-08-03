@@ -62,6 +62,18 @@ export interface SkillRow {
     createdAt: string;
 }
 
+export interface SkillVersionRow {
+    id: string;
+    revision: string;
+    sha256: string;
+    active: boolean;
+    createdAt: string;
+}
+
+export interface SkillInstallResult extends Omit<SkillRow, 'versionCount'> {
+    version: SkillVersionRow;
+}
+
 export interface ToolRunRow {
     id: string;
     tool: string;
@@ -143,9 +155,27 @@ export const adminApi = {
     toggleSkill: (id: string, enabled: boolean) =>
         api.patch<{ id: string; enabled: boolean }>(`${base}/skills/${id}`, { enabled }),
     skillVersions: (id: string) =>
-        api.get<{ id: string; revision: string; sha256: string; createdAt: string }[]>(
+        api.get<SkillVersionRow[]>(
             `${base}/skills/${id}/versions`,
         ),
+    activateSkillVersion: (skillId: string, versionId: string) =>
+        api.post<{ id: string; activeVersionId: string }>(
+            `${base}/skills/${skillId}/versions/${versionId}/activate`,
+        ),
+    uploadSkill: async (file: File) => {
+        const form = new FormData();
+        form.append('archive', file);
+        const response = await fetch(`/api/v1${base}/skills/upload`, {
+            method: 'POST',
+            body: form,
+            credentials: 'include',
+        });
+        if (!response.ok) {
+            const detail = await response.json().catch(() => null);
+            throw new Error(detail?.detail ?? `Skill 安装失败（${response.status}）`);
+        }
+        return response.json() as Promise<SkillInstallResult>;
+    },
 
     toolRuns: (params: Record<string, string> = {}) => {
         const query = new URLSearchParams(

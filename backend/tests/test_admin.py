@@ -10,12 +10,12 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from app import runtime_config
 from app.admin_auth import ADMIN_COOKIE_NAME, set_admin_password
 from app.auth import SESSION_COOKIE_NAME
-from app.main import create_app
 from app.db import get_session
-from app.models import Admin, SiteConfig
-from app import runtime_config
+from app.main import create_app
+from app.models import Admin, SiteConfig, Skill
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +92,35 @@ async def test_admin_session_cannot_reach_main_site_data(admin_client):
     await _login(admin_client)
     response = await admin_client.get("/api/v1/auth/me")
     assert response.status_code == 401
+
+
+async def test_skill_mutations_exist_only_under_admin(authenticated_client):
+    """主站账号不能安装可执行扩展，旧的主站 Skill 变更接口也不再保留。"""
+    old_route = await authenticated_client.post(
+        "/api/v1/skills/upload",
+        files={"archive": ("skill.zip", b"not-a-skill", "application/zip")},
+    )
+    assert old_route.status_code == 404
+
+    admin_route = await authenticated_client.post(
+        "/api/v1/admin/skills/upload",
+        files={"archive": ("skill.zip", b"not-a-skill", "application/zip")},
+    )
+    assert admin_route.status_code == 401
+
+
+async def test_skill_without_active_version_cannot_be_enabled(admin_client, session_maker):
+    await _login(admin_client)
+    async with session_maker() as db:
+        skill = Skill(name="empty-skill", description="没有版本", enabled=False)
+        db.add(skill)
+        await db.commit()
+        skill_id = skill.id
+
+    response = await admin_client.patch(
+        f"/api/v1/admin/skills/{skill_id}", json={"enabled": True}
+    )
+    assert response.status_code == 409
 
 
 async def test_config_secrets_are_never_returned_in_plaintext(admin_client, session_maker):
@@ -218,8 +247,8 @@ async def test_every_registry_entry_has_a_label_and_group():
 
 async def test_passkey_challenge_is_single_use(session_maker):
     """挑战值用一次就作废。**这是防重放的前提**——能重复使用的挑战等于没有。"""
-    from app.config import Settings
     from app import passkeys
+    from app.config import Settings
 
     settings = Settings(session_secret="x" * 40)
     async with session_maker() as db:
@@ -250,8 +279,8 @@ async def test_passkey_challenge_is_bound_to_its_audience(session_maker):
     两套账号体系的隔离必须贯穿到挑战这一层——只在 Cookie 和会话表上隔离，
     而挑战通用的话，就留了一条把主站凭据兑换成后台会话的路。
     """
-    from app.config import Settings
     from app import passkeys
+    from app.config import Settings
 
     settings = Settings(session_secret="x" * 40)
     async with session_maker() as db:
@@ -283,8 +312,9 @@ async def test_passkey_endpoints_need_a_session(client, admin_client):
 async def test_registration_options_use_discoverable_credentials(session_maker):
     """必须是可发现凭据，否则登录时要先输用户名——那就不是「一键」了。"""
     import json
-    from app.config import Settings
+
     from app import passkeys
+    from app.config import Settings
 
     settings = Settings(session_secret="x" * 40)
     async with session_maker() as db:

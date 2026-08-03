@@ -213,8 +213,13 @@ class AttachmentRead(Entity):
     status: str
     parse_status: str
     parse_error: str | None
+    parser: str | None
+    artifact_kind: str
+    artifact_version: int
+    parent_id: str | None
     download_url: str
     thumbnail_url: str | None
+    preview_url: str | None
 
 
 class ConversationCreate(ApiModel):

@@ -60,6 +60,12 @@ services:
     <<: *apt-mirror
     restart: always
 
+  docling:
+    restart: always
+
+  gotenberg:
+    restart: always
+
   skill-worker:
     <<: *apt-mirror
     restart: always

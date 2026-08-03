@@ -17,7 +17,6 @@ from app.agents.roles import (
 )
 from app.models import DesktopExecutor, LocalToolCall, User, utcnow
 
-
 # ── 角色边界 ────────────────────────────────────────────────────────────
 
 class _FakeTool:
@@ -44,6 +43,11 @@ def test_direct_conversation_does_get_them():
     """反过来：用户自己开口那一档必须拿得到，否则这个功能等于没做。"""
     tools = [_FakeTool(name) for name in LOCAL_FILE_TOOLS]
     assert len(filter_tools(AgentRole.CONVERSATION, tools)) == len(LOCAL_FILE_TOOLS)
+
+
+def test_desktop_capabilities_never_include_arbitrary_execution():
+    """客户端只是 Device Broker，不能重新长出第二个执行运行时。"""
+    assert "local_run" not in LOCAL_FILE_TOOLS
 
 
 def test_restricted_roles_use_explicit_allowlists():

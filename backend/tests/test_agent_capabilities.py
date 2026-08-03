@@ -255,7 +255,7 @@ def test_pet_cannot_autonomously_search_or_generate_files(session_maker):
     [
         ("web_search", "web.search", "low", True),
         ("web_read", "web.read", "low", True),
-        ("create_document", "site.document", "low", False),
+        ("create_document", "document.create", "low", True),
     ],
 )
 def test_new_tools_are_classified(tool_name, capability, risk, external):

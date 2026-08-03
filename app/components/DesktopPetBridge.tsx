@@ -98,6 +98,16 @@ export default function DesktopPetBridge() {
                 }),
             );
 
+            // 主界面的焦点变了。宠物据此重新判断「这条未读该不该由我来报」
+            // ——消息到达时人可能正看着主界面，等他切走之后才轮到宠物开口。
+            cleanups.push(
+                await listen<boolean>('main-focus-changed', event => {
+                    window.dispatchEvent(new CustomEvent('kitty-main-focus', {
+                        detail: event.payload,
+                    }));
+                }),
+            );
+
             // 自由行动时窗口是 Rust 在挪，网页这边完全不知道自己在动——
             // 不转发的话，宠物会一路「站着」滑过整个桌面，像被拖走的贴纸。
             cleanups.push(

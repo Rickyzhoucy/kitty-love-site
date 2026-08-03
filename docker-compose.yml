@@ -133,6 +133,10 @@ services:
       # 可选提供方：bocha（国内直连）/ tavily / brave
       WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-bocha}
       WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:-}
+      # 文档理解/渲染只在服务器。API 与 Worker 通过内网调用，客户端不带运行时。
+      DOCUMENT_PARSER_URL: http://docling:5001
+      DOCUMENT_PARSER_API_KEY: ${DOCLING_SERVE_API_KEY:?Set DOCLING_SERVE_API_KEY in .env}
+      DOCUMENT_RENDERER_URL: http://gotenberg:3000
     depends_on:
       postgres:
         condition: service_healthy
@@ -186,6 +190,36 @@ services:
     networks:
       - default
       - skill-internal
+
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.18.0
+    environment:
+      DOCLING_SERVE_API_KEY: ${DOCLING_SERVE_API_KEY:?Set DOCLING_SERVE_API_KEY in .env}
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "300"
+    mem_limit: 6g
+    cpus: 4.0
+    pids_limit: 512
+    init: true
+    restart: unless-stopped
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.34.0
+    command:
+      - gotenberg
+      - --api-timeout=120s
+      - --libreoffice-disable-routes=false
+      - --chromium-disable-routes=true
+      - --webhook-disable=true
+    mem_limit: 1g
+    cpus: 2.0
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
 
   skill-worker:
     build:

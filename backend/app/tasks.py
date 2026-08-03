@@ -12,10 +12,11 @@ from app.agents.conversation import build_agent, build_chat_model
 from app.agents.reflection import ReflectionAgent, companions_with_pending
 from app.agents.roles import AgentRole
 from app.anniversaries import ANNIVERSARY_EVENT, deliver_due, scan_anniversaries
-from app.attachment_processing import extract_text, thumbnail_webp
+from app.attachment_processing import thumbnail_webp
 from app.config import get_settings
 from app.context_assembler import ContextAssembler
 from app.db import session_factory
+from app.document_services import render_preview_pdf, understand_document
 from app.embeddings import OpenAICompatibleEmbeddingProvider, UnavailableEmbeddingProvider
 from app.future_letters import LETTER_EVENT, announce_unlocked
 from app.memory import MemoryService
@@ -749,16 +750,11 @@ async def process_attachment(payload: dict) -> None:
             return
         content = await storage.get_bytes(attachment.bucket, attachment.object_key)
         try:
-            extracted = extract_text(
+            understanding = await understand_document(
                 content,
                 attachment.content_type,
                 attachment.filename,
-                max_chars=settings.attachment_extracted_text_chars,
-                max_pdf_pages=settings.attachment_max_pdf_pages,
-                max_office_uncompressed_bytes=(settings.attachment_max_office_uncompressed_bytes),
-                max_workbook_sheets=settings.attachment_max_workbook_sheets,
-                max_workbook_rows=settings.attachment_max_workbook_rows,
-                max_workbook_cells=settings.attachment_max_workbook_cells,
+                settings,
             )
             thumbnail = thumbnail_webp(content, attachment.content_type)
         except Exception as error:
@@ -766,9 +762,31 @@ async def process_attachment(payload: dict) -> None:
             attachment.parse_error = str(error)[:2000]
             await db.commit()
             return
-        attachment.extracted_text = extracted if extracted is not None else None
+        attachment.extracted_text = understanding.text
+        attachment.parser = understanding.parser
+        attachment.processing_metadata = understanding.processing_metadata
+        attachment.derived_bucket = settings.minio_derived_bucket
+        if understanding.document_ir is not None:
+            encoded_ir = json.dumps(
+                understanding.document_ir,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(encoded_ir) > settings.document_ir_max_bytes:
+                attachment.parse_status = "failed"
+                attachment.parse_error = "Document IR 超过存储上限"
+                await db.commit()
+                return
+            attachment.document_ir_key = (
+                f"{attachment.owner_id}/{attachment.id}/document-ir.json"
+            )
+            await storage.put_bytes(
+                attachment.derived_bucket,
+                attachment.document_ir_key,
+                encoded_ir,
+                "application/json",
+            )
         if thumbnail is not None:
-            attachment.derived_bucket = settings.minio_derived_bucket
             attachment.thumbnail_key = f"{attachment.owner_id}/{attachment.id}/thumbnail.webp"
             await storage.put_bytes(
                 attachment.derived_bucket,
@@ -776,8 +794,38 @@ async def process_attachment(payload: dict) -> None:
                 thumbnail,
                 "image/webp",
             )
+        try:
+            preview = await render_preview_pdf(
+                content,
+                attachment.content_type,
+                attachment.filename,
+                settings,
+            )
+        except Exception as error:
+            attachment.processing_metadata = {
+                **attachment.processing_metadata,
+                "renderer": {"status": "failed", "error": str(error)[:1000]},
+            }
+            preview = None
+        if preview is not None:
+            attachment.preview_key = f"{attachment.owner_id}/{attachment.id}/preview.pdf"
+            await storage.put_bytes(
+                attachment.derived_bucket,
+                attachment.preview_key,
+                preview,
+                "application/pdf",
+            )
+            attachment.processing_metadata = {
+                **attachment.processing_metadata,
+                "renderer": {"status": "ready", "engine": "gotenberg"},
+            }
         attachment.parse_status = (
-            "ready" if extracted is not None or thumbnail is not None else "unsupported"
+            "ready"
+            if understanding.text is not None
+            or understanding.document_ir is not None
+            or thumbnail is not None
+            or preview is not None
+            else "unsupported"
         )
         attachment.parse_error = None
         await db.commit()

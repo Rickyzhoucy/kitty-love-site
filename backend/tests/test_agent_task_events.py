@@ -21,7 +21,13 @@ from app.agent_tasks import describe_step, task_event
         ),
         ("site_resource_delete", {"resource": "photo"}, "site.photo", "high", "删除照片"),
         ("site_pet_action", {"action": "wave"}, "site.pet", "none", "做一个动作"),
-        ("run_skill_script", {"name": "report"}, "site.skill", "high", "执行 Skill 脚本"),
+        (
+            "run_skill_script",
+            {"name": "report"},
+            "server.skill",
+            "high",
+            "在服务器沙箱执行 Skill",
+        ),
     ],
 )
 def test_describe_step_maps_capability_and_risk(

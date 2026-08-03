@@ -30,7 +30,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agent_context import AgentContext
-from app.agent_tasks import AgentTaskStatus, TaskStep, describe_step, task_event
+from app.agent_tasks import (
+    AgentTaskStatus,
+    TaskStep,
+    create_task,
+    describe_step,
+    task_event,
+    update_task,
+)
 from app.agent_tools import build_domain_tools
 from app.agents.reflection import record_event
 from app.agents.roles import AgentRole, filter_tools, spec_for, thread_id
@@ -41,6 +48,7 @@ from app.doc_tools import build_document_tools
 from app.embeddings import EmbeddingProvider
 from app.ids import new_id
 from app.local_tools import build_local_tools
+from app.mcp_tools import build_mcp_tools
 from app.memory import MemoryService
 from app.models import Attachment, ChatMessage
 from app.queue import JobQueue
@@ -184,6 +192,9 @@ def build_agent(
             *build_web_tools(build_search_provider()),
             *build_document_tools(session_maker),
             *build_workspace_tools(get_settings()),
+            # MCP 只注册稳定的 find/call 两级入口；第三方 Schema 按需从服务器目录取，
+            # 不把全部 MCP 工具常驻塞进模型上下文。
+            *build_mcp_tools(session_maker),
             # 读用户真实电脑上的文件。**只有 CONVERSATION 拿得到**——
             # 那一档 tool_names 是 None（不限制），其余三档都是显式白名单，
             # 名字不在里面就自动被 filter_tools 挡掉。理由见 roles.py 的
@@ -373,6 +384,11 @@ class AgentRuntime:
             metadata={"interrupted": True, "reason": reason},
         )
 
+    async def _cancel_task(self, task_id: str) -> None:
+        """流断开后仍把服务器任务置为 cancelled，避免留下永远 running 的假状态。"""
+        async with self.session_maker() as db:
+            await update_task(db, task_id, "cancelled", result_summary="客户端中断了任务流")
+
     async def stream(
         self,
         user_id: str,
@@ -441,6 +457,7 @@ class AgentRuntime:
                 memory_ids=([item.id for item in assembled.memories] if assembled else []),
                 skill_context=skill_prompt(skill_metadata),
                 skill_versions={item["name"]: item["versionId"] for item in skill_metadata},
+                task_id=task_id,
             )
 
         answer_parts: list[str] = []
@@ -530,6 +547,15 @@ class AgentRuntime:
         # 恰好把链接写进正文。
         produced_attachments: list[str] = []
         committed_receipt_ids: list[str] = []
+        task_failed = False
+        async with self.session_maker() as db:
+            await create_task(
+                db,
+                task_id=task_id,
+                user_id=user_id,
+                companion_id=conversation.companion_id,
+                conversation_id=conversation.id,
+            )
         try:
             yield task_sse("created")
             async for event in self.agent.astream_events(
@@ -542,6 +568,8 @@ class AgentRuntime:
                 if event_name == "on_chat_model_start":
                     # 每次模型开始推理都是一次规划——首轮如此，工具返回后
                     # 决定下一步也如此。宠物据此在 thinking 与 working 之间往复。
+                    async with self.session_maker() as db:
+                        await update_task(db, task_id, "planning")
                     yield task_sse("planning")
                 elif event_name == "on_chat_model_stream":
                     delta = _text_content(event.get("data", {}).get("chunk"))
@@ -582,6 +610,8 @@ class AgentRuntime:
                             {"attachmentId": attachment_id},
                         )
                     yield task_sse("progress", step, step_sequence)
+                    async with self.session_maker() as db:
+                        await update_task(db, task_id, "progress")
                     if step is not None and step.risk_level == "high":
                         # 高风险操作真的执行完了，这是值得记住的经历
                         # （架构文档 §9）。只记语义摘要，不记 payload。
@@ -595,6 +625,9 @@ class AgentRuntime:
             raise
         except Exception as error:
             interruption_reason = type(error).__name__
+            task_failed = True
+            async with self.session_maker() as db:
+                await update_task(db, task_id, "failed", result_summary="任务执行失败")
             # 中断类异常（CancelledError / GeneratorExit）在上面先行拦下：那两种
             # 情况下消费端已经断开，再 yield 不会送达，只会污染关闭流程。
             yield task_sse("failed", sequence=step_sequence)
@@ -623,6 +656,21 @@ class AgentRuntime:
                             "Reply persistence continues after stream cancellation",
                             extra={"conversation_id": conversation.id},
                         )
+                if not task_failed:
+                    try:
+                        cancel_task = asyncio.create_task(self._cancel_task(task_id))
+                    except RuntimeError:
+                        cancel_task = None
+                    if cancel_task is not None:
+                        self._background_tasks.add(cancel_task)
+                        cancel_task.add_done_callback(self._background_tasks.discard)
+                        try:
+                            await asyncio.shield(cancel_task)
+                        except asyncio.CancelledError:
+                            logger.info(
+                                "Task cancellation persistence continues after disconnect",
+                                extra={"task_id": task_id},
+                            )
 
         answer = guard_action_claims(
             "".join(answer_parts).strip(),
@@ -668,6 +716,13 @@ class AgentRuntime:
                 except Exception:
                     # Persistence of the reply must not depend on queue availability.
                     pass
+        async with self.session_maker() as db:
+            await update_task(
+                db,
+                task_id,
+                "succeeded",
+                result_summary=f"完成对话；执行 {step_sequence} 个工具步骤",
+            )
         # 带上步骤数：只回了一句话（sequence == 0）和真的动了站内数据是两回事，
         # 前端据此决定要不要庆祝，避免每轮对话都放一次烟花。
         yield task_sse("succeeded", sequence=step_sequence)

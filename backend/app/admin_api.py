@@ -24,8 +24,9 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from typing import Annotated, Any, Literal
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,14 +42,18 @@ from app.admin_auth import (
     verify_admin_password,
 )
 from app.auth import hash_password
+from app.capability_catalog import core_catalog
 from app.config import Settings, get_settings
 from app.db import get_session
+from app.mcp_runtime import McpHost, encrypt_headers
 from app.models import (
     Admin,
     AdminSession,
     AuthAttempt,
     Companion,
     CompanionPersona,
+    McpServer,
+    McpTool,
     MemoryRecord,
     MemoryRecordEmbedding,
     MemoryRevision,
@@ -60,6 +65,7 @@ from app.models import (
     UserSession,
     utcnow,
 )
+from app.skill_runtime import SkillRegistry
 from app.storage import ObjectStorage
 
 logger = logging.getLogger(__name__)
@@ -341,6 +347,275 @@ async def delete_memory(memory_id: str, db: Db, admin: CurrentAdmin) -> None:
 # ── 技能与工具调用 ────────────────────────────────────────────────────────
 
 
+@router.get("/capabilities")
+async def list_capabilities(db: Db, admin: CurrentAdmin) -> dict[str, Any]:
+    """服务器能力目录。设备授权仍由各用户在自己的设备上管理。"""
+    skills = list(await db.scalars(select(Skill).order_by(Skill.name)))
+    return {
+        "core": core_catalog(),
+        "skills": [
+            {
+                "key": f"skill.{skill.name}",
+                "label": skill.name,
+                "kind": "skill",
+                "execution_plane": "server",
+                "risk_level": "high",
+                "enabled": skill.enabled,
+                "activeVersionId": skill.active_version_id,
+            }
+            for skill in skills
+        ],
+        "devicePolicy": {
+            "execution_plane": "device",
+            "managedBy": "user_on_each_device",
+            "arbitraryExecution": False,
+        },
+    }
+
+
+def _mcp_server_payload(server: McpServer, tool_count: int = 0) -> dict[str, Any]:
+    return {
+        "id": server.id,
+        "name": server.name,
+        "url": server.url,
+        "transport": server.transport,
+        "enabled": server.enabled,
+        "status": server.status,
+        "hasAuth": bool(server.auth_headers_ciphertext),
+        "toolCount": tool_count,
+        "lastError": server.last_error,
+        "lastSyncedAt": server.last_synced_at,
+        "createdAt": server.created_at,
+    }
+
+
+def _validate_mcp_url(url: str, settings: Settings) -> str:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "MCP URL 必须是 http(s)")
+    if parsed.username or parsed.password or parsed.fragment:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "MCP URL 不能内嵌凭据或片段")
+    if settings.app_env != "development" and parsed.scheme != "https":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "生产环境 MCP 必须使用 HTTPS")
+    return url.strip()
+
+
+class McpServerCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120, pattern=r"^[a-z0-9][a-z0-9-]*$")
+    url: str = Field(min_length=8, max_length=2048)
+    auth_headers: dict[str, str] = Field(default_factory=dict)
+
+
+class McpServerUpdate(BaseModel):
+    enabled: bool | None = None
+    url: str | None = Field(default=None, min_length=8, max_length=2048)
+    auth_headers: dict[str, str] | None = None
+
+
+class McpToolUpdate(BaseModel):
+    enabled: bool | None = None
+    risk_level: Literal["none", "low", "high"] | None = None
+
+
+def _validated_headers(headers: dict[str, str]) -> dict[str, str]:
+    if len(headers) > 20:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "MCP 认证头过多")
+    cleaned = {}
+    for key, value in headers.items():
+        if not key or len(key) > 100 or "\n" in key or "\r" in key:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "MCP Header 名无效")
+        if len(value) > 8_000 or "\n" in value or "\r" in value:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "MCP Header 值无效")
+        cleaned[key] = value
+    return cleaned
+
+
+@router.get("/mcp-servers")
+async def list_mcp_servers(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
+    counts = dict(
+        (
+            await db.execute(select(McpTool.server_id, func.count()).group_by(McpTool.server_id))
+        ).all()
+    )
+    servers = list(await db.scalars(select(McpServer).order_by(McpServer.name)))
+    return [_mcp_server_payload(server, counts.get(server.id, 0)) for server in servers]
+
+
+@router.post("/mcp-servers", status_code=status.HTTP_201_CREATED)
+async def create_mcp_server(
+    data: McpServerCreate,
+    db: Db,
+    settings: Config,
+    admin: CurrentAdmin,
+) -> dict[str, Any]:
+    if await db.scalar(select(McpServer.id).where(McpServer.name == data.name)):
+        raise HTTPException(status.HTTP_409_CONFLICT, "MCP Server 名称已存在")
+    server = McpServer(
+        name=data.name,
+        url=_validate_mcp_url(data.url, settings),
+        transport="streamable_http",
+        auth_headers_ciphertext=encrypt_headers(_validated_headers(data.auth_headers), settings),
+        enabled=False,
+        status="unverified",
+    )
+    db.add(server)
+    await db.commit()
+    await db.refresh(server)
+    logger.info("后台 %s 新增了 MCP Server %s", admin.username, server.name)
+    return _mcp_server_payload(server)
+
+
+@router.patch("/mcp-servers/{server_id}")
+async def update_mcp_server(
+    server_id: str,
+    data: McpServerUpdate,
+    db: Db,
+    settings: Config,
+    admin: CurrentAdmin,
+) -> dict[str, Any]:
+    server = await db.get(McpServer, server_id)
+    if server is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP Server 不存在")
+    connection_changed = data.url is not None or data.auth_headers is not None
+    if data.url is not None:
+        server.url = _validate_mcp_url(data.url, settings)
+    if data.auth_headers is not None:
+        server.auth_headers_ciphertext = encrypt_headers(
+            _validated_headers(data.auth_headers), settings
+        )
+    if connection_changed:
+        server.enabled = False
+        server.status = "unverified"
+        server.last_error = None
+        server.last_synced_at = None
+        await db.execute(delete(McpTool).where(McpTool.server_id == server.id))
+    if data.enabled is not None:
+        if data.enabled and server.status != "healthy":
+            raise HTTPException(status.HTTP_409_CONFLICT, "请先同步并通过 MCP 健康检查")
+        server.enabled = data.enabled
+    await db.commit()
+    logger.info("后台 %s 更新了 MCP Server %s", admin.username, server.name)
+    return _mcp_server_payload(server)
+
+
+@router.post("/mcp-servers/{server_id}/sync")
+async def sync_mcp_server(
+    server_id: str,
+    db: Db,
+    settings: Config,
+    admin: CurrentAdmin,
+) -> dict[str, Any]:
+    server = await db.get(McpServer, server_id)
+    if server is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP Server 不存在")
+    try:
+        tools = await McpHost(settings).sync_tools(db, server)
+    except Exception as error:
+        server.status = "failed"
+        server.enabled = False
+        server.last_error = str(error)[:2000]
+        await db.commit()
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "MCP 同步失败") from error
+    logger.info(
+        "后台 %s 同步了 MCP Server %s，共 %s 个工具",
+        admin.username,
+        server.name,
+        len(tools),
+    )
+    return {
+        "server": _mcp_server_payload(server, len(tools)),
+        "tools": [
+            {
+                "id": item.id,
+                "name": item.name,
+                "description": item.description,
+                "inputSchema": item.input_schema,
+                "outputSchema": item.output_schema,
+                "annotations": item.annotations,
+                "enabled": item.enabled,
+                "riskLevel": item.risk_level,
+            }
+            for item in tools
+        ],
+    }
+
+
+@router.get("/mcp-servers/{server_id}/tools")
+async def list_mcp_tools(
+    server_id: str, db: Db, admin: CurrentAdmin
+) -> list[dict[str, Any]]:
+    if await db.get(McpServer, server_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP Server 不存在")
+    tools = list(
+        await db.scalars(
+            select(McpTool).where(McpTool.server_id == server_id).order_by(McpTool.name)
+        )
+    )
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "description": item.description,
+            "inputSchema": item.input_schema,
+            "outputSchema": item.output_schema,
+            "annotations": item.annotations,
+            "enabled": item.enabled,
+            "riskLevel": item.risk_level,
+        }
+        for item in tools
+    ]
+
+
+@router.patch("/mcp-tools/{tool_id}")
+async def update_mcp_tool(
+    tool_id: str, data: McpToolUpdate, db: Db, admin: CurrentAdmin
+) -> dict[str, Any]:
+    item = await db.get(McpTool, tool_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP 工具不存在")
+    if data.enabled is not None:
+        item.enabled = data.enabled
+    if data.risk_level is not None:
+        item.risk_level = data.risk_level
+    await db.commit()
+    logger.info("后台 %s 更新了 MCP Tool %s", admin.username, item.name)
+    return {"id": item.id, "enabled": item.enabled, "riskLevel": item.risk_level}
+
+
+@router.delete("/mcp-servers/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_mcp_server(server_id: str, db: Db, admin: CurrentAdmin) -> None:
+    server = await db.get(McpServer, server_id)
+    if server is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP Server 不存在")
+    await db.delete(server)
+    await db.commit()
+    logger.info("后台 %s 删除了 MCP Server %s", admin.username, server.name)
+
+
+def _skill_version_payload(skill: Skill, version: SkillVersion) -> dict[str, Any]:
+    return {
+        "id": version.id,
+        "revision": version.revision,
+        "sha256": version.sha256,
+        "active": version.id == skill.active_version_id,
+        "createdAt": version.created_at,
+    }
+
+
+def _skill_payload(skill: Skill, version: SkillVersion | None = None) -> dict[str, Any]:
+    payload = {
+        "id": skill.id,
+        "name": skill.name,
+        "description": skill.description,
+        "enabled": skill.enabled,
+        "activeVersionId": skill.active_version_id,
+        "createdAt": skill.created_at,
+    }
+    if version is not None:
+        payload["version"] = _skill_version_payload(skill, version)
+    return payload
+
+
 @router.get("/skills")
 async def list_skills(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
     skills = list(await db.scalars(select(Skill).order_by(Skill.name)))
@@ -369,6 +644,31 @@ class SkillToggle(BaseModel):
     enabled: bool
 
 
+@router.post("/skills/upload", status_code=status.HTTP_201_CREATED)
+async def upload_skill(
+    archive: Annotated[UploadFile, File()],
+    db: Db,
+    settings: Config,
+    admin: CurrentAdmin,
+) -> dict[str, Any]:
+    """安装一个 Skill 版本。可执行扩展的入口只属于独立后台账号。"""
+    data = await archive.read(settings.skill_max_archive_bytes + 1)
+    if len(data) > settings.skill_max_archive_bytes:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Skill ZIP 超过大小限制")
+    try:
+        skill, version = await SkillRegistry(ObjectStorage(settings), settings).install(db, data)
+    except (ValueError, OSError) as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+    logger.info(
+        "后台 %s 安装了 Skill %s@%s (%s)",
+        admin.username,
+        skill.name,
+        version.revision,
+        version.sha256[:12],
+    )
+    return _skill_payload(skill, version)
+
+
 @router.patch("/skills/{skill_id}")
 async def toggle_skill(
     skill_id: str, data: SkillToggle, db: Db, admin: CurrentAdmin
@@ -376,6 +676,8 @@ async def toggle_skill(
     skill = await db.get(Skill, skill_id)
     if skill is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "技能不存在")
+    if data.enabled and skill.active_version_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "技能没有可启用版本")
     skill.enabled = data.enabled
     await db.commit()
     logger.info("后台 %s 把技能 %s 设为 %s", admin.username, skill.name, data.enabled)
@@ -384,20 +686,36 @@ async def toggle_skill(
 
 @router.get("/skills/{skill_id}/versions")
 async def skill_versions(skill_id: str, db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
+    skill = await db.get(Skill, skill_id)
+    if skill is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "技能不存在")
     rows = await db.scalars(
         select(SkillVersion)
         .where(SkillVersion.skill_id == skill_id)
         .order_by(SkillVersion.created_at.desc())
     )
-    return [
-        {
-            "id": v.id,
-            "revision": v.revision,
-            "sha256": v.sha256[:12],
-            "createdAt": v.created_at,
-        }
-        for v in rows
-    ]
+    return [_skill_version_payload(skill, version) for version in rows]
+
+
+@router.post("/skills/{skill_id}/versions/{version_id}/activate")
+async def activate_skill_version(
+    skill_id: str,
+    version_id: str,
+    db: Db,
+    settings: Config,
+    admin: CurrentAdmin,
+) -> dict[str, Any]:
+    skill, version = await SkillRegistry(ObjectStorage(settings), settings).activate(
+        db, skill_id, version_id
+    )
+    logger.info(
+        "后台 %s 激活了 Skill %s@%s (%s)",
+        admin.username,
+        skill.name,
+        version.revision,
+        version.sha256[:12],
+    )
+    return _skill_payload(skill, version)
 
 
 @router.get("/tool-runs")

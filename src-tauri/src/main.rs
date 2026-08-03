@@ -486,20 +486,6 @@ fn run_local_tool(
             &arg("old_text"), &arg("new_text"),
             approval_id.as_deref(), &approval_mode,
         ),
-        "local_run" => {
-            // argv 数组，不是一个命令行字符串——见 run_command_with_consent。
-            let args: Vec<String> = arguments
-                .get("args")
-                .and_then(|v| v.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            run_command_with_consent(&roots, &arg("program"), &args, &arg("cwd"), &approval_mode)
-        }
         // **默认拒绝。** 服务端将来加了新工具而这里还没实现时，结果应该是
         // 「不支持」，而不是掉进某个分支去做一件没想清楚的事。
         other => Err(format!("这个版本的桌面端不支持「{other}」")),
@@ -533,9 +519,6 @@ fn change_with_consent(
         return match claimed {
             Some(PendingAction::Write { target, content }) => {
                 commit_change(app, &target, &content)
-            }
-            Some(PendingAction::Command { program, args, dir }) => {
-                execute_command(&program, &args, &dir)
             }
             None => Err("这次授权已经过期了，请重来一次。".into()),
         };
@@ -593,13 +576,12 @@ fn commit_change(
 /// 一件等着人点头的事。
 pub enum PendingAction {
     Write { target: std::path::PathBuf, content: String },
-    Command { program: String, args: Vec<String>, dir: std::path::PathBuf },
 }
 
 /// 等着人点头的动作。**内容存在这里，不经过网页层。**
 ///
-/// 网页层只拿得到一个 id。它改不了将要写下去的内容，也改不了将要执行的命令
-/// ——这是「审批界面放在气泡里」能成立的关键：被审查的是模型，
+/// 网页层只拿得到一个 id。它改不了将要写下去的内容——这是「审批界面放在
+/// 气泡里」能成立的关键：被审查的是模型，
 /// 而模型既进不了这个 map，也伪造不出这里的 id。
 static PENDING_APPROVALS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<String, PendingAction>>,
@@ -621,111 +603,6 @@ fn stash(action: PendingAction) -> String {
 #[tauri::command]
 fn discard_pending_change(id: String) {
     PENDING_APPROVALS.lock().unwrap().remove(&id);
-}
-
-/// 在授权目录里跑一条命令。**这是整套本地能力里最危险的一个。**
-///
-/// ## 不经 shell
-///
-/// 参数是一个 argv 数组，直接交给 `Command`，**不拼成字符串丢给 `sh -c`**。
-/// 这一条是这里最重要的设计：走 shell 的话，`;`、`&&`、`|`、`$(...)`、反引号
-/// 全都会被解释，于是「参数」和「命令」的边界就没了——模型只要在某个文件名
-/// 参数里带上 `; rm -rf ~`，闸门就形同虚设。argv 数组里那些字符只是普通字符。
-///
-/// ## 不做「安全命令白名单」
-///
-/// 枚举安全命令是走不通的：`git` 看着无害，
-/// `git config --global core.pager 'sh -c ...'` 就不是。真正的安全来自
-/// 工作目录受限 + 每次人工确认 + 不经 shell 这三条。
-fn run_command_with_consent(
-    roots: &[String],
-    program: &str,
-    args: &[String],
-    cwd: &str,
-    approval_mode: &str,
-) -> Result<serde_json::Value, String> {
-    let (dir, display) = local_fs::prepare_command(roots, program, args, cwd)?;
-
-    // 命令**永远**要人点头，`risky` 模式也不例外——它的破坏力和「改一个文件」
-    // 不是一个量级，而且没有备份可以回滚。只有显式设成 never 才跳过。
-    if approval_mode == "never" {
-        return execute_command(program, args, &dir);
-    }
-
-    let id = stash(PendingAction::Command {
-        program: program.to_string(),
-        args: args.to_vec(),
-        dir: dir.clone(),
-    });
-    Ok(serde_json::json!({
-        "needsApproval": {
-            "id": id,
-            "title": "要执行这条命令吗？",
-            "path": dir.to_string_lossy(),
-            "preview": format!(
-                "命令：\n{display}\n\n不经过 shell，所以 ; && | $() 只是普通字符。\n\
-                 最多跑 {} 秒。",
-                local_fs::COMMAND_TIMEOUT_SECS
-            ),
-            "existed": true,
-        }
-    }))
-}
-
-/// 真正把命令跑起来。
-fn execute_command(
-    program: &str,
-    args: &[String],
-    dir: &std::path::Path,
-) -> Result<serde_json::Value, String> {
-    use std::process::{Command, Stdio};
-
-    let mut child = Command::new(program)
-        .args(args)
-        .current_dir(dir)
-        // 不继承标准输入：需要交互的命令（比如等密码的 sudo）会直接读到 EOF
-        // 退出，而不是挂在那儿等一个永远不会来的输入。
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("跑不起来：{e}（这个命令存在吗？）"))?;
-
-    // 超时就杀掉。没有这一条的话，一个卡住的子进程会让整轮对话干等到派发超时，
-    // 而那个进程还在后台继续跑。
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_secs(local_fs::COMMAND_TIMEOUT_SECS);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break Some(status),
-            Ok(None) if std::time::Instant::now() < deadline => {
-                std::thread::sleep(std::time::Duration::from_millis(80));
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                break None;
-            }
-            Err(e) => return Err(format!("等不到结果：{e}")),
-        }
-    };
-
-    let output = child.wait_with_output().map_err(|e| format!("读不到输出：{e}"))?;
-    let clip = |bytes: &[u8]| {
-        let text = String::from_utf8_lossy(bytes);
-        if text.len() > local_fs::MAX_OUTPUT_BYTES {
-            format!("{}\n…（输出太长，已截断）", &text[..local_fs::MAX_OUTPUT_BYTES])
-        } else {
-            text.into_owned()
-        }
-    };
-
-    Ok(serde_json::json!({
-        "cwd": dir.to_string_lossy(),
-        "timedOut": status.is_none(),
-        "exitCode": status.and_then(|s| s.code()),
-        "stdout": clip(&output.stdout),
-        "stderr": clip(&output.stderr),
-    }))
 }
 
 /// 聊天框里打 `@` 时的文件候选。
@@ -800,20 +677,31 @@ fn audit(app: &AppHandle, tool: &str, path: &str, outcome: &Result<serde_json::V
     }
 }
 
-/// 主界面现在是不是真的摆在人眼前。
+/// 主界面现在是不是真的**摆在人眼前**。
 ///
-/// 「新消息该不该由宠物来提醒」全看这一个答案：主界面开着的时候，消息本来就在
-/// 那儿，宠物再报一遍是噪音；主界面收起来或者关掉了，宠物就是唯一的通路。
+/// 「新消息该不该由宠物来提醒」全看这一个答案：主界面就在眼前时，消息本来
+/// 就在那儿，宠物再报一遍是噪音；否则宠物就是唯一的通路。
 ///
-/// **最小化要算「没在看」。** 只问 `is_visible` 是不够的——被最小化到 Dock 的
-/// 窗口在 macOS 上仍然报告 visible=true，照那个判断的话，人把主界面收进 Dock
-/// 之后就再也收不到提醒了，而那恰恰是最需要提醒的时候。
+/// 三个条件缺一不可，每一个都对应一种「其实没在看」：
+///
+/// - **可见** —— 窗口被关掉/收进托盘时当然没在看。
+/// - **没最小化** —— 只问 `is_visible` 不够：被最小化到 Dock 的窗口在 macOS 上
+///   仍然报告 visible=true，照那个判断，人把主界面收进 Dock 之后就再也收不到
+///   提醒，而那恰恰是最需要提醒的时候。
+/// - **有焦点** —— 这一条是后加的，也是最常发生的那种：窗口开着、没最小化，
+///   但压在浏览器和编辑器底下，人正在办公。对人来说这和收起来没区别，
+///   只有前两条的话，这种情况下宠物会一直闷着不吭声。
+///
+/// 反过来说，只有当主界面**正在被看**时才安静。这是个保守的方向：宁可多提醒
+/// 一次，也不要让一条消息因为「窗口其实开着」而无人知晓。
 #[tauri::command]
 fn is_main_window_showing(app: AppHandle) -> bool {
     let Some(main) = app.get_webview_window(MAIN_LABEL) else {
         return false;
     };
-    main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false)
+    main.is_visible().unwrap_or(false)
+        && !main.is_minimized().unwrap_or(false)
+        && main.is_focused().unwrap_or(false)
 }
 
 #[tauri::command]
@@ -1398,6 +1286,20 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 主界面失去/得到焦点时通知宠物窗口重新判断一次。
+            //
+            // **少了这一条会漏消息。** 判断「该不该提醒」发生在消息到达那一刻：
+            // 如果那时主界面正开着且有焦点，宠物就不吭声——对的。但人接着切去
+            // 别的应用办公，这条消息就永远停在「当时不用提醒」的结论上，
+            // 而现在人已经看不到它了。焦点一变就再问一次，那条还没读的消息
+            // 才有第二次机会。
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if window.label() == MAIN_LABEL {
+                    if let Some(pet) = window.app_handle().get_webview_window(PET_LABEL) {
+                        let _ = pet.emit("main-focus-changed", *focused);
+                    }
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle();
                 let close_to_tray = app

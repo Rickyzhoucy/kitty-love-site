@@ -592,6 +592,12 @@ class MemoryRecordEmbedding(StringIdMixin, CreatedAtMixin, Base):
 
 
 class Attachment(StringIdMixin, CreatedAtMixin, Base):
+    """用户可见的不可变 Artifact。
+
+    API 仍称 attachment，因为这是产品里的交互名称；服务端按 Artifact 管理版本、
+    来源、Document IR 和渲染预览。修改文件必须生成子版本，不原地覆盖对象。
+    """
+
     __tablename__ = "Attachment"
     owner_id: Mapped[str] = mapped_column("ownerId", ForeignKey("User.id", ondelete="CASCADE"))
     bucket: Mapped[str] = mapped_column(String(80))
@@ -607,6 +613,20 @@ class Attachment(StringIdMixin, CreatedAtMixin, Base):
     parse_error: Mapped[str | None] = mapped_column("parseError", Text, nullable=True)
     derived_bucket: Mapped[str | None] = mapped_column("derivedBucket", String(80), nullable=True)
     thumbnail_key: Mapped[str | None] = mapped_column("thumbnailKey", Text, nullable=True)
+    document_ir_key: Mapped[str | None] = mapped_column("documentIrKey", Text, nullable=True)
+    preview_key: Mapped[str | None] = mapped_column("previewKey", Text, nullable=True)
+    parser: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    artifact_kind: Mapped[str] = mapped_column("artifactKind", String(32), default="upload")
+    artifact_version: Mapped[int] = mapped_column("artifactVersion", Integer, default=1)
+    parent_id: Mapped[str | None] = mapped_column(
+        "parentId", ForeignKey("Attachment.id", ondelete="SET NULL"), nullable=True
+    )
+    source_tool_run_id: Mapped[str | None] = mapped_column(
+        "sourceToolRunId", ForeignKey("ToolRun.id", ondelete="SET NULL"), nullable=True
+    )
+    processing_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "processingMetadata", JsonType, default=dict
+    )
     __table_args__ = (UniqueConstraint("bucket", "objectKey"),)
 
 
@@ -629,6 +649,44 @@ class SkillVersion(StringIdMixin, CreatedAtMixin, Base):
     sha256: Mapped[str] = mapped_column(String(64))
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JsonType, default=dict)
     __table_args__ = (UniqueConstraint("skillId", "revision"),)
+
+
+class McpServer(StringIdMixin, CreatedAtMixin, Base):
+    """Admin 管理的服务器侧 MCP 连接；认证头加密落库且永不回传。"""
+
+    __tablename__ = "McpServer"
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    url: Mapped[str] = mapped_column(Text)
+    transport: Mapped[str] = mapped_column(String(32), default="streamable_http")
+    auth_headers_ciphertext: Mapped[str] = mapped_column(
+        "authHeadersCiphertext", Text, default=""
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(24), default="unverified")
+    last_error: Mapped[str | None] = mapped_column("lastError", Text, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        "lastSyncedAt", DateTime(timezone=True), nullable=True
+    )
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JsonType, default=dict)
+
+
+class McpTool(StringIdMixin, CreatedAtMixin, Base):
+    """同步后的 MCP 工具快照。默认关闭，管理员审核 Schema 后逐项放行。"""
+
+    __tablename__ = "McpTool"
+    server_id: Mapped[str] = mapped_column(
+        "serverId", ForeignKey("McpServer.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    input_schema: Mapped[dict[str, Any]] = mapped_column("inputSchema", JsonType, default=dict)
+    output_schema: Mapped[dict[str, Any] | None] = mapped_column(
+        "outputSchema", JsonType, nullable=True
+    )
+    annotations: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    risk_level: Mapped[str] = mapped_column("riskLevel", String(10), default="high")
+    __table_args__ = (UniqueConstraint("serverId", "name"),)
 
 
 class ToolRun(StringIdMixin, CreatedAtMixin, Base):

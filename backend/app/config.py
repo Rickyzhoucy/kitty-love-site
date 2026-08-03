@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     attachment_max_workbook_rows: int = 20_000
     attachment_max_workbook_cells: int = 200_000
 
+    # 文档理解与渲染都在服务器 Worker。留空只用于单测/极简开发环境，届时会
+    # 明确标记 builtin-degraded；正式 Compose 默认接 Docling Serve + Gotenberg。
+    document_parser_url: str = ""
+    document_parser_api_key: str = ""
+    document_parser_timeout: float = 300.0
+    document_renderer_url: str = ""
+    document_renderer_timeout: float = 120.0
+    document_ir_max_bytes: int = 25 * 1024 * 1024
+
     #: 这两个人所在的时区。**所有「今天」「深夜」都按它算，不按容器时区算。**
     #: 容器跑在 UTC，改这个不需要动容器；详见 app/localtime.py。
     site_timezone: str = "Asia/Shanghai"
@@ -125,6 +134,11 @@ class Settings(BaseSettings):
     skill_max_files: int = 500
     skill_max_output_bytes: int = 1024 * 1024
     skill_script_timeout: float = 30.0
+
+    # MCP Client/Host 只存在于服务器。远程连接由 Admin 登记，模型只能调用已同步、
+    # 已启用的工具，结果还要受字节上限约束。
+    mcp_timeout: float = 60.0
+    mcp_max_result_bytes: int = 1024 * 1024
 
     #: 宠物的工作目录。与 skill 包的缓存分开：那个是只读的、随时可重新materialize
     #: 的派生物，这个是它自己写的东西，重启要还在。

@@ -1,4 +1,4 @@
-//! 本地文件操作（读 / 写 / 追加 / 精确替换 / 执行命令），带路径白名单。
+//! 本地文件操作（读 / 写 / 追加 / 精确替换），带路径白名单。
 //!
 //! ## 闸门为什么在这里，而不在服务端
 //!
@@ -38,23 +38,8 @@
 //! 确认框（发起方就是网页层，让被审查的一方自己画审查界面没有意义），
 //! 以及覆盖前备份到本机回收站。
 //!
-//! ## 执行命令
-//!
-//! `prepare_command` 只校验两件事：工作目录在授权范围内、程序名不带路径。
-//! **命令本身没有白名单**——枚举「安全的命令」是走不通的：`git` 看着无害，
-//! `git config --global core.pager 'sh -c ...'` 就不是。
-//!
-//! 真正的安全来自三条，缺一不可：
-//!
-//! 1. **不经 shell。** 参数是 argv 数组直接交给 `Command`，不拼字符串丢给
-//!    `sh -c`。走 shell 的话 `;`、`&&`、`|`、`$()` 都会被解释，
-//!    「参数」和「命令」的边界就没了——一个文件名参数里带 `; rm -rf ~`
-//!    就能穿过所有闸门。**改成走 shell 之前先想清楚这一点。**
-//! 2. **工作目录受限**，且程序名不许带路径（否则等于能跑任意位置的二进制）。
-//! 3. **每次人工确认**，确认框里是完整命令。
-//!
-//! 仍然**没有删除**：`rm` 得由用户在那个确认框里自己看着同意，
-//! 而不是我们提供一个专门的删除工具。
+//! 这里刻意没有命令执行。桌面端只是固定能力的 Device Broker，不是 Agent
+//! Runtime；任意命令、脚本和第三方依赖必须在服务器隔离 Worker 里运行。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -567,47 +552,6 @@ fn head(text: &str, limit: usize) -> String {
     }
 }
 
-/// 命令输出的截断上限。跑一个 `find /` 的输出能有几百兆，
-/// 塞进模型上下文既没用又烧钱。
-pub const MAX_OUTPUT_BYTES: usize = 32 * 1024;
-
-/// 命令执行的超时。超了就杀掉——一个卡住的子进程会让整轮对话干等到派发超时。
-pub const COMMAND_TIMEOUT_SECS: u64 = 30;
-
-/// 校验工作目录，并把命令拼成给人看的样子。
-///
-/// **命令本身不做白名单。** 试图枚举「安全的命令」是一条走不通的路：
-/// `git` 看着无害，`git config --global core.pager 'sh -c ...'` 就不是了。
-/// 这里的安全性来自另外三条——不经 shell、工作目录受限、每次人工确认。
-pub fn prepare_command(
-    roots: &[String],
-    program: &str,
-    args: &[String],
-    cwd: &str,
-) -> Result<(PathBuf, String), String> {
-    let dir = resolve_within(roots, cwd)?;
-    if !dir.is_dir() {
-        return Err(format!("「{cwd}」不是一个目录"));
-    }
-    if program.trim().is_empty() {
-        return Err("没给命令".into());
-    }
-    // 程序名里带路径分隔符 = 想跑授权目录外的某个可执行文件。
-    // 让它走 PATH，别让模型自己指定二进制的位置。
-    if program.contains('/') || program.contains('\\') {
-        return Err("命令名里不能带路径，直接给名字就行（比如 ls、git）".into());
-    }
-    let display = std::iter::once(program.to_string())
-        .chain(args.iter().map(|a| {
-            // 给人看的时候把带空格的参数引起来，否则
-            // `rm 我的 文件` 和 `rm "我的 文件"` 在确认框里长得一样。
-            if a.contains(' ') { format!("\"{a}\"") } else { a.clone() }
-        }))
-        .collect::<Vec<_>>()
-        .join(" ");
-    Ok((dir, display))
-}
-
 pub fn info(roots: &[String], requested: &str) -> Result<EntryInfo, String> {
     let path = resolve_within(roots, requested)?;
     describe(&path).ok_or_else(|| format!("看不了「{requested}」的信息"))
@@ -759,55 +703,6 @@ mod tests {
         );
     }
 
-
-    /// 命令的工作目录必须在授权范围内，程序名不许带路径。
-    #[test]
-    fn commands_are_confined() {
-        let tmp = std::env::temp_dir().join("kitty-cmd-jail");
-        let _ = fs::remove_dir_all(&tmp);
-        let inside = tmp.join("inside");
-        fs::create_dir_all(&inside).unwrap();
-        let roots = vec![inside.to_string_lossy().into_owned()];
-
-        assert!(prepare_command(&roots, "ls", &[], inside.to_str().unwrap()).is_ok());
-        // 工作目录在授权范围外
-        assert!(prepare_command(&roots, "ls", &[], "/etc").is_err());
-        // 程序名带路径 = 想跑授权目录外的某个二进制
-        assert!(
-            prepare_command(&roots, "/bin/sh", &[], inside.to_str().unwrap()).is_err(),
-            "带路径的程序名应该被拒"
-        );
-        assert!(prepare_command(&roots, "../../bin/sh", &[], inside.to_str().unwrap()).is_err());
-        // 空命令
-        assert!(prepare_command(&roots, "  ", &[], inside.to_str().unwrap()).is_err());
-    }
-
-    /// **shell 元字符只是普通字符。**
-    ///
-    /// 这条钉的是设计而不是实现：参数走 argv 数组直接交给 `Command`，
-    /// 不拼成字符串丢给 `sh -c`。所以 `; rm -rf ~` 这种东西原样出现在
-    /// 确认框里给人看，而不会被解释成第二条命令。
-    ///
-    /// 哪天有人图省事改成 `sh -c format!(...)`，这个用例不会失败——它只是
-    /// 检查展示串。所以这里再留一句话：**改成走 shell 之前先想清楚，
-    /// 那等于把「参数」和「命令」的边界拆掉。**
-    #[test]
-    fn shell_metacharacters_stay_literal_in_the_preview() {
-        let tmp = std::env::temp_dir().join("kitty-cmd-meta");
-        let _ = fs::remove_dir_all(&tmp);
-        fs::create_dir_all(&tmp).unwrap();
-        let roots = vec![tmp.to_string_lossy().into_owned()];
-
-        let (_, display) = prepare_command(
-            &roots,
-            "echo",
-            &["hi; rm -rf ~".to_string()],
-            tmp.to_str().unwrap(),
-        )
-        .unwrap();
-        // 带空格的参数在预览里要被引起来，否则确认框里看不出这是**一个**参数。
-        assert!(display.contains("\"hi; rm -rf ~\""), "预览没引号：{display}");
-    }
 
 
     /// **精确替换要求原文只出现一次。**

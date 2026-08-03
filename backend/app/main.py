@@ -3,6 +3,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.admin_api import router as admin_router
 from app.agents.cognition import CognitionAgent
 from app.agents.conversation import (
     AgentRuntime,
@@ -11,7 +12,6 @@ from app.agents.conversation import (
     build_chat_model,
 )
 from app.agents.roles import AgentRole
-from app.admin_api import router as admin_router
 from app.api import router
 from app.config import get_settings
 from app.db import session_factory
@@ -21,7 +21,6 @@ from app.embeddings import (
 )
 from app.pet_cognition import PetCognitionService
 from app.queue import ProcrastinateJobQueue, procrastinate_app
-from app.skill_api import router as skill_router
 
 
 @asynccontextmanager
@@ -74,7 +73,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(router, prefix=settings.api_prefix)
-    application.include_router(skill_router, prefix=settings.api_prefix)
     # 后台。**自带一套鉴权**（kitty_admin Cookie），与主站会话无关，
     # 理由见 app/admin_auth.py。
     application.include_router(admin_router, prefix=settings.api_prefix)

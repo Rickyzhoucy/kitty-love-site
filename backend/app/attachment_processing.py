@@ -4,6 +4,7 @@ from zipfile import BadZipFile, ZipFile
 from docx import Document
 from openpyxl import load_workbook
 from PIL import Image, ImageOps
+from pptx import Presentation
 from pypdf import PdfReader
 
 
@@ -63,6 +64,15 @@ def extract_text(
             if length >= max_chars:
                 break
             length = _bounded_append(parts, "\n", length, max_chars)
+        for table_index, table in enumerate(document.tables, start=1):
+            length = _bounded_append(parts, f"\n## 表格 {table_index}\n", length, max_chars)
+            for row in table.rows:
+                text = "\t".join(cell.text for cell in row.cells)
+                length = _bounded_append(parts, f"{text}\n", length, max_chars)
+                if length >= max_chars:
+                    break
+            if length >= max_chars:
+                break
         return "".join(parts)
     if suffix == "xlsx":
         _validate_office_archive(content, max_office_uncompressed_bytes)
@@ -92,6 +102,26 @@ def extract_text(
             if length >= max_chars:
                 break
         workbook.close()
+        return "".join(parts)
+    if suffix == "pptx":
+        _validate_office_archive(content, max_office_uncompressed_bytes)
+        presentation = Presentation(BytesIO(content))
+        parts = []
+        length = 0
+        for index, slide in enumerate(presentation.slides, start=1):
+            length = _bounded_append(parts, f"# 幻灯片 {index}\n", length, max_chars)
+            for shape in slide.shapes:
+                text = getattr(shape, "text", "")
+                if text:
+                    length = _bounded_append(parts, f"{text}\n", length, max_chars)
+            notes = slide.notes_slide
+            for shape in notes.shapes:
+                if getattr(shape, "is_placeholder", False):
+                    text = getattr(shape, "text", "")
+                    if text and text.strip() not in {str(index), ""}:
+                        length = _bounded_append(parts, f"备注：{text}\n", length, max_chars)
+            if length >= max_chars:
+                break
         return "".join(parts)
     return None
 

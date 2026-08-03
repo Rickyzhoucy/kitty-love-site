@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings, get_settings
 from app.document_builder import DocumentSpecError, build_document
+from app.document_services import render_preview_pdf
 from app.models import Attachment
 from app.storage import ObjectStorage
 
@@ -43,6 +44,7 @@ async def persist_document(
     filename: str,
     content_type: str,
     content: bytes,
+    document_ir: dict[str, Any] | None = None,
 ) -> Attachment:
     """写进对象存储并登记为附件。
 
@@ -62,9 +64,46 @@ async def persist_document(
         size=len(content),
         sha256=hashlib.sha256(content).hexdigest(),
         status="ready",
+        artifact_kind="generated",
+        parser="kitty-ooxml-v1",
+        processing_metadata={"generator": "kitty-ooxml-v1"},
         # 自己生成的文件不需要再解析一遍取文本——内容本来就是我们写进去的。
         parse_status="ready",
     )
+    if document_ir is not None:
+        encoded_ir = json.dumps(document_ir, ensure_ascii=False, separators=(",", ":")).encode()
+        if len(encoded_ir) > settings.document_ir_max_bytes:
+            raise ValueError("生成文档的 Document IR 超过存储上限")
+        attachment.derived_bucket = settings.minio_derived_bucket
+        attachment.document_ir_key = f"{user_id}/{attachment.id}/document-ir.json"
+        await storage.put_bytes(
+            attachment.derived_bucket,
+            attachment.document_ir_key,
+            encoded_ir,
+            "application/json",
+        )
+    try:
+        preview = await render_preview_pdf(content, content_type, filename, settings)
+    except Exception as error:
+        logger.warning("生成文档预览失败：%s", error)
+        preview = None
+        attachment.processing_metadata = {
+            **attachment.processing_metadata,
+            "renderer": {"status": "failed", "error": str(error)[:1000]},
+        }
+    if preview is not None:
+        attachment.derived_bucket = settings.minio_derived_bucket
+        attachment.preview_key = f"{user_id}/{attachment.id}/preview.pdf"
+        await storage.put_bytes(
+            attachment.derived_bucket,
+            attachment.preview_key,
+            preview,
+            "application/pdf",
+        )
+        attachment.processing_metadata = {
+            **attachment.processing_metadata,
+            "renderer": {"status": "ready", "engine": "gotenberg"},
+        }
     db.add(attachment)
     await db.commit()
     await db.refresh(attachment)
@@ -108,6 +147,13 @@ def build_document_tools(
                 built.filename,
                 built.content_type,
                 built.content,
+                {
+                    "schemaVersion": "1.0",
+                    "format": kind,
+                    "title": title,
+                    "blocks": blocks,
+                    "generator": "kitty-ooxml-v1",
+                },
             )
         return json.dumps(
             {

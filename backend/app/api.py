@@ -231,9 +231,18 @@ async def attachment_response(
         status=attachment.status,
         parse_status=attachment.parse_status,
         parse_error=attachment.parse_error,
+        parser=attachment.parser,
+        artifact_kind=attachment.artifact_kind,
+        artifact_version=attachment.artifact_version,
+        parent_id=attachment.parent_id,
         download_url=f"/api/v1/attachments/{attachment.id}/content",
         thumbnail_url=(
             f"/api/v1/attachments/{attachment.id}/thumbnail" if attachment.thumbnail_key else None
+        ),
+        preview_url=(
+            f"/api/v1/attachments/{attachment.id}/preview"
+            if attachment.preview_key or attachment.content_type == "application/pdf"
+            else None
         ),
     )
 
@@ -1791,6 +1800,65 @@ async def attachment_thumbnail(
             {
                 "response-content-disposition": "inline",
                 "response-content-type": "image/webp",
+            },
+        ),
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    )
+
+
+@router.get("/attachments/{attachment_id}/preview")
+async def attachment_preview(
+    attachment_id: str,
+    user: CurrentUser,
+    db: Db,
+    storage: Storage,
+) -> RedirectResponse:
+    attachment = await db.get(Attachment, attachment_id)
+    if attachment is None or attachment.owner_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "文档预览不存在")
+    if attachment.preview_key and attachment.derived_bucket:
+        bucket, object_key = attachment.derived_bucket, attachment.preview_key
+    elif attachment.content_type == "application/pdf":
+        bucket, object_key = attachment.bucket, attachment.object_key
+    else:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "文档预览不存在")
+    return RedirectResponse(
+        await storage.presign_get(
+            bucket,
+            object_key,
+            {
+                "response-content-disposition": "inline",
+                "response-content-type": "application/pdf",
+                "response-cache-control": "private, max-age=86400, immutable",
+            },
+        ),
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    )
+
+
+@router.get("/attachments/{attachment_id}/document-ir")
+async def attachment_document_ir(
+    attachment_id: str,
+    user: CurrentUser,
+    db: Db,
+    storage: Storage,
+) -> RedirectResponse:
+    attachment = await db.get(Attachment, attachment_id)
+    if (
+        attachment is None
+        or attachment.owner_id != user.id
+        or attachment.derived_bucket is None
+        or attachment.document_ir_key is None
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document IR 不存在")
+    return RedirectResponse(
+        await storage.presign_get(
+            attachment.derived_bucket,
+            attachment.document_ir_key,
+            {
+                "response-content-disposition": "attachment",
+                "response-content-type": "application/json",
+                "response-cache-control": "private, max-age=600",
             },
         ),
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,

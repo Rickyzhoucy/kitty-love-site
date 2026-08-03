@@ -21,3 +21,7 @@ class AgentContext:
     memory_ids: list[str] = field(default_factory=list)
     skill_context: str = ""
     skill_versions: dict[str, str] = field(default_factory=dict)
+    #: 当前服务器语义任务。工具审计用它把执行调用挂回 AgentTask。
+    task_id: str | None = None
+    #: 只在这一轮运行时内递增；赋值发生在首次 await 前，可安全区分并行工具调用。
+    task_step_sequence: int = 0
