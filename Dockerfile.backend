@@ -74,21 +74,33 @@ RUN if [ -n "$PYPI_PACKAGE_BASE" ]; then \
 RUN git config --global http.lowSpeedLimit 1000 \
     && git config --global http.lowSpeedTime 30
 
-# 重试 5 次，间隔递增。PyPI 那部分现在走镜像站，很快，所以重试的代价基本
-# 只是再试一次 git。
-RUN for i in 1 2 3 4 5; do \
+# 重试。PyPI 那部分现在走镜像站，很快，所以重试的代价基本只是再试一次 git。
+#
+# **次数从 5 提到 12，退避改成固定 8 秒。** 依据是在生产机上又量了一轮
+# `git ls-remote`：4 次里 1 次成功，成功那次只用 2 秒，失败的三次都是卡到
+# 超时才断。也就是说这不是「慢」，是「要么很快通、要么完全不通」。
+#
+# 按 25% 的成功率算，5 次全失败的概率是 0.75^5 ≈ 24%——每四次部署就有一次
+# 整个构建挂掉，实际也确实挂了。提到 12 次后降到 0.75^12 ≈ 3%。
+#
+# 退避从递增（10/20/30…，12 次要睡 450 秒）改成固定 8 秒：这个故障不是
+# 「对面过载了、等久点会好」，而是连接被随机掐掉，多等没有额外收益，
+# 只是把构建时间线性拉长。配合上面的 lowSpeedTime=30，最坏约 8 分钟。
+RUN for i in $(seq 1 12); do \
       uv sync --frozen --no-dev --no-install-project && break; \
-      echo "uv sync 第 $i 次失败（多半是 github 抽风），等 $((i*10)) 秒再试"; \
-      [ "$i" = 5 ] && exit 1; \
-      sleep $((i*10)); \
+      echo "uv sync 第 $i 次失败（多半是 github 抽风），等 8 秒再试"; \
+      [ "$i" = 12 ] && exit 1; \
+      sleep 8; \
     done
 
 COPY backend/ ./
-RUN for i in 1 2 3; do \
+# 同样的 git 依赖，同样的故障模式——上一层已经把它拉进 uv 缓存，正常不会再
+# 走网络；但缓存没命中时失败方式一模一样，所以重试策略也保持一致。
+RUN for i in $(seq 1 12); do \
       uv sync --frozen --no-dev && break; \
-      echo "uv sync（含项目本身）第 $i 次失败，等 $((i*10)) 秒再试"; \
-      [ "$i" = 3 ] && exit 1; \
-      sleep $((i*10)); \
+      echo "uv sync（含项目本身）第 $i 次失败，等 8 秒再试"; \
+      [ "$i" = 12 ] && exit 1; \
+      sleep 8; \
     done
 
 ENV PATH="/app/.venv/bin:$PATH"
