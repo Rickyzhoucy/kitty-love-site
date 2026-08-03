@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Lock, Monitor, PawPrint, Power, Ruler } from 'lucide-react';
+import { FolderOpen, Lock, Monitor, PawPrint, Plus, Power, Ruler, Trash2 } from 'lucide-react';
+import Button from './ui/Button';
 import { isTauriDesktop } from '@/lib/desktop';
 import {
     DEFAULT_DESKTOP_SETTINGS,
@@ -20,6 +21,7 @@ export default function DesktopSettingsPanel() {
     const [available, setAvailable] = useState(false);
     const [settings, setSettings] = useState<DesktopSettings>(DEFAULT_DESKTOP_SETTINGS);
     const [busy, setBusy] = useState(false);
+    const [note, setNote] = useState<string | null>(null);
 
     useEffect(() => {
         if (!isTauriDesktop()) return;
@@ -49,6 +51,30 @@ export default function DesktopSettingsPanel() {
             setBusy(false);
         }
     }, [settings]);
+
+    /**
+     * 用系统原生对话框选目录。
+     *
+     * **刻意不给手打路径的输入框。** 打错一个字的后果是「授权了一个不存在的
+     * 目录」——之后宠物说读不到，而人完全看不出是路径写错了。原生选择器选出来
+     * 的一定存在，也一定是用户真的看着点下去的。
+     */
+    const addFolder = async () => {
+        setNote(null);
+        try {
+            const { open } = await import('@tauri-apps/plugin-dialog');
+            const picked = await open({ directory: true, multiple: false });
+            if (typeof picked !== 'string') return;
+            const current = settings.allowedRoots ?? [];
+            if (current.includes(picked)) {
+                setNote('这个文件夹已经加过了');
+                return;
+            }
+            await patch({ allowedRoots: [...current, picked] });
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : '选文件夹失败');
+        }
+    };
 
     if (!available) return null;
 
@@ -115,6 +141,53 @@ export default function DesktopSettingsPanel() {
                         </button>
                     ))}
                 </div>
+            </div>
+
+            <div className="mt-4 border-t border-sunken pt-3">
+                <p className="m-0 mb-1 flex items-center gap-1.5 text-sm text-ink">
+                    <FolderOpen size={15} className="text-accent" />
+                    允许它读的文件夹
+                </p>
+                <p className="mb-2 mt-0 text-xs leading-relaxed text-ink-muted">
+                    <strong className="text-ink">默认一个都不给。</strong>
+                    加进来的目录，Kitty 才能读里面的文件（只能读，不能改、不能删）。
+                    隐藏文件（`.` 开头的）永远不读。
+                </p>
+
+                <ul className="m-0 mb-2 flex list-none flex-col gap-1.5 p-0">
+                    {(settings.allowedRoots ?? []).map(root => (
+                        <li
+                            key={root}
+                            className="flex items-center gap-2 rounded-xl bg-sunken/40 px-3 py-2"
+                        >
+                            <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">
+                                {root}
+                            </span>
+                            <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void patch({
+                                    allowedRoots: settings.allowedRoots.filter(item => item !== root),
+                                })}
+                                aria-label={`取消授权 ${root}`}
+                                className="shrink-0 cursor-pointer rounded-lg p-1 text-ink-muted transition-colors hover:bg-danger/10 hover:text-danger"
+                            >
+                                <Trash2 size={14} />
+                            </button>
+                        </li>
+                    ))}
+                </ul>
+
+                <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void addFolder()}
+                >
+                    <Plus size={15} />
+                    选一个文件夹
+                </Button>
+                {note && <p className="m-0 mt-2 text-xs text-danger">{note}</p>}
             </div>
 
             <p className="mb-0 mt-3 text-xs leading-relaxed text-ink-muted">

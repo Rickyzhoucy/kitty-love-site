@@ -23,6 +23,8 @@
     "allow-desktop-settings",
     "allow-window-control",
     "autostart:default",
-    "allow-server-url"
+    "allow-server-url",
+    "allow-local-files",
+    "dialog:allow-open"
   ]
 }

@@ -16,6 +16,10 @@ keyring = "3.6"
 #   macOSPrivateApi 同时开**，只开一边构建脚本会直接报错。
 #   代价是用了私有 API 的包上不了 Mac App Store——这个站是私人分发，无所谓。
 tauri = { version = "2.9", features = ["tray-icon", "macos-private-api"] }
+# 选文件夹用系统原生对话框。**不能让用户手打路径**——
+# 打错一个字的后果是「授权了一个不存在的目录」，然后宠物说读不到，
+# 而人完全看不出是路径写错了。原生选择器选出来的一定存在。
+tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }

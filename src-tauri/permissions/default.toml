@@ -40,3 +40,11 @@ commands.allow = [
 identifier = "allow-server-url"
 description = "Reads and updates the self-hosted server address from the bundled setup page."
 commands.allow = ["get_server_url", "save_server_url", "close_setup_window"]
+
+# 本地文件（二期，只读）。
+# 命令本身不带白名单参数——白名单从本机设置里取，前端**改不了**它。
+# 这一点是刻意的：远端页面能调这个命令，但决定不了它能读哪儿。
+[[permission]]
+identifier = "allow-local-files"
+description = "Runs read-only local file lookups inside the user's allow-listed directories."
+commands.allow = ["run_local_tool"]

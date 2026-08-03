@@ -43,6 +43,14 @@ export interface DesktopSettings {
     /** 上次宠物窗口的位置，还没摆过时是 null。 */
     petX: number | null;
     petY: number | null;
+    /**
+     * 允许宠物读取的目录。**默认空：一个都不给。**
+     *
+     * 这份是显示用的副本，真正的闸门在 Rust 侧（src-tauri/src/local_fs.rs）
+     * 按同一份配置校验。服务端也存了一份同名字段，那份**只**用于在设置页展示，
+     * 不参与任何判断——把闸门放在可能被提示注入影响的一侧就不叫闸门了。
+     */
+    allowedRoots: string[];
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
@@ -55,6 +63,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
     closeToTray: true,
     petX: null,
     petY: null,
+    allowedRoots: [],
 };
 
 /**

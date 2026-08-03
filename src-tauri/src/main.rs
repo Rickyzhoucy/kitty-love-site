@@ -13,6 +13,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod local_fs;
 mod settings;
 
 use settings::{DesktopSettings, SettingsState};
@@ -196,6 +197,85 @@ fn set_pet_expanded(app: AppHandle, state: tauri::State<'_, SettingsState>, expa
     let _ = pet.set_shadow(false);
     if let Some(position) = next_position {
         let _ = pet.set_position(position);
+    }
+}
+
+// ── 本地文件（二期）──────────────────────────────────────────────────
+
+/// 执行一次本地文件调用。**闸门在这儿，不在服务端。**
+///
+/// 云端那个 agent 会读联网搜索结果、对方的消息——全是不可信输入。把「能不能读
+/// 这个路径」交给它判断，等于把闸门交给一个可能被提示注入影响的系统。
+/// 所以白名单从**本机配置**里取，校验也在本机做（见 local_fs.rs）。
+///
+/// 返回值刻意做成 `Result<Value, String>`：拒绝的理由要能原样交给模型，
+/// 让它知道该去调 local_roots，而不是换个写法反复重试。
+#[tauri::command]
+fn run_local_tool(
+    app: AppHandle,
+    state: tauri::State<'_, SettingsState>,
+    tool: String,
+    arguments: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let roots = { state.0.lock().unwrap().allowed_roots.clone() };
+    let arg = |key: &str| -> String {
+        arguments
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    let outcome = match tool.as_str() {
+        "local_roots" => Ok(serde_json::json!({ "roots": roots })),
+        "local_list" => local_fs::list(&roots, &arg("path"))
+            .map(|items| serde_json::json!({ "entries": items })),
+        "local_read" => {
+            local_fs::read(&roots, &arg("path")).map(|text| serde_json::json!({ "content": text }))
+        }
+        "local_search" => local_fs::search(&roots, &arg("path"), &arg("pattern"))
+            .map(|items| serde_json::json!({ "entries": items })),
+        "local_info" => {
+            local_fs::info(&roots, &arg("path")).map(|item| serde_json::json!({ "info": item }))
+        }
+        // **默认拒绝。** 服务端将来加了新工具而这里还没实现时，结果应该是
+        // 「不支持」，而不是掉进某个分支去做一件没想清楚的事。
+        other => Err(format!("这个版本的桌面端不支持「{other}」")),
+    };
+
+    audit(&app, &tool, &arg("path"), &outcome);
+    outcome
+}
+
+/// 把每一次本地调用记在本机。
+///
+/// **审计必须在本地。** 出了事之后想知道「它到底读过什么」，不能只依赖服务端
+/// 日志——那份在云上，而这件事发生在你的电脑上。
+fn audit(app: &AppHandle, tool: &str, path: &str, outcome: &Result<serde_json::Value, String>) {
+    let Ok(dir) = app.path().app_config_dir() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let verdict = match outcome {
+        Ok(_) => "允许".to_string(),
+        Err(reason) => format!("拒绝：{reason}"),
+    };
+    let now = local_fs::format_epoch_public(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
+    let line = format!("{now}\t{tool}\t{path}\t{verdict}\n");
+    // 追加写。写不进去不该连累宠物读文件，但也不能悄悄吞掉——
+    // 一个「有审计」却其实没在记的系统比没有审计更糟。
+    if let Err(error) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("local-access.log"))
+        .and_then(|mut file| std::io::Write::write_all(&mut file, line.as_bytes()))
+    {
+        eprintln!("审计日志写不进去：{error}");
     }
 }
 
@@ -622,6 +702,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app.clone());
         }))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -637,6 +718,7 @@ fn main() {
             start_pet_dragging,
             set_pet_ready,
             set_pet_expanded,
+            run_local_tool,
             show_pet_context_menu,
             get_server_url,
             save_server_url,

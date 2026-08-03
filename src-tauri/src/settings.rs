@@ -23,6 +23,11 @@ pub struct DesktopSettings {
     /// 自托管，人家不可能为了换个域名重新打一次包；而写死成环境变量的话，
     /// 双击启动的 .app 根本读不到。
     pub server_url: Option<String>,
+    /// 允许宠物读取的目录。**这份才是真正的闸门**——服务端那份同名字段只用于
+    /// 在设置页展示。校验必须发生在本机，见 local_fs.rs 顶部。
+    ///
+    /// 默认空：一个目录都不给。用户显式加进来的才算数。
+    pub allowed_roots: Vec<String>,
     /// 锁定：整窗鼠标穿透，宠物变纯装饰，点不到也拖不动。
     pub locked: bool,
     /// 宠物窗口置顶。
@@ -44,6 +49,7 @@ impl Default for DesktopSettings {
     fn default() -> Self {
         Self {
             server_url: None,
+            allowed_roots: Vec::new(),
             // **默认不锁。** 第一次打开如果宠物点不动，用户只会以为它坏了，
             // 而不会想到去托盘里找一个「锁定」开关。
             locked: false,
