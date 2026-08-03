@@ -75,12 +75,17 @@ WORKSPACE_TOOLS = frozenset(
 #:
 #: 与 WORKSPACE_TOOLS 的对比很说明问题：工作区**给了 ASSIST**，因为那是沙箱里
 #: 一块隔离的草稿纸，写坏了只丢草稿；本地文件是用户的真实家目录，读出去就收不回。
+#: `local_write` 也在这一档里，而且**只该在这一档**。
+#: 它每次都会在用户机器上弹系统确认框（见 src-tauri 的 write_with_consent），
+#: 但那道闸的前提是「用户此刻就在电脑前」——只有 CONVERSATION 满足这一点。
+#: 给 COGNITION 的话，会变成没人在的时候弹一个框，然后一直挂在那儿。
 LOCAL_FILE_TOOLS = frozenset(
     {
         "local_list",
         "local_read",
         "local_search",
         "local_info",
+        "local_write",
         "local_roots",
     }
 )

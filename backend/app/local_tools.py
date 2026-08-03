@@ -70,6 +70,17 @@ def build_local_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         """看**用户自己电脑上**某个文件的信息（大小、修改时间、是不是目录）。"""
         return await run(runtime, "local_info", path=path)
 
+    @tool("local_write")
+    async def local_write(path: str, content: str, runtime: ToolRuntime) -> Any:
+        """在**用户自己电脑上**写一个文本文件（新建或覆盖）。
+
+        **每一次都会弹出系统确认框给用户看**，显示完整路径和内容开头——
+        你写的东西他会先过目。被拒绝时直接说明，不要换个路径重试。
+
+        覆盖已有文件时原文件会自动备份，可以找回。只能写在授权目录里。
+        """
+        return await run(runtime, "local_write", path=path, content=content)
+
     @tool("local_roots")
     async def local_roots(runtime: ToolRuntime) -> Any:
         """看用户授权了哪些目录给你。
@@ -78,4 +89,4 @@ def build_local_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         """
         return await run(runtime, "local_roots")
 
-    return [local_list, local_read, local_search, local_info, local_roots]
+    return [local_list, local_read, local_search, local_info, local_write, local_roots]

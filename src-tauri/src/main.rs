@@ -241,6 +241,7 @@ fn run_local_tool(
         "local_info" => {
             local_fs::info(&roots, &arg("path")).map(|item| serde_json::json!({ "info": item }))
         }
+        "local_write" => write_with_consent(&app, &roots, &arg("path"), &arg("content")),
         // **默认拒绝。** 服务端将来加了新工具而这里还没实现时，结果应该是
         // 「不支持」，而不是掉进某个分支去做一件没想清楚的事。
         other => Err(format!("这个版本的桌面端不支持「{other}」")),
@@ -248,6 +249,68 @@ fn run_local_tool(
 
     audit(&app, &tool, &arg("path"), &outcome);
     outcome
+}
+
+/// 写文件。**每一次都弹系统确认框，没有「永久允许」。**
+///
+/// 这是整个本地能力里唯一不可逆的一步，所以三道闸：
+///
+/// 1. **路径**：父目录必须在白名单里，文件名不许带分隔符（见 resolve_for_write）；
+/// 2. **人**：系统原生确认框，显示完整路径和内容开头。用原生而不是网页弹窗，
+///    是因为发起方就是那个网页层——让被审查的一方自己画审查界面没有意义；
+/// 3. **可撤销**：覆盖前先把原文件备份到本机回收站。
+///
+/// 没做「10 分钟内允许」那类会话授权：读可以自动，写每次都该看一眼。
+/// 一个能连写二十个文件而只问一次的宠物，和没有闸门差别不大。
+fn write_with_consent(
+    app: &AppHandle,
+    roots: &[String],
+    path: &str,
+    content: &str,
+) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    let target = local_fs::resolve_for_write(roots, path)?;
+    let existed = target.exists();
+    let preview: String = content.chars().take(400).collect();
+    let ellipsis = if content.chars().count() > 400 { "\n…" } else { "" };
+    let headline = if existed { "覆盖这个文件？" } else { "新建这个文件？" };
+
+    let approved = app
+        .dialog()
+        .message(format!(
+            "{}\n\n{}\n\n{} 字符{}\n\n内容开头：\n{preview}{ellipsis}",
+            target.display(),
+            if existed { "原文件会先备份到回收站，可以找回。" } else { "这是一个新文件。" },
+            content.chars().count(),
+            if existed { "（覆盖）" } else { "" },
+        ))
+        .title(headline)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            (if existed { "覆盖" } else { "创建" }).into(),
+            "取消".into(),
+        ))
+        .blocking_show();
+
+    if !approved {
+        // 拒绝要让模型明确知道是**人**拒绝的，不是路径不对——
+        // 否则它会换个路径反复试。
+        return Err("你拒绝了这次写入。".into());
+    }
+
+    let backup = app
+        .path()
+        .app_config_dir()
+        .ok()
+        .and_then(|dir| local_fs::backup_before_write(&dir, &target));
+
+    std::fs::write(&target, content).map_err(|e| format!("写不进去：{e}"))?;
+    Ok(serde_json::json!({
+        "path": target.to_string_lossy(),
+        "bytes": content.len(),
+        "backedUpTo": backup.map(|p| p.to_string_lossy().into_owned()),
+    }))
 }
 
 /// 聊天框里打 `@` 时的文件候选。

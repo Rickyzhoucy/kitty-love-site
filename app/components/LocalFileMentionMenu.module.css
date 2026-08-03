@@ -1,0 +1,60 @@
+/* 本机文件候选菜单。两个输入框共用（私聊页、宠物对话面板），
+   所以定位靠 `position: absolute` + 调用方给的定位上下文，自己不假设贴在哪儿。 */
+.menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  /* 十几条候选必须能滚——不封顶的话菜单会从输入框一路顶出屏幕，
+     而在两百像素宽的宠物窗里这个后果尤其明显。 */
+  max-height: min(260px, 40vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 88%);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lift);
+}
+
+.item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-ink);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover:not(:disabled),
+.item:focus-visible {
+  background: var(--color-accent-soft);
+}
+
+.item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hint {
+  flex: none;
+  color: var(--color-ink-muted);
+  font-size: 11px;
+}

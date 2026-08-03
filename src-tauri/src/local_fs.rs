@@ -14,14 +14,21 @@
 //! 服务器本身不拦。既然闸门无论如何都要自己写，那多一个进程和一个运行时依赖
 //! 就不值当了。
 //!
-//! ## 二期只读；三期放开写时这里要改
+//! ## 读和写用的是两条不同的夹取逻辑
 //!
-//! 现在用 `canonicalize()` + `starts_with()`：前者会解析符号链接，所以
-//! 「白名单里放一个软链指向 /etc」这种逃逸会被后者挡下。
+//! **读**（`resolve_within`）：`canonicalize()` + `starts_with()`。前者会解析
+//! 符号链接，所以「白名单里放个软链指向 /etc」这种逃逸会被后者挡下。
 //!
-//! **但 `canonicalize()` 要求路径已经存在。** 三期要写新文件时它会直接失败，
-//! 那时候不能图省事改成「先校验父目录」——父目录校验完到真正写入之间有 TOCTOU
-//! 窗口。应该换成 `soft-canonicalize` 或 `path_jail` 这类专门处理不存在路径的库。
+//! **写**（`resolve_for_write`）：`canonicalize()` 要求路径已经存在，写新文件时
+//! 必然失败，所以改成规范化**父目录**再把文件名拼回去。这条路有个经典缺口——
+//! 父目录过了之后，一个 `../../etc/passwd` 的「文件名」照样能落到白名单外，
+//! 所以文件名里不许出现分隔符。有测试专门钉这一条。
+//!
+//! 写还多两道闸，都在 main.rs 的 `write_with_consent` 里：每次弹**系统原生**
+//! 确认框（发起方就是网页层，让被审查的一方自己画审查界面没有意义），
+//! 以及覆盖前备份到本机回收站。
+//!
+//! 仍然**没有删除、没有执行**。那两样的不可逆程度和「写一个文件」不是一个量级。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -338,6 +345,67 @@ pub fn read_for_attach(roots: &[String], requested: &str) -> Result<(String, Vec
     Ok((name, bytes))
 }
 
+/// 写入用的路径夹取。**和只读那条不是同一个函数，这是刻意的。**
+///
+/// `canonicalize()` 要求路径已经存在——写新文件时它必然失败。所以这里改成
+/// 规范化**父目录**（父目录必须存在、且必须在白名单里），再把文件名拼回去。
+///
+/// 文件名里不许有分隔符：父目录校验完之后，一个 `../../etc/passwd` 的「文件名」
+/// 就能把写入落到白名单外。这一条不能省——它正是「校验父目录」这个做法的
+/// 那个经典缺口。
+pub fn resolve_for_write(roots: &[String], requested: &str) -> Result<PathBuf, String> {
+    if roots.is_empty() {
+        return Err("还没有授权任何目录。去桌面版的设置里加一个吧。".into());
+    }
+    let target = expand_tilde(requested);
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("这个路径没法写：{requested}"))?;
+    let name = target
+        .file_name()
+        .ok_or_else(|| format!("没有文件名：{requested}"))?
+        .to_string_lossy()
+        .into_owned();
+    if name.contains('/') || name.contains('\\') || name == ".." || name == "." {
+        return Err("文件名不合法".into());
+    }
+
+    let parent_real = parent
+        .canonicalize()
+        .map_err(|_| format!("这个文件夹不存在：{}", parent.display()))?;
+    for root in roots {
+        let Ok(root_real) = expand_tilde(root).canonicalize() else {
+            continue;
+        };
+        if parent_real.starts_with(&root_real) {
+            return Ok(parent_real.join(name));
+        }
+    }
+    Err(format!(
+        "「{requested}」不在授权范围内。用 local_roots 看看能写哪些目录。"
+    ))
+}
+
+/// 覆盖之前先备份到本机回收站，可以找回来。
+///
+/// **没有备份的覆盖是不可逆的**，而这一侧的调用方是个模型——它完全可能理解错
+/// 你的意思，把一份东西写成另一份。备份让「它改坏了」从事故降级成麻烦。
+pub fn backup_before_write(app_dir: &Path, target: &Path) -> Option<PathBuf> {
+    if !target.exists() {
+        return None;
+    }
+    let trash = app_dir.join("local-backups");
+    fs::create_dir_all(&trash).ok()?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let name = target.file_name()?.to_string_lossy().into_owned();
+    let backup = trash.join(format!("{stamp}-{name}"));
+    fs::copy(target, &backup).ok()?;
+    Some(backup)
+}
+
 pub fn info(roots: &[String], requested: &str) -> Result<EntryInfo, String> {
     let path = resolve_within(roots, requested)?;
     describe(&path).ok_or_else(|| format!("看不了「{requested}」的信息"))
@@ -422,6 +490,49 @@ mod tests {
         assert_eq!(name, "ok.txt");
         assert_eq!(bytes, b"hello");
         assert!(read_for_attach(&roots, tmp.join("outside.txt").to_str().unwrap()).is_err());
+    }
+
+    /// 写入的路径夹取：父目录必须在白名单里，文件名不许带分隔符。
+    ///
+    /// **后半条是「校验父目录」这个做法的经典缺口**：父目录过了之后，
+    /// 一个 `../../etc/passwd` 的「文件名」就能把写入落到白名单外。
+    #[test]
+    fn writes_cannot_escape_through_the_filename() {
+        let tmp = std::env::temp_dir().join("kitty-write-jail");
+        let _ = fs::remove_dir_all(&tmp);
+        let inside = tmp.join("inside");
+        fs::create_dir_all(&inside).unwrap();
+        let roots = vec![inside.to_string_lossy().into_owned()];
+
+        // 新文件（还不存在）也要能解析出来——这正是 canonicalize 做不到的。
+        let ok = resolve_for_write(&roots, inside.join("新建.md").to_str().unwrap());
+        assert!(ok.is_ok(), "写新文件被拒了：{ok:?}");
+
+        // 文件名里带分隔符 → 拒绝
+        let sneaky = format!("{}/{}", inside.display(), "../../etc/passwd");
+        assert!(resolve_for_write(&roots, &sneaky).is_err());
+
+        // 父目录在白名单外 → 拒绝
+        assert!(resolve_for_write(&roots, "/etc/newfile.txt").is_err());
+
+        // 父目录不存在 → 拒绝（而不是默默建一串目录）
+        let missing = inside.join("还没有的目录/x.md");
+        assert!(resolve_for_write(&roots, missing.to_str().unwrap()).is_err());
+    }
+
+    /// 覆盖前会留一份备份。
+    #[test]
+    fn overwrite_leaves_a_backup() {
+        let tmp = std::env::temp_dir().join("kitty-backup-test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let target = tmp.join("日记.md");
+        fs::write(&target, b"original").unwrap();
+
+        let backup = backup_before_write(&tmp, &target).expect("应该有备份");
+        assert_eq!(fs::read(&backup).unwrap(), b"original");
+        // 新文件没有可备份的东西，返回 None 而不是报错。
+        assert!(backup_before_write(&tmp, &tmp.join("nope.md")).is_none());
     }
 
     /// 符号链接指向白名单外时也要拒绝——这是 canonicalize 存在的理由。
