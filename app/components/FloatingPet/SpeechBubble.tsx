@@ -37,6 +37,7 @@ export default function SpeechBubble({
     onClose,
     onReply,
     sending = false,
+    approval,
 }: {
     text: string;
     petName: string;
@@ -50,6 +51,8 @@ export default function SpeechBubble({
     onReply?: (text: string) => void;
     /** 它还在说（流式输出中）。这时候不该让人回，那句话还没说完。 */
     sending?: boolean;
+    /** 等你点头的那件事（改文件 / 跑命令）。挂在正文下面。 */
+    approval?: React.ReactNode;
 }) {
     const [draft, setDraft] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
@@ -82,6 +85,8 @@ export default function SpeechBubble({
             <div className={styles.speechScroll}>
                 <Markdown content={text} className={styles.speechBody} />
             </div>
+
+            {approval}
 
             {/* 直接回这一条。
                 **这里刻意不做成聊天记录。** 上面那段话就是上下文，回完之后

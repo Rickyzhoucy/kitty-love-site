@@ -28,6 +28,16 @@ pub struct DesktopSettings {
     ///
     /// 默认空：一个目录都不给。用户显式加进来的才算数。
     pub allowed_roots: Vec<String>,
+    /// 什么时候弹确认框。
+    ///
+    /// - `"risky"`（默认）：**只在会毁掉已有内容时问**——覆盖已有文件、
+    ///   精确替换、执行命令。新建文件和追加不问，因为它们一个字节都不会毁。
+    /// - `"always"`：每次都问。
+    ///
+    /// 默认从 `always` 改成 `risky` 是实际用下来的结论：给追加也弹框，
+    /// 只会让人养成不看内容直接点「执行」的习惯——那反而把真正危险的
+    /// 那一次也一起放过去了。**弹框要少而准，它才有意义。**
+    pub write_approval: String,
     /// 锁定：整窗鼠标穿透，宠物变纯装饰，点不到也拖不动。
     pub locked: bool,
     /// 宠物窗口置顶。
@@ -50,6 +60,7 @@ impl Default for DesktopSettings {
         Self {
             server_url: None,
             allowed_roots: Vec::new(),
+            write_approval: "risky".into(),
             // **默认不锁。** 第一次打开如果宠物点不动，用户只会以为它坏了，
             // 而不会想到去托盘里找一个「锁定」开关。
             locked: false,

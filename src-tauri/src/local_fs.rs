@@ -470,6 +470,11 @@ pub struct Planned {
     /// 给人看的改动预览。
     pub preview: String,
     pub existed: bool,
+    /// 这次改动会不会毁掉已有内容。
+    ///
+    /// 新建和追加是 false——原有的一个字节都不动。覆盖已有文件和精确替换是
+    /// true。确认框只在 true 时弹，**弹框要少而准才有意义**。
+    pub destructive: bool,
 }
 
 /// 读出现有内容。文件不存在时给空串——追加到一个还不存在的文件上
@@ -505,6 +510,8 @@ pub fn plan_change(
             title: if existed { "覆盖这个文件？" } else { "新建这个文件？" },
             preview: format!("新内容开头：\n{}", head(a, 400)),
             existed,
+            // 覆盖一个已有文件会毁掉原内容；写一个新文件不会。
+            destructive: existed,
         },
         Change::Append => {
             // 原文件不以换行结尾时补一个，否则追加的内容会黏在最后一行后面。
@@ -514,6 +521,7 @@ pub fn plan_change(
                 title: "在文件末尾追加？",
                 preview: format!("要追加的内容：\n{}", head(a, 400)),
                 existed,
+                destructive: false,
             }
         }
         Change::Edit => {
@@ -537,6 +545,7 @@ pub fn plan_change(
                 title: "修改这个文件？",
                 preview: format!("把这段：\n{}\n\n换成：\n{}", head(a, 240), head(b, 240)),
                 existed,
+                destructive: true,
             }
         }
     };

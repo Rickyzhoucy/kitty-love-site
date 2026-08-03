@@ -1,0 +1,94 @@
+/* 长在宠物气泡里的授权卡片。
+ *
+ * 视觉上刻意**不像系统弹窗**：圆角、暖色、和气泡同一套语言。但也不能太轻——
+ * 这是一次真实的文件改动，用户得看出来这一下和「点个赞」不是一回事。
+ * 所以左边留一条 accent 竖线，把它和普通气泡内容区分开。 */
+.card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-accent), transparent 94%);
+}
+
+.title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.path {
+  margin: 0 0 8px;
+  overflow: hidden;
+  color: var(--color-ink-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* 路径太长时截前面，保留文件名——那才是你要看的部分 */
+  text-align: left;
+}
+
+/* 内容和命令按原样显示：Markdown 渲染会把 `**` 吃掉、把缩进压平，
+   而你正是要照着这段判断该不该同意。 */
+.preview {
+  max-height: 160px;
+  margin: 0 0 8px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-surface), transparent 20%);
+  color: var(--color-ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.note {
+  margin: 0 0 8px;
+  color: var(--color-ink-muted);
+  font-size: 11px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.approve,
+.reject {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.approve {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+/* 拒绝不做成危险色：拒绝是安全的那个选择，不该看起来像在做坏事。
+   真正需要用户停一下的是「可以」那一边。 */
+.reject {
+  border-color: color-mix(in oklch, var(--color-ink), transparent 85%);
+  background: transparent;
+  color: var(--color-ink-muted);
+}
+
+.approve:disabled,
+.reject:disabled {
+  cursor: default;
+  opacity: 0.55;
+}

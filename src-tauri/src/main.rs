@@ -220,7 +220,15 @@ fn run_local_tool(
     tool: String,
     arguments: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let roots = { state.0.lock().unwrap().allowed_roots.clone() };
+    let (roots, approval_mode) = {
+        let guard = state.0.lock().unwrap();
+        (guard.allowed_roots.clone(), guard.write_approval.clone())
+    };
+    // 第二趟兑现时网页层会把 Rust 发出去的 id 带回来（见 change_with_consent）。
+    let approval_id = arguments
+        .get("approvalId")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let arg = |key: &str| -> String {
         arguments
             .get(key)
@@ -243,13 +251,16 @@ fn run_local_tool(
         }
         "local_write" => change_with_consent(
             &app, &roots, &arg("path"), local_fs::Change::Overwrite, &arg("content"), "",
+            approval_id.as_deref(), &approval_mode,
         ),
         "local_append" => change_with_consent(
             &app, &roots, &arg("path"), local_fs::Change::Append, &arg("content"), "",
+            approval_id.as_deref(), &approval_mode,
         ),
         "local_edit" => change_with_consent(
             &app, &roots, &arg("path"), local_fs::Change::Edit,
             &arg("old_text"), &arg("new_text"),
+            approval_id.as_deref(), &approval_mode,
         ),
         "local_run" => {
             // argv 数组，不是一个命令行字符串——见 run_command_with_consent。
@@ -263,7 +274,7 @@ fn run_local_tool(
                         .collect()
                 })
                 .unwrap_or_default();
-            run_command_with_consent(&app, &roots, &arg("program"), &args, &arg("cwd"))
+            run_command_with_consent(&roots, &arg("program"), &args, &arg("cwd"), &approval_mode)
         }
         // **默认拒绝。** 服务端将来加了新工具而这里还没实现时，结果应该是
         // 「不支持」，而不是掉进某个分支去做一件没想清楚的事。
@@ -289,45 +300,103 @@ fn change_with_consent(
     change: local_fs::Change,
     a: &str,
     b: &str,
+    approval_id: Option<&str>,
+    approval_mode: &str,
 ) -> Result<serde_json::Value, String> {
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    // 第二趟：带着 Rust 自己发出去的 id 回来兑现。
+    if let Some(id) = approval_id {
+        let claimed = PENDING_APPROVALS.lock().unwrap().remove(id);
+        return match claimed {
+            Some(PendingAction::Write { target, content }) => {
+                commit_change(app, &target, &content)
+            }
+            Some(PendingAction::Command { program, args, dir }) => {
+                execute_command(&program, &args, &dir)
+            }
+            None => Err("这次授权已经过期了，请重来一次。".into()),
+        };
+    }
 
     let (target, planned) = local_fs::plan_change(roots, path, change, a, b)?;
 
-    let approved = app
-        .dialog()
-        .message(format!(
-            "{}\n\n{}\n\n{}",
-            target.display(),
-            if planned.existed {
-                "原文件会先备份到回收站，可以找回。"
-            } else {
-                "这是一个新文件。"
-            },
-            planned.preview,
-        ))
-        .title(planned.title)
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("执行".into(), "取消".into()))
-        .blocking_show();
-
-    if !approved {
-        // 让模型明确知道是**人**拒绝的，不是路径不对——否则它会换个写法反复试。
-        return Err("你拒绝了这次改动。".into());
+    // 会毁掉已有内容的才问。新建和追加不问——它们一个字节都不会毁，
+    // 给它们弹确认只会让人养成不看内容直接点同意的习惯，
+    // 那反而把真正危险的那一次也一起放过去了。
+    let risky = planned.destructive;
+    if approval_mode == "never" || (approval_mode == "risky" && !risky) {
+        return commit_change(app, &target, &planned.content);
     }
 
+    // 需要人点头。**把算好的内容存在 Rust 这边**，只把 id 交出去——
+    // 网页层拿不到也改不了将要写下去的内容，它能做的只是把 id 递回来。
+    // 这是「审批界面放在网页里」能成立的关键：被审查的是模型，而模型
+    // 既进不了这个 map，也伪造不出这个 id。
+    let id = stash(PendingAction::Write {
+        target: target.clone(),
+        content: planned.content.clone(),
+    });
+
+    Ok(serde_json::json!({
+        "needsApproval": {
+            "id": id,
+            "title": planned.title,
+            "path": target.to_string_lossy(),
+            "preview": planned.preview,
+            "existed": planned.existed,
+        }
+    }))
+}
+
+/// 真正落盘：备份 → 写。
+fn commit_change(
+    app: &AppHandle,
+    target: &std::path::Path,
+    content: &str,
+) -> Result<serde_json::Value, String> {
     let backup = app
         .path()
         .app_config_dir()
         .ok()
-        .and_then(|dir| local_fs::backup_before_write(&dir, &target));
-
-    std::fs::write(&target, &planned.content).map_err(|e| format!("写不进去：{e}"))?;
+        .and_then(|dir| local_fs::backup_before_write(&dir, target));
+    std::fs::write(target, content).map_err(|e| format!("写不进去：{e}"))?;
     Ok(serde_json::json!({
         "path": target.to_string_lossy(),
-        "bytes": planned.content.len(),
+        "bytes": content.len(),
         "backedUpTo": backup.map(|p| p.to_string_lossy().into_owned()),
     }))
+}
+
+/// 一件等着人点头的事。
+pub enum PendingAction {
+    Write { target: std::path::PathBuf, content: String },
+    Command { program: String, args: Vec<String>, dir: std::path::PathBuf },
+}
+
+/// 等着人点头的动作。**内容存在这里，不经过网页层。**
+///
+/// 网页层只拿得到一个 id。它改不了将要写下去的内容，也改不了将要执行的命令
+/// ——这是「审批界面放在气泡里」能成立的关键：被审查的是模型，
+/// 而模型既进不了这个 map，也伪造不出这里的 id。
+static PENDING_APPROVALS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, PendingAction>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn stash(action: PendingAction) -> String {
+    let id = format!(
+        "{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    PENDING_APPROVALS.lock().unwrap().insert(id.clone(), action);
+    id
+}
+
+/// 用户在气泡里点了「不用了」。把暂存的内容丢掉。
+#[tauri::command]
+fn discard_pending_change(id: String) {
+    PENDING_APPROVALS.lock().unwrap().remove(&id);
 }
 
 /// 在授权目录里跑一条命令。**这是整套本地能力里最危险的一个。**
@@ -344,44 +413,52 @@ fn change_with_consent(
 /// 枚举安全命令是走不通的：`git` 看着无害，
 /// `git config --global core.pager 'sh -c ...'` 就不是。真正的安全来自
 /// 工作目录受限 + 每次人工确认 + 不经 shell 这三条。
-///
-/// ## 每次都问
-///
-/// 和写文件一样，没有「10 分钟内允许」。命令的破坏力比写一个文件大得多，
-/// 而一次确认省下的那两秒不值得拿这个换。
 fn run_command_with_consent(
-    app: &AppHandle,
     roots: &[String],
     program: &str,
     args: &[String],
     cwd: &str,
+    approval_mode: &str,
 ) -> Result<serde_json::Value, String> {
-    use std::process::{Command, Stdio};
-    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-
     let (dir, display) = local_fs::prepare_command(roots, program, args, cwd)?;
 
-    let approved = app
-        .dialog()
-        .message(format!(
-            "在这个目录里执行：\n{}\n\n命令：\n{display}\n\n\
-             命令不经过 shell，所以 ; && | $() 这些只是普通字符，不会被解释。\n\
-             最多跑 {} 秒。",
-            dir.display(),
-            local_fs::COMMAND_TIMEOUT_SECS,
-        ))
-        .title("要执行这条命令吗？")
-        .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom("执行".into(), "取消".into()))
-        .blocking_show();
-
-    if !approved {
-        return Err("你拒绝了这条命令。".into());
+    // 命令**永远**要人点头，`risky` 模式也不例外——它的破坏力和「改一个文件」
+    // 不是一个量级，而且没有备份可以回滚。只有显式设成 never 才跳过。
+    if approval_mode == "never" {
+        return execute_command(program, args, &dir);
     }
+
+    let id = stash(PendingAction::Command {
+        program: program.to_string(),
+        args: args.to_vec(),
+        dir: dir.clone(),
+    });
+    Ok(serde_json::json!({
+        "needsApproval": {
+            "id": id,
+            "title": "要执行这条命令吗？",
+            "path": dir.to_string_lossy(),
+            "preview": format!(
+                "命令：\n{display}\n\n不经过 shell，所以 ; && | $() 只是普通字符。\n\
+                 最多跑 {} 秒。",
+                local_fs::COMMAND_TIMEOUT_SECS
+            ),
+            "existed": true,
+        }
+    }))
+}
+
+/// 真正把命令跑起来。
+fn execute_command(
+    program: &str,
+    args: &[String],
+    dir: &std::path::Path,
+) -> Result<serde_json::Value, String> {
+    use std::process::{Command, Stdio};
 
     let mut child = Command::new(program)
         .args(args)
-        .current_dir(&dir)
+        .current_dir(dir)
         // 不继承标准输入：需要交互的命令（比如等密码的 sudo）会直接读到 EOF
         // 退出，而不是挂在那儿等一个永远不会来的输入。
         .stdin(Stdio::null())
@@ -408,9 +485,7 @@ fn run_command_with_consent(
         }
     };
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("读不到输出：{e}"))?;
+    let output = child.wait_with_output().map_err(|e| format!("读不到输出：{e}"))?;
     let clip = |bytes: &[u8]| {
         let text = String::from_utf8_lossy(bytes);
         if text.len() > local_fs::MAX_OUTPUT_BYTES {
@@ -421,7 +496,6 @@ fn run_command_with_consent(
     };
 
     Ok(serde_json::json!({
-        "command": display,
         "cwd": dir.to_string_lossy(),
         "timedOut": status.is_none(),
         "exitCode": status.and_then(|s| s.code()),
@@ -942,6 +1016,7 @@ fn main() {
             set_pet_ready,
             set_pet_expanded,
             run_local_tool,
+            discard_pending_change,
             search_local_files,
             read_local_attachment,
             show_pet_context_menu,

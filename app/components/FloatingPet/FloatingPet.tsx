@@ -35,6 +35,8 @@ import { useChatNudge } from '../ChatMediationProvider';
 import DailyRitualPanel from '../DailyRitualPanel';
 import SpeechBubble from './SpeechBubble';
 import LocalFileMentionMenu, { useLocalFileMention } from '../LocalFileMentionMenu';
+import LocalApprovalCard, { type PendingApproval } from '../LocalApprovalCard';
+import { answerApproval, onApprovalRequested } from '@/lib/localApproval';
 import styles from './FloatingPet.module.css';
 import {
     DESKTOP_PET_ROUTE,
@@ -103,6 +105,9 @@ export default function FloatingPet() {
     /** 当前这句能不能直接回。见 showSpeech 的注释。 */
     const [speechRepliable, setSpeechRepliable] = useState(false);
     const chatInputRef = useRef<HTMLInputElement>(null);
+    /** 它想动文件 / 跑命令，等你点头。内容由 Rust 提供，模型伪造不出来。 */
+    const [approval, setApproval] = useState<PendingApproval | null>(null);
+    const [approving, setApproving] = useState(false);
     const [chatOpen, setChatOpen] = useState(false);
     const [ritualOpen, setRitualOpen] = useState(false);
     const [chatInput, setChatInput] = useState('');
@@ -358,7 +363,8 @@ export default function FloatingPet() {
      * 两百像素的窗口装不下它们，不撑大的话右键了也「什么都没出现」，
      * 因为面板被窗口边界整个裁掉了。
      */
-    const needsWindowRoom = menuType !== 'none' || chatOpen || ritualOpen || speech !== null;
+    const needsWindowRoom =
+        menuType !== 'none' || chatOpen || ritualOpen || speech !== null || approval !== null;
     useEffect(() => {
         if (!isPetWindow) return;
         void requestPetWindowRoom(needsWindowRoom);
@@ -376,6 +382,30 @@ export default function FloatingPet() {
     }, [activityBridge, shouldSkip]);
 
     attachFilesRef.current = files => void attachFiles(files);
+
+    /**
+     * 接住执行器发来的授权请求。
+     *
+     * 顺手把气泡撑开——不然卡片会挂在一个已经消失的气泡下面。
+     * 用 `duration 0`：这件事得等人回应，不能几秒后自己溜走。
+     */
+    useEffect(() => {
+        if (shouldSkip) return;
+        return onApprovalRequested(next => {
+            setApproval(next);
+            setApproving(false);
+            setSpeech(current => current ?? '有件事想问你：');
+            setSpeechRepliable(false);
+        });
+    }, [shouldSkip]);
+
+    const resolveApproval = useCallback((approved: boolean) => {
+        if (!approval) return;
+        setApproving(true);
+        answerApproval(approval.id, approved);
+        setApproval(null);
+        setApproving(false);
+    }, [approval]);
 
     /** 菜单里的动作。刻意不关闭菜单——连着喂两次、玩一会儿是常见操作。 */
     const runAction = useCallback((id: PetActionId) => {
@@ -593,8 +623,19 @@ export default function FloatingPet() {
                     onClose={() => setSpeech(null)}
                     // 只有「它真的在跟你说话」那种气泡才给回复框，
                     // 几秒就消失的状态提示不给。见 showSpeech 的注释。
-                    onReply={speechRepliable ? (value) => void sendMessage(value) : undefined}
+                    // 等着点头的时候不给回复框——先把这件事处理完。
+                    onReply={speechRepliable && !approval
+                        ? (value) => void sendMessage(value)
+                        : undefined}
                     sending={sending}
+                    approval={approval && (
+                        <LocalApprovalCard
+                            approval={approval}
+                            busy={approving}
+                            onApprove={() => resolveApproval(true)}
+                            onReject={() => resolveApproval(false)}
+                        />
+                    )}
                 />
             )}
 

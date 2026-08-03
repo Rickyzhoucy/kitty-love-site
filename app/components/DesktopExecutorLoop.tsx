@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { isTauriDesktop } from '@/lib/desktop';
 import { DESKTOP_PET_ROUTE, type DesktopSettings } from '@/lib/desktopPet';
+import { requestApproval, type PendingApproval } from '@/lib/localApproval';
 
 /**
  * 本地执行器：把云端派来的文件读取请求在这台电脑上做掉。
@@ -88,6 +89,28 @@ export default function DesktopExecutorLoop() {
                             tool: claimed.tool,
                             arguments: claimed.arguments,
                         });
+
+                        // Rust 说这一步要人点头：把卡片挂到气泡上等着。
+                        // **内容留在 Rust 那边**，我们手上只有一个 id——
+                        // 同意之后带着它再调一次，Rust 才拿出真正要写的东西。
+                        const pending = (result as { needsApproval?: PendingApproval })
+                            ?.needsApproval;
+                        if (pending) {
+                            const approved = await requestApproval(pending);
+                            if (approved) {
+                                result = await invoke('run_local_tool', {
+                                    tool: claimed.tool,
+                                    arguments: { ...claimed.arguments, approvalId: pending.id },
+                                });
+                            } else {
+                                await invoke('discard_pending_change', { id: pending.id })
+                                    .catch(() => {});
+                                result = null;
+                                // 让模型知道是**人**拒绝的，不是路径不对——
+                                // 否则它会换个写法反复试。
+                                error = '你拒绝了这次操作。';
+                            }
+                        }
                     } catch (thrown) {
                         // Rust 侧的拒绝理由是给模型看的人话，原样带回去。
                         error = String(thrown);

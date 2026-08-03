@@ -47,7 +47,7 @@ commands.allow = ["get_server_url", "save_server_url", "close_setup_window"]
 [[permission]]
 identifier = "allow-local-files"
 description = "Runs read-only local file lookups inside the user's allow-listed directories."
-commands.allow = ["run_local_tool"]
+commands.allow = ["run_local_tool", "discard_pending_change"]
 
 # 聊天框里 @ 附加本地文件。
 # 候选查询和读取都过同一份白名单——`path` 是从网页层传回来的字符串，
