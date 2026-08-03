@@ -788,3 +788,80 @@ class MapPin(StringIdMixin, CreatedAtMixin, AttributionMixin, Base):
     date: Mapped[str | None] = mapped_column(String(80), nullable=True)
     #: 与相册、时间线复用同一批 Attachment
     photo_ids: Mapped[list[str]] = mapped_column("photoIds", JsonType, default=list)
+
+
+# ── 桌面本地执行器（二期）──────────────────────────────────────────────
+#
+# 宠物的大脑在云端，但「读这台电脑上的文件」只能发生在你自己的机器上。
+# 这两张表就是那条通路：云端把工具调用挂在这里，桌面端认领、执行、回填。
+
+
+class DesktopExecutor(StringIdMixin, CreatedAtMixin, Base):
+    """一台注册过的电脑。
+
+    **一个用户可以有多台**（家里的、公司的），所以派发时必须挑一台，
+    不能广播——否则同一个调用会在几台机器上各跑一遍。
+    """
+
+    __tablename__ = "DesktopExecutor"
+    user_id: Mapped[str] = mapped_column(
+        "userId", ForeignKey("User.id", ondelete="CASCADE")
+    )
+    #: 给人看的名字，比如「Ricky 的 MacBook」。
+    name: Mapped[str] = mapped_column(String(120))
+    #: 最后一次心跳。挑执行者时只看还活着的。
+    last_seen_at: Mapped[datetime] = mapped_column(
+        "lastSeenAt", DateTime(timezone=True), default=utcnow
+    )
+    #: 这台机器允许宠物读哪些目录。**服务端这份只用于展示**——真正的校验在
+    #: 本地做（见 src-tauri）。放在服务端校验等于把闸门交给一个可能被
+    #: 提示注入影响的系统，那不叫闸门。
+    allowed_roots: Mapped[list[str]] = mapped_column(
+        "allowedRoots", JsonType, default=list
+    )
+    enabled: Mapped[bool] = mapped_column(default=True)
+    __table_args__ = (
+        Index("DesktopExecutor_userId_lastSeenAt_idx", "userId", "lastSeenAt"),
+    )
+
+
+class LocalToolCall(StringIdMixin, CreatedAtMixin, Base):
+    """一次派发到某台电脑上的工具调用。
+
+    ## 状态机就是租约
+
+    `pending → claimed → done / failed`。认领走的是一条原子的
+    `UPDATE ... WHERE state='pending'`：**抢到的那一行才返回**，所以哪怕两台
+    机器同时看到通知，也只有一台能真正执行。把「挑执行者」放在派发端做是不够的
+    ——那只是选了个收件人，拦不住另一台也去执行。
+
+    ## 为什么参数不走 SSE
+
+    `stream_outbox` 是**全局广播**，没有按用户过滤：每个连接都会收到每一条事件。
+    把文件路径放进 payload，等于对方的浏览器也会收到「正在读 ~/Documents/xxx」。
+    所以 SSE 只发一个「有活儿了，id=X」，参数由桌面端带着鉴权来取。
+    """
+
+    __tablename__ = "LocalToolCall"
+    executor_id: Mapped[str] = mapped_column(
+        "executorId", ForeignKey("DesktopExecutor.id", ondelete="CASCADE")
+    )
+    #: 工具名，比如 local_read。
+    tool: Mapped[str] = mapped_column(String(80))
+    arguments: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    state: Mapped[str] = mapped_column(String(16), default="pending")
+    #: 成功时是结果，失败时是 {"error": "人话"}。
+    result: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(
+        "claimedAt", DateTime(timezone=True), nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        "resolvedAt", DateTime(timezone=True), nullable=True
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'claimed', 'done', 'failed')",
+            name="LocalToolCall_state_check",
+        ),
+        Index("LocalToolCall_executorId_state_idx", "executorId", "state"),
+    )

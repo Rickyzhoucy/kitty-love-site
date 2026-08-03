@@ -47,6 +47,7 @@ from app.storage import ObjectStorage
 from app.tool_audit import build_tool_audit_middleware
 from app.web_search import build_search_provider
 from app.web_tools import build_web_tools
+from app.local_tools import build_local_tools
 from app.workspace_tools import build_workspace_tools
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,11 @@ def build_agent(
             *build_web_tools(build_search_provider()),
             *build_document_tools(session_maker),
             *build_workspace_tools(get_settings()),
+            # 读用户真实电脑上的文件。**只有 CONVERSATION 拿得到**——
+            # 那一档 tool_names 是 None（不限制），其余三档都是显式白名单，
+            # 名字不在里面就自动被 filter_tools 挡掉。理由见 roles.py 的
+            # LOCAL_FILE_TOOLS 注释。
+            *build_local_tools(session_maker),
         ],
     )
     return create_agent(

@@ -7,6 +7,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import Field as PydanticField
 
 from app.agents.cognition import CognitionInput
 from app.agents.conversation import AgentRuntime
@@ -59,6 +60,7 @@ from app.models import (
     Companion,
     CompanionPersona,
     CompanionPetProfile,
+    DesktopExecutor,
     EventTimer,
     MemoryItem,
     Message,
@@ -153,7 +155,7 @@ from app.schemas import (
 from app.services import CrudService
 from app.site_config import EDITABLE_KEYS as EDITABLE_SITE_CONFIG_KEYS
 from app.site_config import load as load_site_config
-from app import passkeys, runtime_config
+from app import local_executor, passkeys, runtime_config
 from app.storage import ObjectStorage, get_storage
 
 logger = logging.getLogger(__name__)
@@ -1584,3 +1586,82 @@ async def passkey_delete(credential_pk: str, db: Db, user: CurrentUser) -> None:
     if not await passkeys.delete_credential(db, "user", user.id, credential_pk):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这把钥匙")
     await db.commit()
+
+
+# ── 桌面本地执行器（二期）──────────────────────────────────────────────
+#
+# 这三个接口是桌面端和云端之间那条通路的服务端一侧。
+# 派发与租约的设计见 app/local_executor.py 顶部。
+
+
+class ExecutorRegister(ApiModel):
+    name: str = PydanticField(min_length=1, max_length=120)
+    #: 这台机器上用户授权了哪些目录。**服务端只存来展示**——真正的校验在本地做，
+    #: 把闸门放在可能被提示注入影响的一侧就不叫闸门了。
+    allowed_roots: list[str] = PydanticField(default_factory=list, max_length=32)
+
+
+class ExecutorResult(ApiModel):
+    call_id: str
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+@router.post("/desktop/executors")
+async def register_executor(
+    data: ExecutorRegister, db: Db, user: CurrentUser
+) -> dict[str, Any]:
+    """注册这台电脑，或者续一次心跳。
+
+    按 (用户, 机器名) 认同一台机器。用名字而不是随机 id，是为了让重装、
+    重新登录之后还是同一条记录——否则设置页里会越攒越多台「Ricky 的 MacBook」。
+    """
+    existing = await db.scalar(
+        select(DesktopExecutor).where(
+            DesktopExecutor.user_id == user.id, DesktopExecutor.name == data.name
+        )
+    )
+    if existing is None:
+        existing = DesktopExecutor(user_id=user.id, name=data.name)
+        db.add(existing)
+    existing.allowed_roots = data.allowed_roots
+    existing.last_seen_at = utcnow()
+    await db.commit()
+    return {"executorId": existing.id, "enabled": existing.enabled}
+
+
+@router.post("/desktop/executors/{executor_id}/claim")
+async def claim_local_call(
+    executor_id: str, db: Db, user: CurrentUser
+) -> dict[str, Any] | None:
+    """认领一条待办，**同时拿到参数**。
+
+    参数只在这里给，不走 SSE：那条流是全局广播，没有按用户过滤，
+    路径放进去等于对方的浏览器也会收到「正在读 ~/Documents/xxx」。
+    """
+    executor = await db.get(DesktopExecutor, executor_id)
+    if executor is None or executor.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这台机器")
+    call = await local_executor.claim_next(db, executor_id)
+    if call is None:
+        return None
+    return {"callId": call.id, "tool": call.tool, "arguments": call.arguments}
+
+
+@router.post(
+    "/desktop/executors/{executor_id}/result",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def submit_local_result(
+    executor_id: str, data: ExecutorResult, db: Db, user: CurrentUser
+) -> None:
+    """回填执行结果。只有认领它的那台机器能回填。"""
+    executor = await db.get(DesktopExecutor, executor_id)
+    if executor is None or executor.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "没有这台机器")
+    if not await local_executor.resolve(
+        db, executor_id, data.call_id, data.result, data.error
+    ):
+        # 多半是已经超时被判失败了。不当成错误——桌面端晚回来一步很正常，
+        # 它没有做错什么，只是这条已经不需要了。
+        raise HTTPException(status.HTTP_409_CONFLICT, "这次调用已经结束了")
