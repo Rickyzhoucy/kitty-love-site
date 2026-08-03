@@ -34,7 +34,7 @@ import { ApiError } from '@/lib/api/client';
 import { useChatNudge } from '../ChatMediationProvider';
 import DailyRitualPanel from '../DailyRitualPanel';
 import SpeechBubble from './SpeechBubble';
-import LocalFileMentionMenu, { useMentionQuery } from '../LocalFileMentionMenu';
+import LocalFileMentionMenu, { useLocalFileMention } from '../LocalFileMentionMenu';
 import styles from './FloatingPet.module.css';
 import {
     DESKTOP_PET_ROUTE,
@@ -102,8 +102,6 @@ export default function FloatingPet() {
     const [speech, setSpeech] = useState<string | null>(null);
     /** 当前这句能不能直接回。见 showSpeech 的注释。 */
     const [speechRepliable, setSpeechRepliable] = useState(false);
-    /** 对话框里 `@` 后面那截字，驱动本机文件候选。 */
-    const { query: mentionQuery, setQuery: setMentionQuery, sync: syncMention } = useMentionQuery();
     const chatInputRef = useRef<HTMLInputElement>(null);
     const [chatOpen, setChatOpen] = useState(false);
     const [ritualOpen, setRitualOpen] = useState(false);
@@ -117,6 +115,9 @@ export default function FloatingPet() {
     const { size, setSize, scale } = usePetSize();
     const bodyRef = useRef<HTMLElement | null>(null);
     const speechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    /** attachFiles 定义在下面，而 mention hook 在它之前就要拿到回调。
+        用 ref 打破这个先后顺序，比把整个 attachFiles 提上来改动小。 */
+    const attachFilesRef = useRef<((files: File[]) => void) | null>(null);
 
     /**
      * `duration === 0` 的那些才是「它真的在跟你说话」。
@@ -298,6 +299,12 @@ export default function FloatingPet() {
         }
     };
 
+    /** 打 `@` 时的本机文件候选。键盘导航、读文件、进附件槽都在这里面。 */
+    const mention = useLocalFileMention(
+        useCallback((file: File) => attachFilesRef.current?.([file]), []),
+        useCallback((message: string) => showSpeech(message, 4_000), [showSpeech]),
+    );
+
     // 收 FileList（文件选择框）也收 File[]（@ 选中的本机文件）——
     // 两条来源最终都走同一段上传逻辑，没必要分两个函数。
     const attachFiles = async (files: FileList | File[] | null) => {
@@ -367,6 +374,8 @@ export default function FloatingPet() {
         window.addEventListener('kitty-pet-action', handle);
         return () => window.removeEventListener('kitty-pet-action', handle);
     }, [activityBridge, shouldSkip]);
+
+    attachFilesRef.current = files => void attachFiles(files);
 
     /** 菜单里的动作。刻意不关闭菜单——连着喂两次、玩一会儿是常见操作。 */
     const runAction = useCallback((id: PetActionId) => {
@@ -514,30 +523,23 @@ export default function FloatingPet() {
                         ))}
                     </div>
                     <div className={styles.chatInput} style={{ position: 'relative' }}>
-                        {/* 打 `@` 弹本机文件候选。选中直接进附件槽，不往消息里插路径。 */}
-                        <LocalFileMentionMenu
-                            query={mentionQuery}
-                            onPicked={file => attachFiles([file])}
-                            onError={message => showSpeech(message, 4_000)}
-                        />
+                        {/* 打 `@` 弹本机文件候选。上下键选、Enter 确认、Esc 关掉。
+                            选中直接进附件槽，不往消息里插路径。 */}
+                        <LocalFileMentionMenu controller={mention} />
                         <input
                             ref={chatInputRef}
                             value={chatInput}
                             onChange={event => {
                                 setChatInput(event.target.value);
-                                syncMention(event.currentTarget);
+                                mention.sync(event.currentTarget);
                             }}
-                            onKeyUp={event => syncMention(event.currentTarget)}
-                            onClick={event => syncMention(event.currentTarget)}
-                            onBlur={() => setMentionQuery(null)}
+                            onKeyUp={event => mention.sync(event.currentTarget)}
+                            onClick={event => mention.sync(event.currentTarget)}
+                            onBlur={() => mention.dismiss()}
                             onKeyDown={event => {
-                                if (event.key === 'Escape' && mentionQuery !== null) {
-                                    // 候选开着时 Esc 只关候选，不关整个面板——
-                                    // 不然想取消一次误触发的 @ 就得把面板重开一遍。
-                                    event.stopPropagation();
-                                    setMentionQuery(null);
-                                    return;
-                                }
+                                // 菜单先挑：它吃掉的键（上下 / Enter / Tab / Esc）
+                                // 不能再当成「发送」，否则选候选那下会把消息也发出去。
+                                if (mention.handleKeyDown(event)) return;
                                 if (event.key === 'Enter') void sendMessage();
                             }}
                             placeholder="说点什么…（打 @ 可以带上本机文件）"

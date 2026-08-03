@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Paperclip } from 'lucide-react';
 import {
     getAttachment,
     uploadAttachment,
@@ -20,12 +19,7 @@ import { subscribeServerEvent } from '@/lib/api/events';
 import { PET_ASSETS } from '@/app/components/FloatingPet/petConfig';
 import { usePet } from '@/app/components/FloatingPet/usePet';
 import Lightbox, { type LightboxImage } from '@/app/companion/Lightbox';
-import {
-    formatSize,
-    readLocalFileForUpload,
-    useLocalFileCandidates,
-    type LocalFileCandidate,
-} from '@/lib/localFileMention';
+import LocalFileMentionMenu, { useLocalFileMention } from '@/app/components/LocalFileMentionMenu';
 import styles from './page.module.css';
 
 /**
@@ -150,6 +144,8 @@ export default function ChatPage() {
     const threadRef = useRef<HTMLDivElement | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const composerRef = useRef<HTMLTextAreaElement | null>(null);
+    /** addFiles 定义在下面，mention hook 在它之前就要拿到回调。 */
+    const addFilesRef = useRef<((files: File[]) => void) | null>(null);
     const { pet } = usePet();
 
     const petEmoji = PET_ASSETS.find(asset => asset.id === pet?.assetId)?.emoji ?? '🐾';
@@ -238,6 +234,8 @@ export default function ChatPage() {
         }
     }, [pending.length, uploading]);
 
+    addFilesRef.current = files => void addFiles(files);
+
     const send = async () => {
         const body = draft.trim();
         if ((!body && !pending.length) || sending || uploading) return;
@@ -312,32 +310,10 @@ export default function ChatPage() {
      * ——私聊里的宠物拿不到本地文件工具，那一档带着联网搜索，
      * 不该和本地文件权限同轮出现（见 backend/app/agents/roles.py）。
      */
-    const fileCandidates = useLocalFileCandidates(mentionQuery);
-
-    /** 把光标前那截 `@半截词` 整个删掉。选文件时用——文件走附件，不留文字。 */
-    const dropMentionText = useCallback(() => {
-        const element = composerRef.current;
-        if (!element) return;
-        const caret = element.selectionStart;
-        const start = element.value.slice(0, caret).lastIndexOf('@');
-        if (start < 0) return;
-        setDraft(element.value.slice(0, start) + element.value.slice(caret));
-        setMentionQuery(null);
-        requestAnimationFrame(() => {
-            element.focus();
-            element.setSelectionRange(start, start);
-        });
-    }, []);
-
-    const attachLocalFile = useCallback(async (candidate: LocalFileCandidate) => {
-        dropMentionText();
-        try {
-            const file = await readLocalFileForUpload(candidate.path);
-            await addFiles([file]);
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : String(reason));
-        }
-    }, [addFiles, dropMentionText]);
+    const fileMention = useLocalFileMention(
+        useCallback((file: File) => addFilesRef.current?.([file]), []),
+        useCallback((message: string) => setError(message), []),
+    );
 
     /** 选中候选：把光标前那截 `@半截名字` 换成完整的 `@名字 `。 */
     const applyMention = useCallback(() => {
@@ -534,7 +510,9 @@ export default function ChatPage() {
                     void addFiles(event.dataTransfer.files);
                 }}
             >
-                {(mentionMatches.length > 0 || fileCandidates.length > 0) && (
+                <LocalFileMentionMenu controller={fileMention} />
+
+                {mentionMatches.length > 0 && (
                     <div className={styles.mentionMenu} role="listbox" aria-label="可以叫的">
                         {mentionMatches.map(candidate => (
                             <button
@@ -556,29 +534,6 @@ export default function ChatPage() {
                             </button>
                         ))}
 
-                        {/* 这台电脑上的文件。只有桌面版、且只在授权目录里的会出现。
-                            选中之后直接变成附件——不往消息里插路径。 */}
-                        {fileCandidates.map(candidate => (
-                            <button
-                                key={candidate.path}
-                                type="button"
-                                role="option"
-                                aria-selected="false"
-                                className={styles.mentionItem}
-                                title={candidate.path}
-                                // onMouseDown 同上：textarea 失焦会先把菜单关掉。
-                                onMouseDown={event => {
-                                    event.preventDefault();
-                                    void attachLocalFile(candidate);
-                                }}
-                            >
-                                <Paperclip size={14} aria-hidden="true" />
-                                <span className={styles.mentionName}>{candidate.name}</span>
-                                <span className={styles.mentionHint}>
-                                    {formatSize(candidate.size)} · 作为附件带上
-                                </span>
-                            </button>
-                        ))}
                     </div>
                 )}
 
@@ -635,9 +590,16 @@ export default function ChatPage() {
                         onChange={event => {
                             setDraft(event.target.value);
                             syncMention(event.target);
+                            fileMention.sync(event.target);
                         }}
-                        onClick={event => syncMention(event.currentTarget)}
-                        onBlur={() => setMentionQuery(null)}
+                        onClick={event => {
+                            syncMention(event.currentTarget);
+                            fileMention.sync(event.currentTarget);
+                        }}
+                        onBlur={() => {
+                            setMentionQuery(null);
+                            fileMention.dismiss();
+                        }}
                         onPaste={event => {
                             const files = Array.from(event.clipboardData.files);
                             if (!files.length) return;
@@ -645,6 +607,9 @@ export default function ChatPage() {
                             void addFiles(files);
                         }}
                         onKeyDown={event => {
+                            // 文件候选先挑（上下键 / Enter / Tab / Esc）。
+                            // 它返回 true 就说明这个键已经用掉了，不能再往下走。
+                            if (fileMention.handleKeyDown(event)) return;
                             // 候选开着的时候，回车是「选它」而不是「发出去」——
                             // 否则每次 @ 都会把半截名字当成消息发走。
                             if (mentionMatches.length > 0) {
@@ -667,10 +632,13 @@ export default function ChatPage() {
                             // 方向键移动光标后 selectionStart 才更新，所以推到下一帧再看
                             if (event.key.startsWith('Arrow') || event.key === 'Backspace') {
                                 const element = event.currentTarget;
-                                requestAnimationFrame(() => syncMention(element));
+                                requestAnimationFrame(() => {
+                                    syncMention(element);
+                                    fileMention.sync(element);
+                                });
                             }
                         }}
-                        placeholder={dragging ? '松手就带上它' : `说点什么…（打 @ 可以叫${petName}）`}
+                        placeholder={dragging ? '松手就带上它' : `说点什么…（@ 叫${petName}，也能带本机文件）`}
                         aria-label="消息内容"
                         rows={1}
                     />

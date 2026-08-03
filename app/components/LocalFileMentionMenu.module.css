@@ -33,7 +33,9 @@
   cursor: pointer;
 }
 
-.item:hover:not(:disabled),
+/* 键盘选中的那一条。用 data-active 而不是 :hover——键盘导航时鼠标可能
+   停在别处，两个高亮同时亮着会让人不知道 Enter 会选哪个。 */
+.item[data-active],
 .item:focus-visible {
   background: var(--color-accent-soft);
 }
