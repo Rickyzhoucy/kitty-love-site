@@ -42,7 +42,7 @@ export default function SpeechBubble({
     onClose: () => void;
 }) {
     return (
-        <div className={styles.speech} data-side={side} role="status">
+        <div className={styles.speech} data-side={side} data-pet-overlay role="status">
             {/* 署名行。用衬线排名字，让它读起来像一句话的落款，而不是一个
                 控件标题——这个站里衬线体一直是「有人在说话」的信号。
                 关闭按钮并进这一行，不再单独占一列。 */}
@@ -65,7 +65,7 @@ export default function SpeechBubble({
 
             {/* 尖角。两层：外层是描边色、里层是底色，叠出「有边框的尖角」，
                 而不是一个描边被截断的三角形。 */}
-            <span className={styles.speechTail} aria-hidden="true">
+            <span className={styles.speechTail} data-pet-speech-tail aria-hidden="true">
                 <span className={styles.speechTailFill} />
             </span>
         </div>

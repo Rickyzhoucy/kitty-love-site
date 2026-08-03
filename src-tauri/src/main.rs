@@ -17,7 +17,10 @@ mod settings;
 
 use settings::{DesktopSettings, SettingsState};
 use tauri::{
-    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{
+        CheckMenuItem, IsMenuItem, Menu, MenuBuilder, MenuItem, PredefinedMenuItem, Submenu,
+        SubmenuBuilder,
+    },
     tray::TrayIconBuilder,
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
@@ -39,6 +42,10 @@ const PET_LABEL: &str = "pet";
 const SETUP_LABEL: &str = "setup";
 /// 必须和前端 `lib/desktopPet.ts` 里的 DESKTOP_PET_ROUTE 一致。
 const PET_ROUTE: &str = "/desktop-pet";
+
+/// 原生菜单必须和 App 同寿命。临时在命令里创建的 macOS `NSMenu` 在弹出调用
+/// 返回后就会被释放；持有成应用状态也避免每次右键重复注册同一批菜单项。
+struct PetContextMenu(Menu<tauri::Wry>);
 
 // ── 凭据 ────────────────────────────────────────────────────────────────
 
@@ -164,12 +171,32 @@ fn set_pet_expanded(app: AppHandle, state: tauri::State<'_, SettingsState>, expa
     };
     let base = { state.0.lock().unwrap().pet_size };
     let (w, h) = if expanded {
-        // 够装下菜单九宫格和对话框；宠物本身仍然居中，视觉上没跳。
-        (base.max(360.0), base.max(460.0))
+        // 四行菜单、对话框和长气泡都需要宠物上方有完整空间。
+        (base.max(380.0), base.max(580.0))
     } else {
         (base, base)
     };
+
+    // set_size 默认钉住窗口左上角，结果宠物（位于窗口中央）会在右键时跳半个
+    // 扩容量。同步补偿位置，把原来的 base × base 宠物区域锚在屏幕原处。
+    let next_position = pet
+        .outer_position()
+        .ok()
+        .zip(pet.outer_size().ok())
+        .map(|(position, size)| {
+            let scale = pet.scale_factor().unwrap_or(1.0);
+            let position = position.to_logical::<f64>(scale);
+            let size = size.to_logical::<f64>(scale);
+            LogicalPosition::new(
+                position.x + (size.width - w) / 2.0,
+                position.y + size.height - h,
+            )
+        });
     let _ = pet.set_size(LogicalSize::new(w, h));
+    let _ = pet.set_shadow(false);
+    if let Some(position) = next_position {
+        let _ = pet.set_position(position);
+    }
 }
 
 #[tauri::command]
@@ -196,6 +223,77 @@ fn remember_pet_position(app: AppHandle, state: tauri::State<'_, SettingsState>)
     settings.pet_x = Some(logical.x);
     settings.pet_y = Some(logical.y);
     settings::save(&app, &settings);
+}
+
+/// 只允许拖动独立宠物窗。前端不拿通用窗口拖动权限，避免远程页面把主窗或
+/// 设置窗也变成可随意拖动的目标。
+#[tauri::command]
+fn start_pet_dragging(app: AppHandle) -> Result<(), String> {
+    let pet = app
+        .get_webview_window(PET_LABEL)
+        .ok_or_else(|| "pet window is not available".to_string())?;
+    pet.start_dragging().map_err(|error| error.to_string())
+}
+
+/// 在鼠标当前位置弹出真正的系统右键菜单。
+///
+/// 透明 WebView 里的 HTML 浮层永远受窗口矩形裁剪；菜单 DOM 即使已经渲染，
+/// 超出两百多像素的宠物窗口后仍然完全看不见。这里让 Tauri 交给系统菜单层绘制，
+/// 选择结果再发回前端，动作和面板仍只保留一套 React 实现。
+fn build_pet_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let actions = SubmenuBuilder::new(app, "动作")
+        .text("petctx:action:calm", "安静待着")
+        .text("petctx:action:walk", "走两步")
+        .text("petctx:action:sleep", "睡一会儿")
+        .text("petctx:action:play", "玩耍")
+        .text("petctx:action:feed", "吃东西")
+        .text("petctx:action:cheer", "开心一下")
+        .build()?;
+    let appearance = SubmenuBuilder::new(app, "外观")
+        .text("petctx:appearance:kitty", "Kitty")
+        .text("petctx:appearance:momo", "Momo")
+        .text("petctx:appearance:hello-kitty", "Hello Kitty")
+        .text("petctx:appearance:snoopy", "Snoopy")
+        .text("petctx:appearance:shiba", "柴犬")
+        .text("petctx:appearance:bichon", "比熊")
+        .text("petctx:appearance:shiba-q", "柴犬（插画）")
+        .text("petctx:appearance:bichon-q", "比熊（插画）")
+        .build()?;
+    let size = SubmenuBuilder::new(app, "大小")
+        .text("petctx:size:small", "小")
+        .text("petctx:size:medium", "中")
+        .text("petctx:size:large", "大")
+        .build()?;
+    let initiative = SubmenuBuilder::new(app, "主动性")
+        .text("petctx:initiative:normal", "偶尔主动")
+        .text("petctx:initiative:quiet", "安静模式")
+        .text("petctx:initiative:off", "完全安静")
+        .build()?;
+
+    MenuBuilder::new(app)
+        .text("petctx:chat", "说句话…")
+        .text("petctx:today", "今天")
+        .text("petctx:main", "打开主界面")
+        .separator()
+        .item(&actions)
+        .item(&appearance)
+        .item(&size)
+        .item(&initiative)
+        .separator()
+        .text("petctx:rename", "改名…")
+        .text("petctx:settings", "桌面设置…")
+        .build()
+}
+
+#[tauri::command]
+fn show_pet_context_menu(
+    app: AppHandle,
+    menu: tauri::State<'_, PetContextMenu>,
+) -> Result<(), String> {
+    let Some(pet) = app.get_webview_window(PET_LABEL) else {
+        return Err("宠物窗口还没有就绪".into());
+    };
+    pet.popup_menu(&menu.0).map_err(|error| error.to_string())
 }
 
 // ── 托盘 ────────────────────────────────────────────────────────────────
@@ -435,7 +533,15 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<()> {
         "menu_setup" => open_setup_window(app),
         "menu_site_settings" => open_site_settings_window(app),
         "menu_show_main" => show_main_window(app.clone()),
-        _ => {}
+        "petctx:main" => show_main_window(app.clone()),
+        "petctx:settings" => open_site_settings_window(app),
+        id => {
+            if let Some(command) = id.strip_prefix("petctx:") {
+                if let Some(pet) = app.get_webview_window(PET_LABEL) {
+                    let _ = pet.emit("pet-context-command", command);
+                }
+            }
+        }
     });
     Ok(())
 }
@@ -511,6 +617,11 @@ fn build_pet_window(app: &AppHandle, base: &url::Url, settings: &DesktopSettings
 
 fn main() {
     tauri::Builder::default()
+        // 官方单实例插件必须最先注册。再次双击 App 时只唤起已有主窗口，
+        // 不会再创建第二个宠物窗口，看起来像拖动留下残影。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app.clone());
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -523,8 +634,10 @@ fn main() {
             update_desktop_settings,
             show_main_window,
             remember_pet_position,
+            start_pet_dragging,
             set_pet_ready,
             set_pet_expanded,
+            show_pet_context_menu,
             get_server_url,
             save_server_url,
             close_setup_window,
@@ -533,6 +646,7 @@ fn main() {
             let handle = app.handle().clone();
             let settings = settings::load(&handle);
             app.manage(SettingsState(std::sync::Mutex::new(settings.clone())));
+            app.manage(PetContextMenu(build_pet_context_menu(&handle)?));
 
             build_tray(&handle, &settings)?;
             build_app_menu(&handle)?;

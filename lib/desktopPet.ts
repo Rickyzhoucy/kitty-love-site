@@ -1,5 +1,7 @@
 'use client';
 
+import { invoke } from '@tauri-apps/api/core';
+
 /**
  * 桌面宠物窗口的共享约定。
  *
@@ -63,8 +65,24 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
  */
 export async function openMainWindow(): Promise<void> {
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
-    const { invoke } = await import('@tauri-apps/api/core');
     await invoke('show_main_window');
+}
+
+/** 在桌宠当前位置弹出操作系统原生右键菜单。 */
+export async function openPetContextMenu(): Promise<void> {
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+    await invoke('show_pet_context_menu');
+}
+
+/**
+ * 左键按住宠物时，让 Rust 对唯一的 `pet` 窗口发起系统拖动。
+ *
+ * 不把通用 `core:window:startDragging` 能力直接暴露给远程 WebView：这里只允许
+ * 应用自己的窄命令，而且 Rust 侧固定目标窗口，主界面和设置窗都拖不到。
+ */
+export async function startPetWindowDragging(): Promise<void> {
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+    await invoke('start_pet_dragging');
 }
 
 /**
@@ -74,8 +92,7 @@ export async function openMainWindow(): Promise<void> {
  * 「右键了但什么都没出现」。不在 Tauri 里就是空操作。
  */
 export async function requestPetWindowRoom(expanded: boolean): Promise<void> {
-    if (typeof window === 'undefined' || !('__TAURI__' in window)) return;
-    const { invoke } = await import('@tauri-apps/api/core');
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
     await invoke('set_pet_expanded', { expanded }).catch(() => {});
 }
 

@@ -125,29 +125,61 @@
   pointer-events: none;
 }
 
-/* 容器只负责把宠物摆到窗口正中（窗口本身就只有宠物那么大，贴右下角会压边、
- * 气泡还会被裁掉）。**它自己不接事件**——铺满整窗又接事件的话，等于整个透明
- * 矩形都在拦截桌面点击，和没做穿透一样。 */
+/* 容器只保留宠物本身的尺寸并放在窗口中央。不能把容器扩成 100vw/100vh：
+ * 对话、改名等网页面板是绝对定位在容器上方的，容器等于整窗高时会被画到窗外。 */
 :root[data-desktop-pet="true"] [data-pet-hit] {
   position: fixed;
-  inset: 0;
+  left: 50%;
+  top: 50%;
   right: auto;
   bottom: auto;
-  width: 100vw;
-  height: 100vh;
-  display: grid;
-  place-items: center;
+  width: var(--pet-size);
+  height: var(--pet-size);
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 
-/* 真正能点的只有它的直接子元素：宠物本体、气泡、菜单、对话面板。 */
+/* 面板打开后 Rust 会把透明窗向上扩展，并保持底部那块原宠物区域的屏幕坐标
+ * 不变。这里把宠物放回那块区域中央：面板得到上方空间，宠物本身不会跳。 */
+:root[data-desktop-pet="true"] [data-pet-hit][data-pet-expanded="true"] {
+  top: auto;
+  bottom: calc((var(--desktop-pet-window-base, 220px) - var(--pet-size)) / 2);
+  transform: translateX(-50%);
+}
+
+/* 网页版浮层会根据宠物在页面左右半区，贴它的左边或右边展开；独立桌宠窗没有
+ * 整个页面宽度可借，只有一块 380px 左右的透明窗口。继续按宠物右边缘对齐时，
+ * 348px 的对话面板在 380px 窗口中的左坐标会变成约 -89px，必然被 WebView
+ * 裁掉。桌面态统一按宠物中轴居中，并给窗口两侧保留 16px。
+ *
+ * 使用独立的 `translate` 属性，不能写进 `transform`：回复气泡的入场动画也会
+ * 改 transform，写在一起会在动画结束时丢掉水平居中。 */
+:root[data-desktop-pet="true"]
+  [data-pet-hit][data-pet-expanded="true"]
+  [data-pet-overlay] {
+  left: 50%;
+  right: auto;
+  max-width: calc(100vw - 32px);
+  translate: -50% 0;
+}
+
+/* 展开后的浮层以宠物中心为锚点，气泡尖角也必须回到同一个中心线。 */
+:root[data-desktop-pet="true"]
+  [data-pet-hit][data-pet-expanded="true"]
+  [data-pet-speech-tail] {
+  left: 50%;
+  right: auto;
+  translate: -50% 0;
+}
+
+/* 真正能点的只有它的直接子元素：宠物本体、气泡和对话面板。 */
 :root[data-desktop-pet="true"] [data-pet-hit] > * {
   pointer-events: auto;
 }
 
 /* 锁定态：连宠物本身也不接收，纯装饰。
  * Rust 侧同时会开整窗穿透，这里是双保险——万一某个平台上
- * set_ignore_cursor_events 不生效，至少 CSS 这层还拦得住。 */
+ * set_ignore_cursor_events 不生效，至少 CSS 这层还拦得住。
  *
  * **锁定用的是另一个属性，不是 data-desktop-pet 的另一个值。**
  * 一开始写成 `data-desktop-pet="locked"`，结果一锁定，上面那些按 `="true"`

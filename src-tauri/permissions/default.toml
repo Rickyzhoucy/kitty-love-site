@@ -28,8 +28,10 @@ description = "Shows the main window and remembers where the pet window was drag
 commands.allow = [
   "show_main_window",
   "remember_pet_position",
+  "start_pet_dragging",
   "set_pet_ready",
   "set_pet_expanded",
+  "show_pet_context_menu",
 ]
 
 # 服务器地址。给打包进来的本地设置页用——那一页是「连不上服务器时」唯一

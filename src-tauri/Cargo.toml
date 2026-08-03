@@ -16,6 +16,7 @@ keyring = "3.6"
 #   macOSPrivateApi 同时开**，只开一边构建脚本会直接报错。
 #   代价是用了私有 API 的包上不了 Mac App Store——这个站是私人分发，无所谓。
 tauri = { version = "2.9", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

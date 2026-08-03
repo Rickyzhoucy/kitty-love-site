@@ -19,8 +19,8 @@ import { DESKTOP_PET_ROUTE, type DesktopSettings } from '@/lib/desktopPet';
  *    宠物还会跟着鼠标做悬停反应，看着像"活的却点不动"，很怪。
  * 2. **接托盘发来的命令**（目前只有「走两步」）。动作逻辑留在前端，
  *    Rust 只发信号，不在两边各写一套步态。
- * 3. **记住窗口被拖到哪了。** 无边框窗口靠 `data-tauri-drag-region` 拖动，
- *    松手后要存一次位置，否则下次启动它又回到原点。
+ * 3. **记住窗口被拖到哪了。** 宠物本体在左键按下时调用 Tauri 的
+ *    `startDragging()`；系统拖完后要存一次位置，否则下次启动它又回到原点。
  */
 export default function DesktopPetBridge() {
     const pathname = usePathname();
@@ -45,10 +45,17 @@ export default function DesktopPetBridge() {
             const applyLocked = (locked: boolean) => {
                 document.documentElement.dataset.petLocked = locked ? 'true' : 'false';
             };
+            const applyWindowBaseSize = (petSize: number) => {
+                document.documentElement.style.setProperty(
+                    '--desktop-pet-window-base',
+                    `${petSize}px`,
+                );
+            };
 
             const current = await invoke<DesktopSettings>('get_desktop_settings');
             if (disposed) return;
             applyLocked(current.locked);
+            applyWindowBaseSize(current.petSize);
 
             /**
              * 会话有效吗？有效才让窗口露面。
@@ -79,6 +86,15 @@ export default function DesktopPetBridge() {
             cleanups.push(
                 await listen<DesktopSettings>('desktop-settings-changed', event => {
                     applyLocked(event.payload.locked);
+                    applyWindowBaseSize(event.payload.petSize);
+                }),
+            );
+
+            cleanups.push(
+                await listen<string>('pet-context-command', event => {
+                    window.dispatchEvent(new CustomEvent('kitty-pet-context-command', {
+                        detail: event.payload,
+                    }));
                 }),
             );
 

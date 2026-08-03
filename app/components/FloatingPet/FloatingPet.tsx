@@ -35,7 +35,13 @@ import { useChatNudge } from '../ChatMediationProvider';
 import DailyRitualPanel from '../DailyRitualPanel';
 import SpeechBubble from './SpeechBubble';
 import styles from './FloatingPet.module.css';
-import { DESKTOP_PET_ROUTE, openMainWindow, requestPetWindowRoom } from '@/lib/desktopPet';
+import {
+    DESKTOP_PET_ROUTE,
+    openMainWindow,
+    openPetContextMenu,
+    requestPetWindowRoom,
+    startPetWindowDragging,
+} from '@/lib/desktopPet';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
 import type { PetInitiative } from './petBodyProtocol';
 import { usePet } from './usePet';
@@ -306,7 +312,7 @@ export default function FloatingPet() {
         }
     };
 
-    const chooseAppearance = async (assetId: PetAssetId) => {
+    const chooseAppearance = useCallback(async (assetId: PetAssetId) => {
         if (await setAssetId(assetId)) {
             setMenuType('none');
             setActivity('idle');
@@ -315,7 +321,7 @@ export default function FloatingPet() {
         } else {
             showSpeech('更换造型失败，请重试');
         }
-    };
+    }, [react, setActivity, setAssetId, showSpeech]);
 
     /**
      * 托盘菜单发过来的动作。
@@ -329,11 +335,11 @@ export default function FloatingPet() {
      * 两百像素的窗口装不下它们，不撑大的话右键了也「什么都没出现」，
      * 因为面板被窗口边界整个裁掉了。
      */
+    const needsWindowRoom = menuType !== 'none' || chatOpen || ritualOpen || speech !== null;
     useEffect(() => {
         if (!isPetWindow) return;
-        const needsRoom = menuType !== 'none' || chatOpen || ritualOpen;
-        void requestPetWindowRoom(needsRoom);
-    }, [isPetWindow, menuType, chatOpen, ritualOpen]);
+        void requestPetWindowRoom(needsWindowRoom);
+    }, [isPetWindow, needsWindowRoom]);
 
     useEffect(() => {
         if (shouldSkip) return;
@@ -347,7 +353,7 @@ export default function FloatingPet() {
     }, [activityBridge, shouldSkip]);
 
     /** 菜单里的动作。刻意不关闭菜单——连着喂两次、玩一会儿是常见操作。 */
-    const runAction = (id: PetActionId) => {
+    const runAction = useCallback((id: PetActionId) => {
         switch (id) {
             case 'calm':
                 setActivity('idle');
@@ -370,9 +376,9 @@ export default function FloatingPet() {
                 activityBridge.playPetAction({ action: 'celebrate' });
                 break;
         }
-    };
+    }, [activityBridge, markInteraction, setActivity]);
 
-    const changeInitiative = (next: PetInitiative) => {
+    const changeInitiative = useCallback((next: PetInitiative) => {
         setInitiative(next);
         localStorage.setItem('companionPetInitiative', next);
         setMenuType('none');
@@ -381,7 +387,60 @@ export default function FloatingPet() {
             : next === 'quiet'
                 ? '我会少一点打扰'
                 : '我会偶尔自己活动');
-    };
+    }, [showSpeech]);
+
+    // 系统原生右键菜单只负责选择命令；真正的动作、外观切换和复杂面板仍然
+    // 走网页里原来的实现，避免 Rust 和 React 各养一套宠物业务逻辑。
+    useEffect(() => {
+        if (!isPetWindow) return;
+        const handle = (event: Event) => {
+            const command = (event as CustomEvent<string>).detail;
+            if (!command) return;
+
+            if (command === 'chat') {
+                setChatOpen(true);
+                setMenuType('none');
+                return;
+            }
+            if (command === 'today') {
+                setRitualOpen(true);
+                setMenuType('none');
+                return;
+            }
+            if (command === 'rename') {
+                setMenuType('rename');
+                return;
+            }
+            if (command.startsWith('action:')) {
+                const action = command.slice('action:'.length);
+                if (PET_ACTIONS.some(option => option.id === action)) {
+                    runAction(action as PetActionId);
+                }
+                return;
+            }
+            if (command.startsWith('appearance:')) {
+                const assetId = command.slice('appearance:'.length);
+                if (PET_ASSETS.some(option => option.id === assetId)) {
+                    void chooseAppearance(assetId as PetAssetId);
+                }
+                return;
+            }
+            if (command.startsWith('size:')) {
+                const sizeId = command.slice('size:'.length);
+                const option = PET_SIZES.find(candidate => candidate.id === sizeId);
+                if (option) setSize(option.id);
+                return;
+            }
+            if (command.startsWith('initiative:')) {
+                const next = command.slice('initiative:'.length);
+                if (next === 'normal' || next === 'quiet' || next === 'off') {
+                    changeInitiative(next);
+                }
+            }
+        };
+        window.addEventListener('kitty-pet-context-command', handle);
+        return () => window.removeEventListener('kitty-pet-context-command', handle);
+    }, [changeInitiative, chooseAppearance, isPetWindow, runAction, setSize]);
 
     if (shouldSkip) return null;
 
@@ -416,11 +475,13 @@ export default function FloatingPet() {
             // 透明窗里只有标了这个的元素接收鼠标事件，其余一律穿透到桌面。
             // 见 globals.css 里 [data-desktop-pet] 那一节。
             data-pet-hit
+            data-pet-expanded={isPetWindow && needsWindowRoom ? 'true' : 'false'}
         >
             {chatOpen && (
                 <section
                     className={styles.panel}
                     aria-label={`与 ${pet?.name ?? '伴侣'} 对话`}
+                    data-pet-overlay
                     // 声明为障碍物，宠物不会站到面板上（见 platform/environment.ts）。
                     // 加新面板时在那个面板上加这个属性，而不是回去改一份选择器清单。
                     data-pet-obstacle
@@ -480,7 +541,7 @@ export default function FloatingPet() {
             )}
 
             {ritualOpen && (
-                <div className={styles.ritualPanel}>
+                <div className={styles.ritualPanel} data-pet-overlay>
                     <DailyRitualPanel onClose={() => setRitualOpen(false)} />
                 </div>
             )}
@@ -496,7 +557,12 @@ export default function FloatingPet() {
             )}
 
             {menuType !== 'none' && (
-                <section className={styles.menu} aria-label="伴侣菜单" data-pet-obstacle>
+                <section
+                    className={styles.menu}
+                    aria-label="伴侣菜单"
+                    data-pet-obstacle
+                    data-pet-overlay
+                >
                     <header className={styles.menuHeader}>
                         {menuType === 'main' ? (
                             <span className={styles.menuTitle}>{pet?.name ?? '伴侣'}</span>
@@ -654,27 +720,29 @@ export default function FloatingPet() {
                 </section>
             )}
 
-            {/* 宠物窗口里，拖宠物 = 拖**整个窗口**（窗口只有它那么大，
-                在窗口内部挪位置没有意义，还会被边界裁掉）。
-
-                **必须是 `deep`，不能只写 `data-tauri-drag-region`。**
-                Tauri 只认「鼠标正下方那个元素**自己**带没带这个属性」，不看祖先。
-                而按钮里装着宠物的图，鼠标压着的是那张 img，所以光标着的属性
-                根本不生效——表现就是「按住宠物怎么拖都不动」。
-                `deep`（Tauri 2.11+）会让不可点击的子元素也参与拖动。
-
-                代价是**左键被拖动接管了，onClick 不再可靠**，所以菜单改成右键
-                （`onContextMenu`）——桌宠本来也就该是右键出菜单，顺带还满足了
-                「点一下不要随便触发东西」。 */}
+            {/* 桌宠左键按下时显式请 Tauri 开始拖窗。`data-tauri-drag-region` 的注入
+                脚本在透明、远程 WebView 的按钮上实测没有移动窗口，而且它会在
+                document 层 stopImmediatePropagation，不能再和手动方案叠加。
+                右键仍只负责请 Tauri 在鼠标处弹系统原生菜单。 */}
             <button
                 type="button"
                 className={styles.petButton}
                 {...(isPetWindow ? {} : petButtonProps)}
-                {...(isPetWindow ? { 'data-tauri-drag-region': 'deep' } : {})}
-                onContextMenu={isPetWindow
-                    ? (event) => { event.preventDefault(); handleOpenMenu(); }
+                onMouseDown={isPetWindow
+                    ? (event) => {
+                        if (event.button !== 0) return;
+                        event.preventDefault();
+                        void startPetWindowDragging().catch((error) => {
+                            console.error('Failed to start desktop pet drag', error);
+                        });
+                    }
                     : undefined}
-                onDoubleClick={isPetWindow ? handleOpenMenu : undefined}
+                onContextMenu={isPetWindow
+                    ? (event) => {
+                        event.preventDefault();
+                        void openPetContextMenu();
+                    }
+                    : undefined}
                 aria-label={loading ? '正在加载伴侣宠物' : `打开 ${pet?.name ?? '伴侣'} 菜单`}
             >
                 {loading || !pet ? (
