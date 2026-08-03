@@ -326,7 +326,13 @@ pub fn search_all(roots: &[String], query: &str) -> Vec<EntryInfo> {
     }
     // 名字短的排前面：打 `readme` 时 `readme.md` 应该在
     // `readme-old-backup-2024.md` 前头。
-    found.sort_by_key(|item| item.name.chars().count());
+    //
+    // **长度相同的再按名字排，不能就这么让它们平局。** 平局时顺序取决于
+    // `read_dir` 的返回顺序，而那个顺序两次调用之间没有保证——菜单会在打字
+    // 过程中自己重排，用户眼睛盯着的那一条会跳到别的位置上去。
+    found.sort_by(|a, b| {
+        (a.name.chars().count(), &a.name).cmp(&(b.name.chars().count(), &b.name))
+    });
     found.truncate(CANDIDATE_LIMIT);
     found
 }
@@ -867,6 +873,33 @@ mod tests {
             plan_change(&roots, fresh.to_str().unwrap(), Change::Append, "开头", "").unwrap();
         assert_eq!(planned.content, "开头");
         assert!(!planned.existed);
+    }
+
+
+    /// 候选顺序必须是确定的：长度相同的按名字排。
+    ///
+    /// 不定序的后果不是「不好看」——菜单会在打字过程中自己重排，
+    /// 用户眼睛盯着的那一条会跳到别的位置上去。
+    #[test]
+    fn candidate_order_is_deterministic() {
+        let tmp = std::env::temp_dir().join("kitty-order-test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        // 这两个名字**都是 5 个字符**，正是会平局的那种情况。
+        fs::write(tmp.join("日记.md"), b"x").unwrap();
+        fs::write(tmp.join("b.txt"), b"x").unwrap();
+        fs::write(tmp.join("长一点的名字.md"), b"x").unwrap();
+        let roots = vec![tmp.to_string_lossy().into_owned()];
+
+        let first: Vec<String> =
+            search_all(&roots, "").into_iter().map(|i| i.name).collect();
+        for _ in 0..5 {
+            let again: Vec<String> =
+                search_all(&roots, "").into_iter().map(|i| i.name).collect();
+            assert_eq!(first, again, "同样的查询给出了不同的顺序");
+        }
+        // 短的在前
+        assert!(first[0].chars().count() <= first[2].chars().count());
     }
 
     /// 符号链接指向白名单外时也要拒绝——这是 canonicalize 存在的理由。

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Paperclip } from 'lucide-react';
 import {
     formatSize,
@@ -56,12 +56,15 @@ export function useLocalFileMention(
     const [activeIndex, setActiveIndex] = useState(0);
     const [busyPath, setBusyPath] = useState<string | null>(null);
     const candidates = useLocalFileCandidates(query);
+    /** 最近一次同步光标时用的那个输入框。选中之后要回去把 `@…` 抹掉。 */
+    const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
     // 候选换了一批就把高亮拉回第一条，否则会停在一个已经不存在的位置上。
     useEffect(() => { setActiveIndex(0); }, [query]);
 
     const sync = useCallback((element: HTMLInputElement | HTMLTextAreaElement | null) => {
         if (!element) return;
+        fieldRef.current = element;
         const upto = element.value.slice(0, element.selectionStart ?? 0);
         setQuery(MENTION_AT_CARET.exec(upto)?.[1] ?? null);
     }, []);
@@ -71,6 +74,36 @@ export function useLocalFileMention(
     const pick = useCallback((candidate: LocalFileCandidate) => {
         setBusyPath(candidate.path);
         setQuery(null);
+
+        /**
+         * **把输入框里那截 `@…` 删掉。**
+         *
+         * 少了这一步会很怪：`setQuery(null)` 只是把菜单收起来，而 `@` 还留在
+         * 文本里——紧接着的 keyup 会再跑一次 `sync`，从文本里重新算出这个 `@`，
+         * 菜单**立刻又弹回来，高亮还回到第一条**。用户看到的是「我选了 b.txt，
+         * 结果传上去的是第一个文件」，因为他下一次按键选中的其实是重开的菜单。
+         *
+         * 用原生 setter + input 事件，而不是直接改 element.value：
+         * 输入框的值是 React 受控的，直接改 DOM 会在下次渲染被覆盖回去。
+         */
+        const field = fieldRef.current;
+        if (field) {
+            const caret = field.selectionStart ?? field.value.length;
+            const at = field.value.slice(0, caret).lastIndexOf('@');
+            if (at >= 0) {
+                const next = field.value.slice(0, at) + field.value.slice(caret);
+                const proto = field instanceof HTMLTextAreaElement
+                    ? HTMLTextAreaElement.prototype
+                    : HTMLInputElement.prototype;
+                Object.getOwnPropertyDescriptor(proto, 'value')!
+                    .set!.call(field, next);
+                field.dispatchEvent(new Event('input', { bubbles: true }));
+                requestAnimationFrame(() => {
+                    field.focus();
+                    field.setSelectionRange(at, at);
+                });
+            }
+        }
         void (async () => {
             try {
                 const file = await readLocalFileForUpload(candidate.path);
