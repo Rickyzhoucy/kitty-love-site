@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Paperclip } from 'lucide-react';
 import {
     formatSize,
@@ -33,9 +33,33 @@ import styles from './LocalFileMentionMenu.module.css';
 /** 光标前那个还没打完的 `@xxx`。 */
 export const MENTION_AT_CARET = /@([^\s@]{0,24})$/;
 
+/**
+ * `@` 候选里那些**不是本机文件**的条目——目前只有宠物。
+ *
+ * 做成通用的一档而不是写死一个宠物：这个菜单已经是共用组件，以后要加
+ * 「@某个计划」「@某张照片」时，加数据就够了，不用再开第二个菜单。
+ */
+export interface MentionExtra {
+    id: string;
+    name: string;
+    emoji: string;
+    hint: string;
+    /** 选中时做什么。文件那类由 hook 统一处理，这类各自决定。 */
+    onPick: () => void;
+}
+
+/**
+ * 菜单里的一条。**两类必须在同一个列表里**，否则会变成两个浮层互相遮挡
+ * ——先渲染的那个被后渲染的盖住，用户打 `@` 只看得到文件，看不到宠物。
+ */
+export type MentionItem =
+    | { kind: 'extra'; extra: MentionExtra }
+    | { kind: 'file'; file: LocalFileCandidate };
+
 export interface MentionController {
     query: string | null;
-    candidates: LocalFileCandidate[];
+    /** 宠物在前、文件在后的合并列表。上下键、Enter 都跨着这一个列表走。 */
+    items: MentionItem[];
     activeIndex: number;
     busyPath: string | null;
     /** 挂在输入框的 onChange / onKeyUp / onClick 上，跟踪光标位置。 */
@@ -44,18 +68,40 @@ export interface MentionController {
      *  调用方就不要再当成「发送」处理——否则选候选的那个 Enter 会把消息也发出去。 */
     handleKeyDown: (event: KeyboardEvent) => boolean;
     dismiss: () => void;
-    pick: (candidate: LocalFileCandidate) => void;
+    pick: (item: MentionItem) => void;
     setActiveIndex: (index: number) => void;
 }
 
 export function useLocalFileMention(
     onPicked: (file: File) => void | Promise<void>,
     onError?: (message: string) => void,
+    /**
+     * 按当前输入给出**非文件**候选（宠物）。
+     *
+     * 传函数而不是数组：query 是这个 hook 自己算的，调用方拿不到它，
+     * 传数组就会变成「调用方自己再算一遍光标前那截字」——两份实现迟早分叉。
+     */
+    extrasFor?: (query: string) => MentionExtra[],
 ): MentionController {
     const [query, setQuery] = useState<string | null>(null);
     const [activeIndex, setActiveIndex] = useState(0);
     const [busyPath, setBusyPath] = useState<string | null>(null);
     const candidates = useLocalFileCandidates(query);
+    /**
+     * 宠物在前、文件在后。
+     *
+     * **`extrasFor` 必须进依赖。** 我第一版把它塞进 ref 并只盯 `[query, candidates]`
+     * ——那样宠物改了名字之后，菜单里还挂着旧名字，直到你多打一个字才刷新。
+     * 这正是这一版在别处修的那个毛病（改名不跨窗口生效），别在这儿再造一个。
+     * 调用方用 useCallback 把它按宠物名字缓存，所以只有真的改名时才会重算。
+     */
+    const items: MentionItem[] = useMemo(() => {
+        const extras = query === null ? [] : (extrasFor?.(query) ?? []);
+        return [
+            ...extras.map(extra => ({ kind: 'extra' as const, extra })),
+            ...candidates.map(file => ({ kind: 'file' as const, file })),
+        ];
+    }, [query, candidates, extrasFor]);
     /** 最近一次同步光标时用的那个输入框。选中之后要回去把 `@…` 抹掉。 */
     const fieldRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
 
@@ -71,9 +117,16 @@ export function useLocalFileMention(
 
     const dismiss = useCallback(() => setQuery(null), []);
 
-    const pick = useCallback((candidate: LocalFileCandidate) => {
-        setBusyPath(candidate.path);
+    const pick = useCallback((item: MentionItem) => {
         setQuery(null);
+        // 宠物那类由调用方自己插入 `@名字 `，不走下面抹掉 `@` 的逻辑
+        // ——它要的是把半截名字补全，而不是删掉。
+        if (item.kind === 'extra') {
+            item.extra.onPick();
+            return;
+        }
+        const candidate = item.file;
+        setBusyPath(candidate.path);
 
         /**
          * **把输入框里那截 `@…` 删掉。**
@@ -117,15 +170,15 @@ export function useLocalFileMention(
     }, [onPicked, onError]);
 
     const handleKeyDown = useCallback((event: KeyboardEvent): boolean => {
-        if (query === null || candidates.length === 0) return false;
+        if (query === null || items.length === 0) return false;
         switch (event.key) {
             case 'ArrowDown':
                 event.preventDefault();
-                setActiveIndex(index => (index + 1) % candidates.length);
+                setActiveIndex(index => (index + 1) % items.length);
                 return true;
             case 'ArrowUp':
                 event.preventDefault();
-                setActiveIndex(index => (index - 1 + candidates.length) % candidates.length);
+                setActiveIndex(index => (index - 1 + items.length) % items.length);
                 return true;
             case 'Enter':
             case 'Tab': {
@@ -133,7 +186,7 @@ export function useLocalFileMention(
                 // 不然选中候选的同一个 Enter 会顺手把消息发出去，
                 // 而那条消息里还带着半截 `@日记` 的文字。
                 event.preventDefault();
-                const chosen = candidates[activeIndex];
+                const chosen = items[activeIndex];
                 if (chosen) pick(chosen);
                 return true;
             }
@@ -147,47 +200,59 @@ export function useLocalFileMention(
             default:
                 return false;
         }
-    }, [query, candidates, activeIndex, pick, dismiss]);
+    }, [query, items, activeIndex, pick, dismiss]);
 
     return {
-        query, candidates, activeIndex, busyPath,
+        query, items, activeIndex, busyPath,
         sync, handleKeyDown, dismiss, pick, setActiveIndex,
     };
 }
 
 export default function LocalFileMentionMenu({ controller }: { controller: MentionController }) {
-    const { candidates, activeIndex, busyPath, pick, setActiveIndex } = controller;
-    if (candidates.length === 0) return null;
+    const { items, activeIndex, busyPath, pick, setActiveIndex } = controller;
+    if (items.length === 0) return null;
 
     return (
-        <div className={styles.menu} role="listbox" aria-label="这台电脑上的文件">
-            {candidates.map((candidate, index) => (
-                <button
-                    key={candidate.path}
-                    type="button"
-                    role="option"
-                    aria-selected={index === activeIndex}
-                    data-active={index === activeIndex || undefined}
-                    className={styles.item}
-                    title={candidate.path}
-                    disabled={busyPath !== null}
-                    // 鼠标划过就跟着高亮，免得键盘选到第三条、鼠标又停在第一条上，
-                    // 两个「当前项」互相打架。
-                    onMouseEnter={() => setActiveIndex(index)}
-                    // onMouseDown 而不是 onClick：输入框失焦会先把菜单关掉，
-                    // 等到 click 时这个按钮已经不在了。
-                    onMouseDown={event => {
+        <div className={styles.menu} role="listbox" aria-label="可以叫的和这台电脑上的文件">
+            {items.map((item, index) => {
+                const active = index === activeIndex;
+                const key = item.kind === 'extra' ? `x:${item.extra.id}` : `f:${item.file.path}`;
+                // 鼠标划过就跟着高亮，免得键盘选到第三条、鼠标又停在第一条上，
+                // 两个「当前项」互相打架。
+                // onMouseDown 而不是 onClick：输入框失焦会先把菜单关掉，
+                // 等到 click 时这个按钮已经不在了。
+                const shared = {
+                    type: 'button' as const,
+                    role: 'option',
+                    'aria-selected': active,
+                    'data-active': active || undefined,
+                    className: styles.item,
+                    onMouseEnter: () => setActiveIndex(index),
+                    onMouseDown: (event: React.MouseEvent) => {
                         event.preventDefault();
-                        pick(candidate);
-                    }}
-                >
-                    <Paperclip size={13} aria-hidden="true" />
-                    <span className={styles.name}>{candidate.name}</span>
-                    <span className={styles.hint}>
-                        {busyPath === candidate.path ? '读取中…' : formatSize(candidate.size)}
-                    </span>
-                </button>
-            ))}
+                        pick(item);
+                    },
+                };
+
+                if (item.kind === 'extra') {
+                    return (
+                        <button key={key} {...shared}>
+                            <span aria-hidden="true">{item.extra.emoji}</span>
+                            <span className={styles.name}>{item.extra.name}</span>
+                            <span className={styles.hint}>{item.extra.hint}</span>
+                        </button>
+                    );
+                }
+                return (
+                    <button key={key} {...shared} title={item.file.path} disabled={busyPath !== null}>
+                        <Paperclip size={13} aria-hidden="true" />
+                        <span className={styles.name}>{item.file.name}</span>
+                        <span className={styles.hint}>
+                            {busyPath === item.file.path ? '读取中…' : formatSize(item.file.size)}
+                        </span>
+                    </button>
+                );
+            })}
         </div>
     );
 }

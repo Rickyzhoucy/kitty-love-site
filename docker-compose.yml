@@ -137,10 +137,14 @@ services:
       # 可选提供方：bocha（国内直连）/ tavily / brave
       WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-bocha}
       WEB_SEARCH_API_KEY: ${WEB_SEARCH_API_KEY:-}
-      # 文档理解/渲染只在服务器。API 与 Worker 通过内网调用，客户端不带运行时。
-      DOCUMENT_PARSER_URL: http://docling:5001
-      DOCUMENT_PARSER_API_KEY: ${DOCLING_SERVE_API_KEY:?Set DOCLING_SERVE_API_KEY in .env}
-      DOCUMENT_RENDERER_URL: http://gotenberg:3000
+      # 文档理解/渲染只允许走服务器端服务，客户端不带运行时。
+      #
+      # 当前 2C4G 生产机不运行 Docling/Gotenberg，所以默认留空；以后 Mac mini
+      # NAS 用 docker-compose.document.yml 启动文档栈，再把这里指向 NAS 的
+      # Tailscale/WireGuard 私网地址。不要把 5001/3000 直接暴露到公网。
+      DOCUMENT_PARSER_URL: "${DOCUMENT_PARSER_URL:-}"
+      DOCUMENT_PARSER_API_KEY: "${DOCUMENT_PARSER_API_KEY:-}"
+      DOCUMENT_RENDERER_URL: "${DOCUMENT_RENDERER_URL:-}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -194,39 +198,6 @@ services:
     networks:
       - default
       - skill-internal
-
-  docling:
-    image: quay.io/docling-project/docling-serve-cpu:v1.18.0
-    environment:
-      DOCLING_SERVE_API_KEY: ${DOCLING_SERVE_API_KEY:?Set DOCLING_SERVE_API_KEY in .env}
-      DOCLING_SERVE_ENABLE_UI: "false"
-      DOCLING_SERVE_MAX_SYNC_WAIT: "300"
-    mem_limit: 6g
-    cpus: 4.0
-    pids_limit: 512
-    init: true
-    restart: unless-stopped
-
-  gotenberg:
-    image: gotenberg/gotenberg:8.34.0
-    command:
-      - gotenberg
-      - --api-timeout=120s
-      - --libreoffice-disable-routes=false
-      # 上传的 Office 文档可以嵌入外链；禁止 LibreOffice 借转换过程访问 Compose
-      # 私网、回环和云元数据地址。Gotenberg 8.34 会在解析后再按 IP 类别拦截。
-      - --libreoffice-deny-private-ips=true
-      - --chromium-disable-routes=true
-      - --webhook-disable=true
-    mem_limit: 1g
-    cpus: 2.0
-    pids_limit: 256
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-    restart: unless-stopped
 
   skill-worker:
     build:

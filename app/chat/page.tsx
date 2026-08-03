@@ -40,15 +40,6 @@ import styles from './page.module.css';
 const MAX_PENDING = 8;
 
 /**
- * 光标前那个还没打完的 `@xxx`。
- *
- * 只认**紧挨光标**的那一段，且不含空格与第二个 @：写完一个 @宠物 之后继续
- * 打字，候选就该消失，而不是一直挂在那儿。长度设上限是因为超过这个长度显然
- * 已经不是在打名字了（比如一个邮箱地址）。
- */
-const MENTION_AT_CARET = /@([^\s@]{0,24})$/;
-
-/**
  * 谁都能用的通用叫法。**必须与后端 `chat_assist.GENERIC_MENTIONS` 一致**——
  * 这边判断「要不要显示正在想」，那边判断「要不要真的去想」，两边分叉的结果是
  * 转圈转到超时，或者答案凭空冒出来。
@@ -129,8 +120,6 @@ export default function ChatPage() {
     const [error, setError] = useState<string | null>(null);
     const [attachmentCache, setAttachmentCache] = useState<Record<string, Attachment>>({});
     const [zoomed, setZoomed] = useState<LightboxImage | null>(null);
-    /** 光标前那段 `@` 后面的字；null 表示光标不在一个 @ 里，候选不该出现。 */
-    const [mentionQuery, setMentionQuery] = useState<string | null>(null);
     /**
      * 正在等宠物回话的那条消息。
      *
@@ -345,36 +334,46 @@ export default function ChatPage() {
     }, [awaiting, answered]);
 
     /**
-     * 候选是否该出现。名字是用户能随时改的，所以这里**只认当前的宠物名**，
-     * 外加两个通用叫法——后端 chat_assist.GENERIC_MENTIONS 认的就是这两个，
-     * 两边必须一致，否则这里提示能打的东西后端不认。
-     */
-    const mentionMatches =
-        mentionQuery !== null
-        && [petName, '宠物', 'pet'].some(alias =>
-            alias.toLowerCase().startsWith(mentionQuery.toLowerCase()))
-            ? [{ name: petName, emoji: petEmoji }]
-            : [];
-
-    /** 光标动了就重新判断——只在 onChange 里判断的话，用方向键移出去候选会赖着不走。 */
-    const syncMention = useCallback((element: HTMLTextAreaElement) => {
-        const upto = element.value.slice(0, element.selectionStart);
-        setMentionQuery(MENTION_AT_CARET.exec(upto)?.[1] ?? null);
-    }, []);
-
-    /**
      * `@` 的第二类候选：这台电脑上的文件（只在桌面版，且只在授权目录里）。
      *
      * 选中之后走的是**附件**这条路，不是往消息里插一个路径让宠物自己去读
      * ——私聊里的宠物拿不到本地文件工具，那一档带着联网搜索，
      * 不该和本地文件权限同轮出现（见 backend/app/agents/roles.py）。
      */
+    /**
+     * **宠物和本机文件在同一个候选列表里。**
+     *
+     * 原来是两个独立的浮层各画各的：`LocalFileMentionMenu` 先渲染，文件那个
+     * 盖在宠物那个上面——打一个 `@` 只看得见文件，宠物被压在底下。而且两套
+     * 键盘导航互相不知道对方存在，上下键在两个列表之间跳不过去。
+     *
+     * 现在合成一个列表：宠物在前（它是最常叫的），文件在后，一套高亮、
+     * 一套上下键、一个 Enter。
+     */
+    const petMentionExtra = useCallback((query: string) => {
+        // 名字是用户能随时改的，所以只认当前的宠物名，外加两个通用叫法——
+        // 后端 chat_assist.GENERIC_MENTIONS 认的就是这两个，两边必须一致，
+        // 否则这里提示能打的东西后端不认。
+        const matched = [petName, '宠物', 'pet'].some(alias =>
+            alias.toLowerCase().startsWith(query.toLowerCase()));
+        if (!matched) return [];
+        return [{
+            id: 'pet',
+            name: petName,
+            emoji: petEmoji,
+            hint: '就着聊天记录帮个忙',
+            onPick: () => applyMentionRef.current?.(),
+        }];
+    }, [petName, petEmoji]);
+
     const fileMention = useLocalFileMention(
         useCallback((file: File) => addFilesRef.current?.([file]), []),
         useCallback((message: string) => setError(message), []),
+        petMentionExtra,
     );
 
     /** 选中候选：把光标前那截 `@半截名字` 换成完整的 `@名字 `。 */
+    const applyMentionRef = useRef<(() => void) | null>(null);
     const applyMention = useCallback(() => {
         const element = composerRef.current;
         if (!element) return;
@@ -383,7 +382,6 @@ export default function ChatPage() {
         if (start < 0) return;
         const inserted = `@${petName} `;
         setDraft(element.value.slice(0, start) + inserted + element.value.slice(caret));
-        setMentionQuery(null);
         // setDraft 之后 DOM 还是旧值，得等这一帧渲染完再放光标
         requestAnimationFrame(() => {
             element.focus();
@@ -391,6 +389,7 @@ export default function ChatPage() {
             element.setSelectionRange(position, position);
         });
     }, [petName]);
+    applyMentionRef.current = applyMention;
 
     const renderAttachments = (ids: string[]) => {
         const resolved = ids.map(id => attachmentCache[id]).filter(Boolean);
@@ -585,31 +584,6 @@ export default function ChatPage() {
             >
                 <LocalFileMentionMenu controller={fileMention} />
 
-                {mentionMatches.length > 0 && (
-                    <div className={styles.mentionMenu} role="listbox" aria-label="可以叫的">
-                        {mentionMatches.map(candidate => (
-                            <button
-                                key={candidate.name}
-                                type="button"
-                                role="option"
-                                aria-selected="true"
-                                className={styles.mentionItem}
-                                // onMouseDown 而不是 onClick：textarea 的 blur 会先关掉
-                                // 这个菜单，等到 click 时按钮已经不在了。
-                                onMouseDown={event => {
-                                    event.preventDefault();
-                                    applyMention();
-                                }}
-                            >
-                                <span aria-hidden="true">{candidate.emoji}</span>
-                                <span className={styles.mentionName}>{candidate.name}</span>
-                                <span className={styles.mentionHint}>就着聊天记录帮个忙</span>
-                            </button>
-                        ))}
-
-                    </div>
-                )}
-
                 {pending.length > 0 && (
                     <div className={styles.pendingRow}>
                         {pending.map(item => (
@@ -663,17 +637,12 @@ export default function ChatPage() {
                         {...ime.handlers}
                         onChange={event => {
                             setDraft(event.target.value);
-                            syncMention(event.target);
                             fileMention.sync(event.target);
                         }}
                         onClick={event => {
-                            syncMention(event.currentTarget);
                             fileMention.sync(event.currentTarget);
                         }}
-                        onBlur={() => {
-                            setMentionQuery(null);
-                            fileMention.dismiss();
-                        }}
+                        onBlur={() => fileMention.dismiss()}
                         onPaste={event => {
                             const files = Array.from(event.clipboardData.files);
                             if (!files.length) return;
@@ -688,20 +657,6 @@ export default function ChatPage() {
                             // 文件候选先挑（上下键 / Enter / Tab / Esc）。
                             // 它返回 true 就说明这个键已经用掉了，不能再往下走。
                             if (fileMention.handleKeyDown(event)) return;
-                            // 候选开着的时候，回车是「选它」而不是「发出去」——
-                            // 否则每次 @ 都会把半截名字当成消息发走。
-                            if (mentionMatches.length > 0) {
-                                if (event.key === 'Enter' || event.key === 'Tab') {
-                                    event.preventDefault();
-                                    applyMention();
-                                    return;
-                                }
-                                if (event.key === 'Escape') {
-                                    event.preventDefault();
-                                    setMentionQuery(null);
-                                    return;
-                                }
-                            }
                             if (event.key === 'Enter' && !event.shiftKey) {
                                 event.preventDefault();
                                 void send();
@@ -711,7 +666,6 @@ export default function ChatPage() {
                             if (event.key.startsWith('Arrow') || event.key === 'Backspace') {
                                 const element = event.currentTarget;
                                 requestAnimationFrame(() => {
-                                    syncMention(element);
                                     fileMention.sync(element);
                                 });
                             }

@@ -1,0 +1,54 @@
+# Mac mini NAS 专用文档运行时；不要与 2C4G 主站 Compose 合并运行。
+#
+# 启用步骤（等 NAS 空出来后再做）：
+#   cp .env.document.example .env.document
+#   # 填写强随机 DOCLING_SERVE_API_KEY，并确认端口只在私网可达
+#   docker compose -f docker-compose.document.yml --env-file .env.document up -d
+#
+# 主站 .env 随后配置：
+#   DOCUMENT_PARSER_URL=http://<NAS 私网 IP>:5001
+#   DOCUMENT_PARSER_API_KEY=<与 DOCLING_SERVE_API_KEY 相同>
+#   DOCUMENT_RENDERER_URL=http://<NAS 私网 IP>:3000
+#
+# 安全边界：Gotenberg 没有应用层鉴权，两个端口都只能通过 Tailscale/WireGuard
+# 或受防火墙保护的可信内网访问，绝对不能直接映射到公网。
+
+name: kitty-love-document-runtime
+
+services:
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.18.0
+    environment:
+      DOCLING_SERVE_API_KEY: ${DOCLING_SERVE_API_KEY:?Set DOCLING_SERVE_API_KEY in .env.document}
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "300"
+    ports:
+      - "${DOCUMENT_RUNTIME_BIND_HOST:-127.0.0.1}:${DOCLING_PORT:-5001}:5001"
+    mem_limit: ${DOCLING_MEMORY_LIMIT:-6g}
+    cpus: ${DOCLING_CPU_LIMIT:-4.0}
+    pids_limit: 512
+    init: true
+    restart: unless-stopped
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.34.0
+    command:
+      - gotenberg
+      - --api-timeout=120s
+      - --libreoffice-disable-routes=false
+      # Office 文档可以嵌入外链；禁止 LibreOffice 借转换过程访问 NAS 私网、
+      # 回环和云元数据地址。即便入口只在 VPN 内，也要保留这层出站防护。
+      - --libreoffice-deny-private-ips=true
+      - --chromium-disable-routes=true
+      - --webhook-disable=true
+    ports:
+      - "${DOCUMENT_RUNTIME_BIND_HOST:-127.0.0.1}:${GOTENBERG_PORT:-3000}:3000"
+    mem_limit: ${GOTENBERG_MEMORY_LIMIT:-1g}
+    cpus: ${GOTENBERG_CPU_LIMIT:-2.0}
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped

@@ -15,7 +15,7 @@
 ## 本地启动
 
 1. 复制 `.env.example` 为 `.env`，填写随机密码、`SESSION_SECRET`、百炼聊天与向量 API Key。
-2. 启动完整环境：
+2. 启动核心环境：
 
    ```powershell
    docker compose up --build -d
@@ -29,6 +29,11 @@
    ```
 
 4. 打开 `http://localhost:3000`。MinIO 管理控制台仅监听本机 `http://127.0.0.1:9001`。
+
+Docling 与 Gotenberg 不在核心 Compose 中启动，避免把文档模型和 LibreOffice
+塞进 2C4G 生产机。以后由 Mac mini NAS 单独运行
+`docker-compose.document.yml`，主服务只通过私网 URL 调用；具体变量和安全注意
+事项见 `.env.example` 与 `.env.document.example`。
 
 常用检查：
 
