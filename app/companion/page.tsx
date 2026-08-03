@@ -20,6 +20,7 @@ import { usePet } from '@/app/components/FloatingPet/usePet';
 import Lightbox, { type LightboxImage } from './Lightbox';
 import MessageBody from './MessageBody';
 import styles from './page.module.css';
+import { useImeGuard } from '@/lib/imeGuard';
 
 /** 同一天的消息归在一条日期分隔线下，而不是每条都挂一个时间戳。 */
 function dayKey(iso: string): string {
@@ -135,6 +136,8 @@ function AttachmentView({
 }
 
 export default function CompanionPage() {
+    /** 回车发送在输入法下的护栏，见 lib/imeGuard.ts。 */
+    const ime = useImeGuard();
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -546,10 +549,14 @@ export default function CompanionPage() {
                                 event.preventDefault();
                                 void addFiles(files);
                             }}
+                            {...ime.handlers}
                             onKeyDown={event => {
                                 // Enter 发送，Shift+Enter 换行——这里会写长句子，
                                 // 不能像即时通讯那样只允许单行。
-                                if (event.key === 'Enter' && !event.shiftKey) {
+                                // 输入法组词时的那一下回车是上屏，不算发送
+                                // （见 lib/imeGuard.ts）。
+                                if (event.key === 'Enter' && !event.shiftKey
+                                    && !ime.isComposing(event)) {
                                     event.preventDefault();
                                     void send();
                                 }

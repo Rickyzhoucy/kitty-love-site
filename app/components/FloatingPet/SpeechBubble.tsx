@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { CornerDownLeft, X } from 'lucide-react';
 import Markdown from '../Markdown';
+import { useImeGuard } from '@/lib/imeGuard';
 import styles from './FloatingPet.module.css';
 
 /**
@@ -55,6 +56,7 @@ export default function SpeechBubble({
     approval?: React.ReactNode;
 }) {
     const [draft, setDraft] = useState('');
+    const ime = useImeGuard();
     const inputRef = useRef<HTMLInputElement>(null);
 
     const submit = () => {
@@ -98,8 +100,12 @@ export default function SpeechBubble({
                         ref={inputRef}
                         value={draft}
                         onChange={event => setDraft(event.target.value)}
+                        {...ime.handlers}
                         onKeyDown={event => {
-                            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                            // 原来只判 isComposing。那一个判断在 Safari 上拦不住：
+                            // 它把 compositionend 排在 keydown 前面，上屏那下到达时
+                            // isComposing 已经是 false（见 lib/imeGuard.ts）。
+                            if (event.key === 'Enter' && !ime.isComposing(event)) {
                                 event.preventDefault();
                                 submit();
                             }

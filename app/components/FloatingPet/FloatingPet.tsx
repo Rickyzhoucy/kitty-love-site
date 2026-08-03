@@ -51,6 +51,7 @@ import {
     type DesktopSettings,
 } from '@/lib/desktopPet';
 import { isTauriDesktop } from '@/lib/desktop';
+import { useImeGuard } from '@/lib/imeGuard';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
 import type { PetInitiative } from './petBodyProtocol';
 import { usePet } from './usePet';
@@ -136,6 +137,8 @@ export default function FloatingPet() {
      */
     const [roaming, setRoaming] = useState(false);
     const { size, setSize, scale } = usePetSize();
+    /** 回车发送在输入法下的护栏，见 lib/imeGuard.ts。 */
+    const ime = useImeGuard();
     const bodyRef = useRef<HTMLElement | null>(null);
     const speechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     /** attachFiles 定义在下面，而 mention hook 在它之前就要拿到回调。
@@ -712,7 +715,11 @@ export default function FloatingPet() {
                             onKeyUp={event => mention.sync(event.currentTarget)}
                             onClick={event => mention.sync(event.currentTarget)}
                             onBlur={() => mention.dismiss()}
+                            {...ime.handlers}
                             onKeyDown={event => {
+                                // 输入法组词时的回车是上屏，不是发送。放在最前面：
+                                // 底下的候选菜单也吃 Enter（见 lib/imeGuard.ts）。
+                                if (event.key === 'Enter' && ime.isComposing(event)) return;
                                 // 菜单先挑：它吃掉的键（上下 / Enter / Tab / Esc）
                                 // 不能再当成「发送」，否则选候选那下会把消息也发出去。
                                 if (mention.handleKeyDown(event)) return;
@@ -954,7 +961,9 @@ export default function FloatingPet() {
                             <input
                                 value={newName}
                                 onChange={event => setNewName(event.target.value)}
+                                {...ime.handlers}
                                 onKeyDown={event => {
+                                    if (event.key === 'Enter' && ime.isComposing(event)) return;
                                     if (event.key === 'Enter') void submitRename();
                                 }}
                                 placeholder={pet?.name ?? '新名字'}

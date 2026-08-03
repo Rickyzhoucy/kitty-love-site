@@ -20,6 +20,7 @@ import { PET_ASSETS } from '@/app/components/FloatingPet/petConfig';
 import { usePet } from '@/app/components/FloatingPet/usePet';
 import Lightbox, { type LightboxImage } from '@/app/companion/Lightbox';
 import LocalFileMentionMenu, { useLocalFileMention } from '@/app/components/LocalFileMentionMenu';
+import { useImeGuard } from '@/lib/imeGuard';
 import styles from './page.module.css';
 
 /**
@@ -147,6 +148,8 @@ export default function ChatPage() {
     /** addFiles 定义在下面，mention hook 在它之前就要拿到回调。 */
     const addFilesRef = useRef<((files: File[]) => void) | null>(null);
     const { pet } = usePet();
+    /** 回车发送在输入法下的护栏，见 lib/imeGuard.ts。 */
+    const ime = useImeGuard();
 
     const petEmoji = PET_ASSETS.find(asset => asset.id === pet?.assetId)?.emoji ?? '🐾';
     const petName = pet?.name ?? '它';
@@ -657,6 +660,7 @@ export default function ChatPage() {
                     <textarea
                         ref={composerRef}
                         value={draft}
+                        {...ime.handlers}
                         onChange={event => {
                             setDraft(event.target.value);
                             syncMention(event.target);
@@ -677,6 +681,10 @@ export default function ChatPage() {
                             void addFiles(files);
                         }}
                         onKeyDown={event => {
+                            // **输入法正在组词时，这一下回车是上屏，不是「我说完了」。**
+                            // 必须放在所有分支之前：底下的文件候选和 @ 候选也都吃
+                            // Enter，拦晚了就变成「按回车选词，结果选中了一个候选项」。
+                            if (event.key === 'Enter' && ime.isComposing(event)) return;
                             // 文件候选先挑（上下键 / Enter / Tab / Esc）。
                             // 它返回 true 就说明这个键已经用掉了，不能再往下走。
                             if (fileMention.handleKeyDown(event)) return;
