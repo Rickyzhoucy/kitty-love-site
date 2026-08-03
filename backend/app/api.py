@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import mimetypes
 from datetime import timedelta
 from typing import Annotated, Any
 
@@ -1655,6 +1656,13 @@ async def complete_upload(
     storage: Storage,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AttachmentRead:
+    # Tauri 通过 IPC 把用户手选的本机文件组成 File，那一层刻意不猜 MIME，
+    # 所以会申报 application/octet-stream。服务器在不信任客户类型的前提下
+    # 按文件名统一判定，让 PDF 预览、Office 解析和图片视觉输入走完整链路。
+    if data.content_type == "application/octet-stream":
+        inferred_type, _ = mimetypes.guess_type(data.filename)
+        if inferred_type:
+            data = data.model_copy(update={"content_type": inferred_type})
     expected_prefix = f"{user.id}/"
     if data.bucket != settings.minio_user_bucket or not data.object_key.startswith(expected_prefix):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "对象不属于当前用户")

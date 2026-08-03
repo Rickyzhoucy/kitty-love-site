@@ -11,9 +11,14 @@ export interface Attachment {
     status: string;
     parseStatus: 'pending' | 'ready' | 'unsupported' | 'failed';
     parseError?: string | null;
+    parser?: string | null;
+    artifactKind: 'upload' | 'generated' | string;
+    artifactVersion: number;
+    parentId?: string | null;
     versionId?: string | null;
     downloadUrl: string;
     thumbnailUrl?: string | null;
+    previewUrl?: string | null;
     createdAt: string;
 }
 

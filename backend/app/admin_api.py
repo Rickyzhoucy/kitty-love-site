@@ -26,6 +26,7 @@ from datetime import timedelta
 from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, or_, select
@@ -65,8 +66,10 @@ from app.models import (
     UserSession,
     utcnow,
 )
+from app.skill_catalog import SkillCatalog, enforce_audit_policy
 from app.skill_runtime import SkillRegistry
 from app.storage import ObjectStorage
+from app.web_tools import guard_url
 
 logger = logging.getLogger(__name__)
 
@@ -389,7 +392,7 @@ def _mcp_server_payload(server: McpServer, tool_count: int = 0) -> dict[str, Any
     }
 
 
-def _validate_mcp_url(url: str, settings: Settings) -> str:
+async def _validate_mcp_url(url: str, settings: Settings) -> str:
     parsed = urlparse(url.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "MCP URL 必须是 http(s)")
@@ -397,6 +400,11 @@ def _validate_mcp_url(url: str, settings: Settings) -> str:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "MCP URL 不能内嵌凭据或片段")
     if settings.app_env != "development" and parsed.scheme != "https":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "生产环境 MCP 必须使用 HTTPS")
+    if settings.app_env != "development":
+        try:
+            await guard_url(parsed.geturl())
+        except ValueError as error:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
     return url.strip()
 
 
@@ -452,7 +460,7 @@ async def create_mcp_server(
         raise HTTPException(status.HTTP_409_CONFLICT, "MCP Server 名称已存在")
     server = McpServer(
         name=data.name,
-        url=_validate_mcp_url(data.url, settings),
+        url=await _validate_mcp_url(data.url, settings),
         transport="streamable_http",
         auth_headers_ciphertext=encrypt_headers(_validated_headers(data.auth_headers), settings),
         enabled=False,
@@ -478,7 +486,7 @@ async def update_mcp_server(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP Server 不存在")
     connection_changed = data.url is not None or data.auth_headers is not None
     if data.url is not None:
-        server.url = _validate_mcp_url(data.url, settings)
+        server.url = await _validate_mcp_url(data.url, settings)
     if data.auth_headers is not None:
         server.auth_headers_ciphertext = encrypt_headers(
             _validated_headers(data.auth_headers), settings
@@ -573,10 +581,18 @@ async def update_mcp_tool(
     item = await db.get(McpTool, tool_id)
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "MCP 工具不存在")
-    if data.enabled is not None:
-        item.enabled = data.enabled
+    effective_risk = data.risk_level if data.risk_level is not None else item.risk_level
+    if data.enabled is True and effective_risk == "high":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "高风险 MCP 尚未实现逐次用户授权与外部写回执，不能启用",
+        )
     if data.risk_level is not None:
         item.risk_level = data.risk_level
+        if data.risk_level == "high":
+            item.enabled = False
+    if data.enabled is not None:
+        item.enabled = data.enabled
     await db.commit()
     logger.info("后台 %s 更新了 MCP Tool %s", admin.username, item.name)
     return {"id": item.id, "enabled": item.enabled, "riskLevel": item.risk_level}
@@ -642,6 +658,123 @@ async def list_skills(db: Db, admin: CurrentAdmin) -> list[dict[str, Any]]:
 
 class SkillToggle(BaseModel):
     enabled: bool
+
+
+class MarketplaceInstall(BaseModel):
+    skill_id: str = Field(min_length=3, max_length=300)
+    acknowledge_risk: bool = False
+
+
+async def _skill_catalog(db: AsyncSession, settings: Settings) -> SkillCatalog:
+    values = await runtime_config.load_all(db, settings)
+    try:
+        return SkillCatalog(
+            str(values["skill.catalog_url"]),
+            str(values["skill.catalog_token"]),
+            settings,
+        )
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+
+def _raise_catalog_error(error: httpx.HTTPError) -> None:
+    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in {401, 403}:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Skill 目录凭据缺失或已过期，请到“系统配置 / Skill 目录”更新",
+        ) from error
+    raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Skill 目录请求失败") from error
+
+
+@router.get("/skill-marketplace/search")
+async def search_skill_marketplace(
+    q: str,
+    db: Db,
+    settings: Config,
+    admin: CurrentAdmin,
+) -> dict[str, Any]:
+    """服务器搜索 Skill 目录，浏览器不会获得目录凭据。"""
+    del admin
+    catalog = await _skill_catalog(db, settings)
+    try:
+        rows = await catalog.search(q)
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+    except httpx.HTTPError as error:
+        _raise_catalog_error(error)
+    allowed = {
+        "id",
+        "slug",
+        "name",
+        "source",
+        "installs",
+        "sourceType",
+        "installUrl",
+        "url",
+        "isDuplicate",
+    }
+    return {
+        "results": [
+            {key: value for key, value in row.items() if key in allowed} for row in rows
+        ]
+    }
+
+
+@router.post("/skill-marketplace/install", status_code=status.HTTP_201_CREATED)
+async def install_marketplace_skill(
+    data: MarketplaceInstall,
+    db: Db,
+    settings: Config,
+    admin: CurrentAdmin,
+) -> dict[str, Any]:
+    """审计后把目录快照作为不可变 SkillVersion 安装到服务器。"""
+    catalog = await _skill_catalog(db, settings)
+    try:
+        skill_id = catalog.validate_id(data.skill_id)
+        audits = await catalog.audits(skill_id)
+        enforce_audit_policy(audits, data.acknowledge_risk)
+        detail = await catalog.detail(skill_id)
+        archive = catalog.build_archive(detail)
+    except PermissionError as error:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except httpx.HTTPError as error:
+        _raise_catalog_error(error)
+
+    source = {
+        "catalogId": skill_id,
+        "catalogUrl": catalog.base_url,
+        "catalogHash": detail.get("hash"),
+        "audits": [
+            {
+                key: item.get(key)
+                for key in ("provider", "status", "summary", "auditedAt", "riskLevel")
+                if item.get(key) is not None
+            }
+            for item in audits
+        ],
+    }
+    try:
+        skill, version = await SkillRegistry(ObjectStorage(settings), settings).install(
+            db,
+            archive,
+            source_metadata=source,
+        )
+    except (ValueError, OSError) as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+    logger.info(
+        "后台 %s 从目录安装了 Skill %s -> %s@%s",
+        admin.username,
+        skill_id,
+        skill.name,
+        version.revision,
+    )
+    return {
+        **_skill_payload(skill, version),
+        "catalogId": skill_id,
+        "audits": source["audits"],
+    }
 
 
 @router.post("/skills/upload", status_code=status.HTTP_201_CREATED)

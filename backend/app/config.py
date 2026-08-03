@@ -134,11 +134,22 @@ class Settings(BaseSettings):
     skill_max_files: int = 500
     skill_max_output_bytes: int = 1024 * 1024
     skill_script_timeout: float = 30.0
+    # Skill 发现只是服务器管理面能力。skills.sh v1 要求 Vercel OIDC，
+    # 非 Vercel 部署也可以把这里指向自建的兼容目录。
+    skill_catalog_url: str = "https://skills.sh"
+    skill_catalog_token: str = ""
+    skill_catalog_timeout: float = 20.0
 
     # MCP Client/Host 只存在于服务器。远程连接由 Admin 登记，模型只能调用已同步、
     # 已启用的工具，结果还要受字节上限约束。
     mcp_timeout: float = 60.0
     mcp_max_result_bytes: int = 1024 * 1024
+    mcp_max_tools: int = Field(default=200, ge=1, le=5_000)
+    mcp_max_catalog_bytes: int = Field(
+        default=2 * 1024 * 1024,
+        ge=16 * 1024,
+        le=100 * 1024 * 1024,
+    )
 
     #: 宠物的工作目录。与 skill 包的缓存分开：那个是只读的、随时可重新materialize
     #: 的派生物，这个是它自己写的东西，重启要还在。

@@ -257,6 +257,24 @@ REGISTRY: tuple[Setting, ...] = (
             maximum=200_000,
         ),
     ),
+    # ── 服务器 Skill 目录 ─────────────────────────────────────────
+    *_group(
+        "skill",
+        _s(
+            "skill.catalog_url",
+            "Skill 目录地址",
+            "str",
+            env_attr="skill_catalog_url",
+            help="默认使用 skills.sh v1，也可指向自建的兼容目录。",
+        ),
+        _s(
+            "skill.catalog_token",
+            "Skill 目录凭据",
+            "secret",
+            env_attr="skill_catalog_token",
+            help="skills.sh v1 需要 Vercel OIDC Token。凭据加密落库且不回传。",
+        ),
+    ),
     # ── 宠物的节奏与预算 ───────────────────────────────────────────────────
     *_group(
         "pet",
@@ -516,6 +534,7 @@ GROUP_LABELS: dict[str, str] = {
     "chat": "对话模型",
     "embedding": "向量与检索",
     "web": "联网",
+    "skill": "Skill 目录",
     "pet": "宠物的节奏与预算",
     "memory": "记忆",
     "security": "安全",

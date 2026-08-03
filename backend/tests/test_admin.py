@@ -7,15 +7,20 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app import runtime_config
+from app.admin_api import _validate_mcp_url
 from app.admin_auth import ADMIN_COOKIE_NAME, set_admin_password
 from app.auth import SESSION_COOKIE_NAME
+from app.config import Settings, get_settings
 from app.db import get_session
 from app.main import create_app
-from app.models import Admin, SiteConfig, Skill
+from app.mcp_runtime import McpHost, decrypt_headers
+from app.models import Admin, McpServer, McpTool, SiteConfig, Skill
+from app.skill_catalog import SkillCatalog
 
 
 @pytest.fixture(autouse=True)
@@ -121,6 +126,168 @@ async def test_skill_without_active_version_cannot_be_enabled(admin_client, sess
         f"/api/v1/admin/skills/{skill_id}", json={"enabled": True}
     )
     assert response.status_code == 409
+
+
+async def test_skill_marketplace_search_is_server_side_admin_only(
+    authenticated_client,
+    admin_client,
+    monkeypatch,
+):
+    denied = await authenticated_client.get(
+        "/api/v1/admin/skill-marketplace/search", params={"q": "pdf"}
+    )
+    assert denied.status_code == 401
+
+    async def fake_search(_catalog, query, limit=20):
+        assert query == "pdf"
+        assert limit == 20
+        return [
+            {
+                "id": "example/skills/pdf",
+                "name": "PDF",
+                "source": "example/skills",
+                "installs": 42,
+                "url": "https://skills.example.com/example/skills/pdf",
+                "unexpectedSecret": "must-not-pass-through",
+            }
+        ]
+
+    monkeypatch.setattr(SkillCatalog, "search", fake_search)
+    await _login(admin_client)
+    response = await admin_client.get(
+        "/api/v1/admin/skill-marketplace/search", params={"q": "pdf"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["results"][0]["id"] == "example/skills/pdf"
+    assert "unexpectedSecret" not in response.text
+
+
+async def test_mcp_configuration_is_admin_only_and_hides_auth(
+    authenticated_client,
+    admin_client,
+    session_maker,
+):
+    """MCP 凭据只能进服务器后台，且读 API 绝不回传明文。"""
+    denied = await authenticated_client.post(
+        "/api/v1/admin/mcp-servers",
+        json={"name": "private-tools", "url": "https://mcp.example.com/mcp"},
+    )
+    assert denied.status_code == 401
+
+    await _login(admin_client)
+    secret = "Bearer top-secret-mcp-token"
+    created = await admin_client.post(
+        "/api/v1/admin/mcp-servers",
+        json={
+            "name": "private-tools",
+            "url": "https://mcp.example.com/mcp",
+            "auth_headers": {"Authorization": secret},
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["hasAuth"] is True
+    assert secret not in created.text
+
+    listed = await admin_client.get("/api/v1/admin/mcp-servers")
+    assert listed.status_code == 200
+    assert secret not in listed.text
+
+    async with session_maker() as db:
+        server = await db.scalar(select(McpServer).where(McpServer.name == "private-tools"))
+        assert server is not None
+        assert secret not in server.auth_headers_ciphertext
+        assert decrypt_headers(server, get_settings())["Authorization"] == secret
+
+
+async def test_production_mcp_rejects_private_network_targets():
+    with pytest.raises(HTTPException) as caught:
+        await _validate_mcp_url(
+            "https://127.0.0.1/mcp",
+            Settings(app_env="production", session_secret="x" * 32),
+        )
+    assert getattr(caught.value, "status_code", None) == 422
+
+
+async def test_mcp_sync_defaults_new_tools_off_and_revokes_changed_review(
+    admin_client,
+    session_maker,
+    monkeypatch,
+):
+    """Schema 同步不能绕过 Admin 审核，重新同步也不能洗掉审核结果。"""
+    await _login(admin_client)
+    created = await admin_client.post(
+        "/api/v1/admin/mcp-servers",
+        json={"name": "calendar", "url": "https://mcp.example.com/mcp"},
+    )
+    server_id = created.json()["id"]
+
+    discovered = [
+        {
+            "name": "list_events",
+            "description": "List events",
+            "inputSchema": {"type": "object"},
+        }
+    ]
+
+    async def fake_list_tools(_host, _server):
+        return discovered
+
+    monkeypatch.setattr(McpHost, "list_tools", fake_list_tools)
+    synced = await admin_client.post(f"/api/v1/admin/mcp-servers/{server_id}/sync")
+    assert synced.status_code == 200, synced.text
+    first = synced.json()["tools"]
+    assert first[0]["enabled"] is False
+    assert first[0]["riskLevel"] == "high"
+
+    tool_id = first[0]["id"]
+    blocked = await admin_client.patch(
+        f"/api/v1/admin/mcp-tools/{tool_id}",
+        json={"enabled": True},
+    )
+    assert blocked.status_code == 409
+
+    reviewed = await admin_client.patch(
+        f"/api/v1/admin/mcp-tools/{tool_id}",
+        json={"enabled": True, "risk_level": "low"},
+    )
+    assert reviewed.status_code == 200
+    raised = await admin_client.patch(
+        f"/api/v1/admin/mcp-tools/{tool_id}",
+        json={"risk_level": "high"},
+    )
+    assert raised.status_code == 200
+    assert raised.json()["enabled"] is False
+    reviewed = await admin_client.patch(
+        f"/api/v1/admin/mcp-tools/{tool_id}",
+        json={"enabled": True, "risk_level": "low"},
+    )
+    assert reviewed.status_code == 200
+    assert (await admin_client.patch(
+        f"/api/v1/admin/mcp-servers/{server_id}", json={"enabled": True}
+    )).status_code == 200
+
+    discovered[:] = [
+        {
+            "name": "list_events",
+            "description": "Updated description",
+            "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}},
+        },
+        {
+            "name": "delete_event",
+            "description": "Delete an event",
+            "inputSchema": {"type": "object"},
+        },
+    ]
+    resynced = await admin_client.post(f"/api/v1/admin/mcp-servers/{server_id}/sync")
+    assert resynced.status_code == 200, resynced.text
+    rows = {item["name"]: item for item in resynced.json()["tools"]}
+    assert rows["list_events"]["enabled"] is False
+    assert rows["list_events"]["riskLevel"] == "high"
+    assert rows["delete_event"]["enabled"] is False
+    assert rows["delete_event"]["riskLevel"] == "high"
+
+    async with session_maker() as db:
+        assert len(list(await db.scalars(select(McpTool)))) == 2
 
 
 async def test_config_secrets_are_never_returned_in_plaintext(admin_client, session_maker):

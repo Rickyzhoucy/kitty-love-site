@@ -74,6 +74,43 @@ export interface SkillInstallResult extends Omit<SkillRow, 'versionCount'> {
     version: SkillVersionRow;
 }
 
+export interface MarketplaceSkillRow {
+    id: string;
+    slug: string;
+    name: string;
+    source: string;
+    installs: number;
+    sourceType: string;
+    installUrl: string | null;
+    url: string;
+    isDuplicate?: boolean;
+}
+
+export interface McpServerRow {
+    id: string;
+    name: string;
+    url: string;
+    transport: 'streamable_http';
+    enabled: boolean;
+    status: 'unverified' | 'healthy' | 'failed';
+    hasAuth: boolean;
+    toolCount: number;
+    lastError: string | null;
+    lastSyncedAt: string | null;
+    createdAt: string;
+}
+
+export interface McpToolRow {
+    id: string;
+    name: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown> | null;
+    annotations: Record<string, unknown>;
+    enabled: boolean;
+    riskLevel: 'none' | 'low' | 'high';
+}
+
 export interface ToolRunRow {
     id: string;
     tool: string;
@@ -176,6 +213,51 @@ export const adminApi = {
         }
         return response.json() as Promise<SkillInstallResult>;
     },
+    searchSkillMarketplace: (query: string) =>
+        api.get<{ results: MarketplaceSkillRow[] }>(
+            `${base}/skill-marketplace/search?q=${encodeURIComponent(query)}`,
+        ),
+    installMarketplaceSkill: (skillId: string, acknowledgeRisk: boolean) =>
+        api.post<SkillInstallResult & {
+            catalogId: string;
+            audits: Record<string, unknown>[];
+        }>(`${base}/skill-marketplace/install`, {
+            skill_id: skillId,
+            acknowledge_risk: acknowledgeRisk,
+        }),
+
+    mcpServers: () => api.get<McpServerRow[]>(`${base}/mcp-servers`),
+    createMcpServer: (
+        name: string,
+        url: string,
+        authHeaders: Record<string, string>,
+    ) => api.post<McpServerRow>(`${base}/mcp-servers`, {
+        name,
+        url,
+        auth_headers: authHeaders,
+    }),
+    updateMcpServer: (
+        id: string,
+        values: {
+            enabled?: boolean;
+            url?: string;
+            auth_headers?: Record<string, string>;
+        },
+    ) => api.patch<McpServerRow>(`${base}/mcp-servers/${id}`, values),
+    syncMcpServer: (id: string) => api.post<{
+        server: McpServerRow;
+        tools: McpToolRow[];
+    }>(`${base}/mcp-servers/${id}/sync`),
+    mcpTools: (id: string) =>
+        api.get<McpToolRow[]>(`${base}/mcp-servers/${id}/tools`),
+    updateMcpTool: (
+        id: string,
+        values: { enabled?: boolean; risk_level?: McpToolRow['riskLevel'] },
+    ) => api.patch<Pick<McpToolRow, 'id' | 'enabled' | 'riskLevel'>>(
+        `${base}/mcp-tools/${id}`,
+        values,
+    ),
+    deleteMcpServer: (id: string) => api.delete<void>(`${base}/mcp-servers/${id}`),
 
     toolRuns: (params: Record<string, string> = {}) => {
         const query = new URLSearchParams(

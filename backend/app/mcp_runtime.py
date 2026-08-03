@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import runtime_config
 from app.config import Settings
 from app.models import McpServer, McpTool, utcnow
+from app.web_tools import guard_url
 
 
 def encrypt_headers(headers: dict[str, str], settings: Settings) -> str:
@@ -53,13 +54,18 @@ class McpHost:
     async def session(self, server: McpServer) -> AsyncIterator[ClientSession]:
         if server.transport != "streamable_http":
             raise ValueError("当前服务器只允许 Streamable HTTP MCP")
+        # Admin 保存时会检查一次；连接前仍要重新解析，避免旧记录和 DNS 变化
+        # 把 API 进程引向回环、内网或云元数据地址。
+        safe_url = server.url
+        if self.settings.app_env != "development":
+            safe_url = await guard_url(server.url)
         headers = decrypt_headers(server, self.settings)
         async with httpx.AsyncClient(
             headers=headers,
             timeout=self.settings.mcp_timeout,
             follow_redirects=False,
         ) as client:
-            async with streamable_http_client(server.url, http_client=client) as (
+            async with streamable_http_client(safe_url, http_client=client) as (
                 read_stream,
                 write_stream,
                 _,
@@ -75,13 +81,32 @@ class McpHost:
     async def list_tools(self, server: McpServer) -> list[dict[str, Any]]:
         tools: list[dict[str, Any]] = []
         cursor: str | None = None
+        seen_cursors: set[str] = set()
+        catalog_bytes = 0
         async with self.session(server) as session:
             while True:
                 page = await session.list_tools(cursor=cursor)
-                tools.extend(tool.model_dump(by_alias=True, mode="json") for tool in page.tools)
-                cursor = page.nextCursor
-                if not cursor:
+                for tool in page.tools:
+                    payload = tool.model_dump(by_alias=True, mode="json")
+                    catalog_bytes += len(
+                        json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    )
+                    if catalog_bytes > self.settings.mcp_max_catalog_bytes:
+                        raise ValueError("MCP 工具目录或 Schema 超过大小上限")
+                    tools.append(payload)
+                    if len(tools) > self.settings.mcp_max_tools:
+                        raise ValueError("MCP 工具数量超过上限")
+                next_cursor = page.nextCursor
+                if not next_cursor:
                     break
+                if next_cursor in seen_cursors:
+                    raise ValueError("MCP 工具目录分页游标发生循环")
+                seen_cursors.add(next_cursor)
+                cursor = next_cursor
         return tools
 
     async def sync_tools(self, db: AsyncSession, server: McpServer) -> list[McpTool]:
@@ -100,10 +125,25 @@ class McpHost:
             if item is None:
                 item = McpTool(server_id=server.id, name=name, enabled=False, risk_level="high")
                 db.add(item)
-            item.description = str(payload.get("description") or "")[:20_000]
-            item.input_schema = payload.get("inputSchema") or {}
-            item.output_schema = payload.get("outputSchema")
-            item.annotations = payload.get("annotations") or {}
+            description = str(payload.get("description") or "")[:20_000]
+            input_schema = payload.get("inputSchema") or {}
+            output_schema = payload.get("outputSchema")
+            annotations = payload.get("annotations") or {}
+            definition_changed = item.id is not None and (
+                item.description != description
+                or item.input_schema != input_schema
+                or item.output_schema != output_schema
+                or item.annotations != annotations
+            )
+            if definition_changed:
+                # 审核针对的是同步时看到的定义。远端同名工具换了 Schema/说明后，
+                # 旧的 enabled/low 不能自动继承，否则一次 sync 就能绕过人工复核。
+                item.enabled = False
+                item.risk_level = "high"
+            item.description = description
+            item.input_schema = input_schema
+            item.output_schema = output_schema
+            item.annotations = annotations
         if names:
             await db.execute(
                 delete(McpTool).where(McpTool.server_id == server.id, McpTool.name.not_in(names))

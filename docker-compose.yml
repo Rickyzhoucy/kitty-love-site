@@ -123,6 +123,10 @@ services:
       SKILL_BUCKET: skill-packages
       SKILL_WORKER_URL: http://skill-worker:8010
       SKILL_WORKER_TOKEN: ${SKILL_WORKER_TOKEN:?Set SKILL_WORKER_TOKEN in .env}
+      SKILL_CATALOG_URL: ${SKILL_CATALOG_URL:-https://skills.sh}
+      SKILL_CATALOG_TOKEN: ${SKILL_CATALOG_TOKEN:-}
+      MCP_MAX_TOOLS: ${MCP_MAX_TOOLS:-200}
+      MCP_MAX_CATALOG_BYTES: ${MCP_MAX_CATALOG_BYTES:-2097152}
       # 调用方据此算自己的 HTTP 超时（脚本超时 + 10 秒）。以前只传给了
       # skill-worker 自己：worker 端按默认 30 秒算，40 秒就放弃，而 skill-worker
       # 那头还在老老实实跑到 60 秒——落在中间的脚本，执行着执行着客户端先断了。
@@ -209,6 +213,9 @@ services:
       - gotenberg
       - --api-timeout=120s
       - --libreoffice-disable-routes=false
+      # 上传的 Office 文档可以嵌入外链；禁止 LibreOffice 借转换过程访问 Compose
+      # 私网、回环和云元数据地址。Gotenberg 8.34 会在解析后再按 IP 类别拦截。
+      - --libreoffice-deny-private-ips=true
       - --chromium-disable-routes=true
       - --webhook-disable=true
     mem_limit: 1g

@@ -47,6 +47,7 @@ def build_mcp_tools(
                             McpServer.enabled.is_(True),
                             McpServer.status == "healthy",
                             McpTool.enabled.is_(True),
+                            McpTool.risk_level != "high",
                             or_(
                                 McpTool.name.ilike(f"%{needle}%"),
                                 McpTool.description.ilike(f"%{needle}%"),
@@ -95,6 +96,7 @@ def build_mcp_tools(
                         McpServer.status == "healthy",
                         McpTool.name == tool_name,
                         McpTool.enabled.is_(True),
+                        McpTool.risk_level != "high",
                     )
                 )
             ).one_or_none()

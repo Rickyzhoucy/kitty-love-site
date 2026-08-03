@@ -134,7 +134,12 @@ class SkillRegistry:
         self.cache_root = Path(self.settings.skill_cache_dir)
         self.cache_root.mkdir(parents=True, exist_ok=True)
 
-    async def install(self, db: AsyncSession, archive: bytes) -> tuple[Skill, SkillVersion]:
+    async def install(
+        self,
+        db: AsyncSession,
+        archive: bytes,
+        source_metadata: dict[str, Any] | None = None,
+    ) -> tuple[Skill, SkillVersion]:
         sha256 = hashlib.sha256(archive).hexdigest()
         with tempfile.TemporaryDirectory(prefix="kitty-skill-") as temp:
             package = self.validator.validate_archive(archive, Path(temp) / "package")
@@ -170,6 +175,7 @@ class SkillRegistry:
                     metadata_={
                         "name": package.name,
                         "description": package.description,
+                        **({"source": source_metadata} if source_metadata else {}),
                     },
                 )
                 db.add(version)

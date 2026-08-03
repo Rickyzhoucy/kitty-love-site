@@ -143,6 +143,31 @@ async def test_complete_rejects_wrong_digest(authenticated_client):
     assert completed.status_code == 409
 
 
+async def test_complete_infers_local_file_type_on_server(authenticated_client):
+    """Tauri 上传不猜 MIME，但本机 PDF 仍必须进服务器文档与预览链。"""
+    app = authenticated_client._transport.app
+    app.dependency_overrides[get_storage] = lambda: FakeStorage()
+    app.state.job_queue = FakeJobQueue()
+    request = {
+        "filename": "local-report.pdf",
+        "contentType": "application/octet-stream",
+        "size": 12,
+        "sha256": "a" * 64,
+    }
+    presigned = await authenticated_client.post("/api/v1/attachments/presign", json=request)
+    completed = await authenticated_client.post(
+        "/api/v1/attachments/complete",
+        json={
+            **request,
+            "bucket": presigned.json()["bucket"],
+            "objectKey": presigned.json()["objectKey"],
+        },
+    )
+    assert completed.status_code == 201, completed.text
+    assert completed.json()["contentType"] == "application/pdf"
+    assert completed.json()["previewUrl"].endswith("/preview")
+
+
 async def test_attachment_download_forces_unsafe_types_to_download(
     authenticated_client,
 ):

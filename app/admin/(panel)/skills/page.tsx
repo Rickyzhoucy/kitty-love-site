@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Card from '../../../components/ui/Card';
 import {
     adminApi,
+    type MarketplaceSkillRow,
     type SkillRow,
     type SkillVersionRow,
     type ToolRunRow,
@@ -21,6 +22,9 @@ export default function SkillsPage() {
     const [versions, setVersions] = useState<Record<string, SkillVersionRow[]>>({});
     const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
     const [archive, setArchive] = useState<File | null>(null);
+    const [marketQuery, setMarketQuery] = useState('');
+    const [marketResults, setMarketResults] = useState<MarketplaceSkillRow[]>([]);
+    const [acknowledgeRisk, setAcknowledgeRisk] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
     const [error, setError] = useState('');
 
@@ -111,9 +115,111 @@ export default function SkillsPage() {
         }
     };
 
+    const searchMarketplace = async () => {
+        if (marketQuery.trim().length < 2) return;
+        setBusy('market-search');
+        setError('');
+        try {
+            const result = await adminApi.searchSkillMarketplace(marketQuery.trim());
+            setMarketResults(result.results);
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : 'Skill 目录搜索失败');
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    const installFromMarketplace = async (item: MarketplaceSkillRow) => {
+        setBusy(`market-install:${item.id}`);
+        setError('');
+        try {
+            await adminApi.installMarketplaceSkill(item.id, acknowledgeRisk);
+            await load();
+        } catch (cause) {
+            setError(cause instanceof Error ? cause.message : '目录 Skill 安装失败');
+        } finally {
+            setBusy(null);
+        }
+    };
+
     return (
         <div className="flex flex-col gap-4">
             <h1 className="m-0 font-display text-2xl text-ink">技能与调用</h1>
+
+            <Card className="p-5">
+                <div>
+                    <h2 className="m-0 font-display text-lg text-ink">Skill 市场</h2>
+                    <p className="m-0 mt-1 text-xs leading-5 text-ink-muted">
+                        服务器搜索目录、读取安全审计和文件快照，再经本站校验器安装。
+                        不在浏览器或桌面端运行 npx/git。
+                    </p>
+                </div>
+                <div className="mt-3 flex gap-2">
+                    <input
+                        value={marketQuery}
+                        onChange={event => setMarketQuery(event.target.value)}
+                        onKeyDown={event => {
+                            if (event.key === 'Enter') void searchMarketplace();
+                        }}
+                        placeholder="搜索 PDF、表格、数据库…"
+                        className="min-w-0 flex-1 rounded-xl border border-ink/10 bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                    />
+                    <button
+                        type="button"
+                        disabled={marketQuery.trim().length < 2 || busy === 'market-search'}
+                        onClick={searchMarketplace}
+                        className="rounded-xl bg-ink px-4 py-2 text-xs text-surface disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                        {busy === 'market-search' ? '搜索中…' : '查找 Skill'}
+                    </button>
+                </div>
+                {marketResults.length > 0 && (
+                    <>
+                        <label className="mt-3 flex items-start gap-2 text-xs leading-5 text-ink-muted">
+                            <input
+                                type="checkbox"
+                                checked={acknowledgeRisk}
+                                onChange={event => setAcknowledgeRisk(event.target.checked)}
+                                className="mt-1"
+                            />
+                            允许安装“尚无审计”或“存在警告”的 Skill。
+                            审计失败、HIGH 或 CRITICAL 仍会被服务器强制拦截。
+                        </label>
+                        <ul className="m-0 mt-3 flex list-none flex-col gap-2 p-0">
+                            {marketResults.map(item => (
+                                <li
+                                    key={item.id}
+                                    className="flex flex-wrap items-center gap-3 rounded-xl bg-sunken/60 p-3"
+                                >
+                                    <div className="min-w-0 flex-1">
+                                        <p className="m-0 truncate text-sm text-ink">{item.name}</p>
+                                        <p className="m-0 truncate text-xs text-ink-muted">
+                                            {item.source} · {item.installs.toLocaleString('zh-CN')} 次安装
+                                            {item.isDuplicate ? ' · 疑似重复来源' : ''}
+                                        </p>
+                                    </div>
+                                    <a
+                                        href={item.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="rounded-full bg-surface px-3 py-1 text-xs text-ink-muted"
+                                    >
+                                        查看来源
+                                    </a>
+                                    <button
+                                        type="button"
+                                        disabled={busy === `market-install:${item.id}`}
+                                        onClick={() => installFromMarketplace(item)}
+                                        className="rounded-full bg-accent px-3 py-1 text-xs text-on-accent disabled:opacity-40"
+                                    >
+                                        {busy === `market-install:${item.id}` ? '审计安装中…' : '审计并安装'}
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </>
+                )}
+            </Card>
 
             <Card className="p-5">
                 <div className="mb-4 flex flex-wrap items-end justify-between gap-3">

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
     Brain,
+    Cable,
     Gauge,
     Image as ImageIcon,
     LogOut,
@@ -33,6 +34,7 @@ const NAV = [
     { href: '/admin/system', label: '系统配置', icon: Settings2 },
     { href: '/admin/memories', label: '记忆', icon: Brain },
     { href: '/admin/skills', label: '技能与调用', icon: Puzzle },
+    { href: '/admin/capabilities', label: 'MCP 能力', icon: Cable },
     { href: '/admin/hero', label: '首页素材', icon: ImageIcon },
     { href: '/admin/accounts', label: '账号', icon: Users },
 ] as const;

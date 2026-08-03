@@ -418,14 +418,14 @@ export default function ChatPage() {
             ) : (
                 <a
                     key={item.id}
-                    href={apiUrl(item.downloadUrl)}
+                    href={apiUrl(item.previewUrl || item.downloadUrl)}
                     target="_blank"
                     rel="noreferrer"
                     className={styles.attachedFile}
                 >
                     <span aria-hidden="true">📄</span>
                     <span className={styles.attachedName}>{item.filename}</span>
-                    <small>{humanSize(item.size)}</small>
+                    <small>{item.previewUrl ? `PDF 预览 · ${humanSize(item.size)}` : humanSize(item.size)}</small>
                 </a>
             ),
         );

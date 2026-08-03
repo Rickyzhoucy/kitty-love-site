@@ -397,9 +397,8 @@ class AgentRuntime:
         attachment_ids: list[str] | None = None,
     ):
         attachment_ids = list(dict.fromkeys(attachment_ids or []))
-        # 一轮对话即一个语义任务；每次工具调用是它的一个步骤（对应 P3 的
-        # AgentTask / AgentTaskStep）。任务 id 现在只在流内有意义，P3 落库后
-        # 这里改为复用 AgentTask.id。
+        # 一轮对话即一个持久化 AgentTask；每次工具调用作为 AgentTaskStep
+        # 由审计中间件落库。流事件和服务器记录共用同一个 id，便于断线后追溯。
         task_id = new_id()
         async with self.session_maker() as db:
             if conversation_id:
