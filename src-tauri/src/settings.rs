@@ -50,6 +50,12 @@ pub struct DesktopSettings {
     pub pet_visible: bool,
     /// 关主窗口时收进托盘而不是退出。
     pub close_to_tray: bool,
+    /// 自由行动：宠物跟着鼠标在桌面上走。
+    ///
+    /// 存下来是因为它是一个**模式**，不是一次动作——用户开了它就是希望它一直
+    /// 这样，重启之后还得再翻一次菜单会很烦。菜单里有勾，所以不会出现
+    /// 「它怎么自己动起来了」的困惑。
+    pub roam: bool,
     /// 上次宠物窗口的位置。`None` 表示还没摆过，交给系统默认。
     pub pet_x: Option<f64>,
     pub pet_y: Option<f64>,
@@ -69,6 +75,7 @@ impl Default for DesktopSettings {
             pet_size: 220.0,
             pet_visible: true,
             close_to_tray: true,
+            roam: false,
             pet_x: None,
             pet_y: None,
         }

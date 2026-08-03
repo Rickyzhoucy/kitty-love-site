@@ -40,6 +40,8 @@ export interface DesktopSettings {
     petVisible: boolean;
     /** 关掉主窗口时是收进托盘还是退出整个应用。 */
     closeToTray: boolean;
+    /** 自由行动：宠物跟着鼠标在桌面上走。 */
+    roam: boolean;
     /** 上次宠物窗口的位置，还没摆过时是 null。 */
     petX: number | null;
     petY: number | null;
@@ -61,6 +63,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
     petSize: 220,
     petVisible: true,
     closeToTray: true,
+    roam: false,
     petX: null,
     petY: null,
     allowedRoots: [],
@@ -77,10 +80,35 @@ export async function openMainWindow(): Promise<void> {
     await invoke('show_main_window');
 }
 
+/**
+ * 右键菜单打开的那一刻，宠物是什么状态。
+ *
+ * 造型和主动性在站点那边、大小在 localStorage 里，Rust 一份都没有。菜单要
+ * 打勾就得有人告诉它，而唯一知道真值的就是这里。
+ */
+export interface PetMenuState {
+    appearance?: string;
+    size?: string;
+    initiative?: string;
+    roam: boolean;
+}
+
 /** 在桌宠当前位置弹出操作系统原生右键菜单。 */
-export async function openPetContextMenu(): Promise<void> {
+export async function openPetContextMenu(state: PetMenuState): Promise<void> {
     if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
-    await invoke('show_pet_context_menu');
+    await invoke('show_pet_context_menu', { state });
+}
+
+/**
+ * 自由行动：宠物跟着鼠标在桌面上走。
+ *
+ * 真正的跟随在 Rust 那边（src-tauri/src/main.rs）——桌面上的「走动」是移动
+ * 窗口，网页改 CSS 位置在这里没有意义，宠物窗口只有两百像素，它在里面怎么挪
+ * 都还在原地。这边只负责拨开关，以及收 Rust 发回来的「在走 / 朝哪边」。
+ */
+export async function setPetRoam(enabled: boolean): Promise<void> {
+    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+    await invoke('set_pet_roam', { enabled });
 }
 
 /**

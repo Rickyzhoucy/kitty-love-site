@@ -47,9 +47,13 @@ const SETUP_LABEL: &str = "setup";
 /// 必须和前端 `lib/desktopPet.ts` 里的 DESKTOP_PET_ROUTE 一致。
 const PET_ROUTE: &str = "/desktop-pet";
 
-/// 原生菜单必须和 App 同寿命。临时在命令里创建的 macOS `NSMenu` 在弹出调用
-/// 返回后就会被释放；持有成应用状态也避免每次右键重复注册同一批菜单项。
-struct PetContextMenu(Menu<tauri::Wry>);
+/// 最近一次弹出的宠物右键菜单。
+///
+/// 菜单每次右键都重建（要显示当前选中项的勾），但**不能建完就扔**：
+/// `popup_menu` 是非阻塞的，函数返回时菜单还挂在屏幕上，对象一旦被回收，
+/// macOS 的 `NSMenu` 跟着释放，用户看到的就是「闪一下就没了」。存在这里
+/// 让它活到下一次右键。
+struct PetContextMenu(std::sync::Mutex<Option<Menu<tauri::Wry>>>);
 
 // ── 凭据 ────────────────────────────────────────────────────────────────
 
@@ -137,8 +141,12 @@ fn apply_settings(app: &AppHandle, settings: &DesktopSettings) {
     } else {
         let _ = pet.hide();
     }
-    if let (Some(x), Some(y)) = (settings.pet_x, settings.pet_y) {
-        let _ = pet.set_position(LogicalPosition::new(x, y));
+    // 自由行动时不要把它拽回记住的位置——那个位置是上一次它停下的地方，
+    // 而现在它正跟着鼠标走。不加这个判断，改任何一项设置都会让宠物瞬移一次。
+    if !ROAMING.load(std::sync::atomic::Ordering::Relaxed) {
+        if let (Some(x), Some(y)) = (settings.pet_x, settings.pet_y) {
+            let _ = pet.set_position(LogicalPosition::new(x, y));
+        }
     }
 }
 
@@ -201,6 +209,222 @@ fn set_pet_expanded(app: AppHandle, state: tauri::State<'_, SettingsState>, expa
     if let Some(position) = next_position {
         let _ = pet.set_position(position);
     }
+}
+
+// ── 自由行动 ────────────────────────────────────────────────────────────
+
+/// 每帧最多挪多少逻辑像素，60fps 下约合每秒 780px。
+const ROAM_MAX_STEP: f64 = 13.0;
+/// 缓动系数。离得远走得快、快到了自己慢下来，落点不会「啪」地一停。
+const ROAM_EASING: f64 = 0.14;
+/// 到了就算到了。差这么几像素还继续挪只会看见它在原地抖。
+const ROAM_ARRIVE_SLACK: f64 = 6.0;
+/// 落点在点击处**上方**多少个身位。宠物是站着的，脚踩在你点的地方，
+/// 身子在上面——直接把中心对准点击点的话，它会把你刚点的那个图标盖住。
+const ROAM_FOOT_OFFSET: f64 = 0.38;
+
+/// 自由行动开着没有。
+static ROAMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+// 左键现在按着没有。
+//
+// **用轮询按键状态，不装全局事件钩子。** macOS 上的全局鼠标监听要「输入监控」
+// 授权——那是一个能读到你在**所有应用里**每一次点击的权限，为了一只宠物去
+// 要它，无论从隐私还是从「用户会不会点同意」看都不合适。
+// `CGEventSourceButtonState` 只回答「此刻按着没有」，不需要任何授权。
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGEventSourceButtonState(state_id: u32, button: u32) -> bool;
+}
+
+fn left_button_pressed() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // kCGEventSourceStateCombinedSessionState = 0，kCGMouseButtonLeft = 0
+        unsafe { CGEventSourceButtonState(0, 0) }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+/// 点哪儿走哪儿。
+///
+/// ## 为什么在 Rust 里做
+///
+/// 桌面上的「走动」就是**移动窗口**，网页那套改 CSS 位置的做法在这里没有意义
+/// ——宠物窗口只有两百像素，它在窗口里怎么挪都还在桌面同一个地方。而且点击
+/// 发生在窗口**外面**，网页根本收不到。所以整件事只有这一侧能做，前端只收
+/// 「在走 / 朝哪边」两个信号去播动画。
+///
+/// ## 为什么不是「一直跟着光标」
+///
+/// 试过，那个手感不对：宠物变成了挂在指针上的一块东西，你干什么它都在眼角
+/// 晃。点一下才过来才像宠物——你叫它，它才动身。
+///
+/// ## 为什么不夹边界
+///
+/// 落点是你点出来的，而你点得到的地方就在屏幕上。多显示器之间它会走一条直线
+/// 穿过缝隙，到得了。加夹取反而要处理「宠物和落点不在同一块屏」的情况，
+/// 一不小心就是一次瞬移。
+fn spawn_roam_loop(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut announced: Option<(bool, &'static str)> = None;
+        let mut was_pressed = false;
+        // 要去的地方，物理像素，指的是**宠物**的中心该落在哪儿。
+        let mut target: Option<(f64, f64)> = None;
+        loop {
+            if !ROAMING.load(std::sync::atomic::Ordering::Relaxed) {
+                // 关掉时把没走完的路也丢掉，不然重新打开会先补走上一趟。
+                target = None;
+                was_pressed = false;
+                announce_roam(&app, &mut announced, false, None);
+                // 关着的时候别空转。200ms 醒一次，开关拨过来最多晚这么久生效。
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                continue;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(16));
+
+            if !PET_READY.load(std::sync::atomic::Ordering::Relaxed) {
+                continue;
+            }
+            let Some(pet) = app.get_webview_window(PET_LABEL) else {
+                continue;
+            };
+            if !pet.is_visible().unwrap_or(false) {
+                continue;
+            }
+            let (Ok(position), Ok(size)) = (pet.outer_position(), pet.outer_size()) else {
+                continue;
+            };
+            let scale = pet.scale_factor().unwrap_or(1.0);
+            let body = {
+                let state = app.state::<SettingsState>();
+                let size = state.0.lock().unwrap().pet_size;
+                size * scale
+            };
+
+            // 全程用物理像素。多显示器缩放不同的时候，往返换算逻辑像素
+            // 会在跨屏那一刻把位置算歪。
+            let width = size.width as f64;
+            let height = size.height as f64;
+            let left = position.x as f64;
+            let top = position.y as f64;
+            // 宠物在窗口里的位置。**不能直接用窗口中心**：气泡或菜单展开时
+            // 窗口会被撑到 380×580，而宠物仍然贴着下沿（见 set_pet_expanded）。
+            // 按「底边往上半个身位」算，收起时这个式子正好退化成窗口正中，
+            // 两种状态共用一个公式。
+            let pet_x = left + width / 2.0;
+            let pet_y = top + height - body / 2.0;
+
+            // 左键松开的那一下才是一次「去那儿」。按下就走的话，拖选、拖动
+            // 窗口这些动作会在中途把它叫走。
+            let pressed = left_button_pressed();
+            let released = was_pressed && !pressed;
+            was_pressed = pressed;
+            if released {
+                if let Ok(cursor) = app.cursor_position() {
+                    let inside = cursor.x >= left
+                        && cursor.x <= left + width
+                        && cursor.y >= top
+                        && cursor.y <= top + height;
+                    // 点在宠物自己身上是在跟它互动（拖它、开菜单），不是叫它过去。
+                    if !inside {
+                        target = Some((cursor.x, cursor.y - body * ROAM_FOOT_OFFSET));
+                    }
+                }
+            }
+
+            let Some((target_x, target_y)) = target else {
+                announce_roam(&app, &mut announced, false, None);
+                continue;
+            };
+            let dx = target_x - pet_x;
+            let dy = target_y - pet_y;
+            let distance = dx.hypot(dy);
+            if distance <= ROAM_ARRIVE_SLACK * scale {
+                target = None;
+                announce_roam(&app, &mut announced, false, None);
+                continue;
+            }
+
+            let step = (distance * ROAM_EASING)
+                .min(ROAM_MAX_STEP * scale)
+                .max(1.0);
+            let next_x = pet_x + dx / distance * step - width / 2.0;
+            let next_y = pet_y + dy / distance * step - (height - body / 2.0);
+            let _ = pet.set_position(tauri::PhysicalPosition::new(next_x, next_y));
+
+            // 朝向只在明显有横向分量时才改，否则纯竖直移动会让它左右乱翻。
+            let facing = if dx.abs() < 2.0 {
+                None
+            } else if dx >= 0.0 {
+                Some("right")
+            } else {
+                Some("left")
+            };
+            announce_roam(&app, &mut announced, true, facing);
+        }
+    });
+}
+
+/// 只在状态真的变了才发事件。每帧发一次的话，前端每 16ms 就要 setState 一遍，
+/// 而它需要知道的只有「开始走了」和「停下了」这两个瞬间。
+///
+/// `facing` 传 `None` 表示「这次没有新的朝向」——停下来和纯竖直移动都属于
+/// 这一类。停下时把朝向硬掰成 right 的话，宠物会在到达的瞬间转个身。
+fn announce_roam(
+    app: &AppHandle,
+    announced: &mut Option<(bool, &'static str)>,
+    moving: bool,
+    facing: Option<&'static str>,
+) {
+    let facing = facing
+        .or_else(|| announced.map(|(_, last)| last))
+        .unwrap_or("right");
+    if *announced == Some((moving, facing)) {
+        return;
+    }
+    *announced = Some((moving, facing));
+    if let Some(pet) = app.get_webview_window(PET_LABEL) {
+        let _ = pet.emit(
+            "pet-roam",
+            serde_json::json!({ "moving": moving, "facing": facing }),
+        );
+    }
+}
+
+/// 打开 / 关掉自由行动。
+#[tauri::command]
+fn set_pet_roam(app: AppHandle, state: tauri::State<'_, SettingsState>, enabled: bool) {
+    // 先落原子量再动设置：跟随线程只看这一个标志，早一帧停下没有坏处，
+    // 晚一帧却可能在下面存位置的时候把它又挪走了。
+    ROAMING.store(enabled, std::sync::atomic::Ordering::Relaxed);
+
+    // 关掉时把它停下的地方记住，下次启动就在那儿——跟手动拖完一样的待遇。
+    let landed = (!enabled)
+        .then(|| app.get_webview_window(PET_LABEL))
+        .flatten()
+        .and_then(|pet| {
+            let scale = pet.scale_factor().unwrap_or(1.0);
+            pet.outer_position()
+                .ok()
+                .map(|position| position.to_logical::<f64>(scale))
+        });
+
+    let next = {
+        let mut current = state.0.lock().unwrap();
+        current.roam = enabled;
+        if let Some(landed) = landed {
+            current.pet_x = Some(landed.x);
+            current.pet_y = Some(landed.y);
+        }
+        current.clone()
+    };
+    settings::save(&app, &next);
+    let _ = app.emit("desktop-settings-changed", &next);
 }
 
 // ── 本地文件（二期）──────────────────────────────────────────────────
@@ -588,6 +812,12 @@ fn show_main_window(app: AppHandle) {
 /// 记住宠物窗口现在在哪。拖完就存，免得下次开在别的地方。
 #[tauri::command]
 fn remember_pet_position(app: AppHandle, state: tauri::State<'_, SettingsState>) {
+    // 自由行动时窗口一直在动，前端的 onMoved 会不停触发——照做就是每秒往
+    // 配置文件里写好几次。跟随停下（或被关掉）时 `set_pet_roam` 会补存一次，
+    // 该记住的位置一个都不会丢。
+    if ROAMING.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     let Some(pet) = app.get_webview_window(PET_LABEL) else {
         return;
     };
@@ -612,12 +842,66 @@ fn start_pet_dragging(app: AppHandle) -> Result<(), String> {
     pet.start_dragging().map_err(|error| error.to_string())
 }
 
+/// 右键菜单打开时，宠物当前是什么状态。
+///
+/// **这些值只有前端知道。** 造型和主动性存在站点那边、大小存在浏览器
+/// localStorage 里，Rust 从来没有过一份副本。与其在 Rust 里再养一份影子状态
+/// （然后眼看着它和真值慢慢对不上），不如每次右键让前端把当前值报上来。
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PetMenuState {
+    appearance: Option<String>,
+    size: Option<String>,
+    initiative: Option<String>,
+    roam: bool,
+}
+
+/// 一组互斥选项，选中的那个打勾。
+///
+/// macOS 的原生菜单没有 radio 型菜单项，约定俗成就是用 CheckMenuItem——
+/// Finder 的「排序方式」、系统设置里的各种模式选择都是这么做的。
+fn checked_group(
+    app: &AppHandle,
+    title: &str,
+    prefix: &str,
+    options: &[(&str, &str)],
+    current: Option<&str>,
+) -> tauri::Result<Submenu<tauri::Wry>> {
+    let mut builder = SubmenuBuilder::new(app, title);
+    let items = options
+        .iter()
+        .map(|(id, label)| {
+            CheckMenuItem::with_id(
+                app,
+                format!("{prefix}{id}"),
+                label,
+                true,
+                current == Some(id),
+                None::<&str>,
+            )
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    for item in &items {
+        builder = builder.item(item);
+    }
+    builder.build()
+}
+
 /// 在鼠标当前位置弹出真正的系统右键菜单。
 ///
 /// 透明 WebView 里的 HTML 浮层永远受窗口矩形裁剪；菜单 DOM 即使已经渲染，
 /// 超出两百多像素的宠物窗口后仍然完全看不见。这里让 Tauri 交给系统菜单层绘制，
 /// 选择结果再发回前端，动作和面板仍只保留一套 React 实现。
-fn build_pet_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+///
+/// **每次右键重新构建，不复用同一份。** 菜单要显示「现在选的是哪个」，而那些
+/// 状态随时在变；构建一次存起来的话，勾会永远停在应用启动那一刻的样子。
+/// 重建一份十几项的菜单是微秒级的事，不值得为此留一个会说谎的缓存。
+fn build_pet_context_menu(
+    app: &AppHandle,
+    state: &PetMenuState,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    // 动作是**一次性命令**，不是状态，所以不打勾——给「走两步」画个勾，
+    // 反而会让人以为宠物进入了某种「走路模式」。
     let actions = SubmenuBuilder::new(app, "动作")
         .text("petctx:action:calm", "安静待着")
         .text("petctx:action:walk", "走两步")
@@ -626,26 +910,50 @@ fn build_pet_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .text("petctx:action:feed", "吃东西")
         .text("petctx:action:cheer", "开心一下")
         .build()?;
-    let appearance = SubmenuBuilder::new(app, "外观")
-        .text("petctx:appearance:kitty", "Kitty")
-        .text("petctx:appearance:momo", "Momo")
-        .text("petctx:appearance:hello-kitty", "Hello Kitty")
-        .text("petctx:appearance:snoopy", "Snoopy")
-        .text("petctx:appearance:shiba", "柴犬")
-        .text("petctx:appearance:bichon", "比熊")
-        .text("petctx:appearance:shiba-q", "柴犬（插画）")
-        .text("petctx:appearance:bichon-q", "比熊（插画）")
-        .build()?;
-    let size = SubmenuBuilder::new(app, "大小")
-        .text("petctx:size:small", "小")
-        .text("petctx:size:medium", "中")
-        .text("petctx:size:large", "大")
-        .build()?;
-    let initiative = SubmenuBuilder::new(app, "主动性")
-        .text("petctx:initiative:normal", "偶尔主动")
-        .text("petctx:initiative:quiet", "安静模式")
-        .text("petctx:initiative:off", "完全安静")
-        .build()?;
+    let appearance = checked_group(
+        app,
+        "外观",
+        "petctx:appearance:",
+        &[
+            ("kitty", "Kitty"),
+            ("momo", "Momo"),
+            ("hello-kitty", "Hello Kitty"),
+            ("snoopy", "Snoopy"),
+            ("shiba", "柴犬"),
+            ("bichon", "比熊"),
+            ("shiba-q", "柴犬（插画）"),
+            ("bichon-q", "比熊（插画）"),
+        ],
+        state.appearance.as_deref(),
+    )?;
+    let size = checked_group(
+        app,
+        "大小",
+        "petctx:size:",
+        &[("small", "小"), ("medium", "中"), ("large", "大")],
+        state.size.as_deref(),
+    )?;
+    let initiative = checked_group(
+        app,
+        "主动性",
+        "petctx:initiative:",
+        &[
+            ("normal", "偶尔主动"),
+            ("quiet", "安静模式"),
+            ("off", "完全安静"),
+        ],
+        state.initiative.as_deref(),
+    )?;
+    // 自由行动放在最外层而不是塞进「动作」：它是个开关，开着的时候宠物
+    // 的整体行为都变了，值得在不展开任何子菜单时就能一眼看到勾。
+    let roam = CheckMenuItem::with_id(
+        app,
+        "petctx:roam",
+        "自由行动（点哪儿走哪儿）",
+        true,
+        state.roam,
+        None::<&str>,
+    )?;
 
     MenuBuilder::new(app)
         .text("petctx:chat", "说句话…")
@@ -656,6 +964,7 @@ fn build_pet_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .item(&appearance)
         .item(&size)
         .item(&initiative)
+        .item(&roam)
         .separator()
         .text("petctx:rename", "改名…")
         .text("petctx:settings", "桌面设置…")
@@ -666,11 +975,19 @@ fn build_pet_context_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 fn show_pet_context_menu(
     app: AppHandle,
     menu: tauri::State<'_, PetContextMenu>,
+    state: Option<PetMenuState>,
 ) -> Result<(), String> {
     let Some(pet) = app.get_webview_window(PET_LABEL) else {
         return Err("宠物窗口还没有就绪".into());
     };
-    pet.popup_menu(&menu.0).map_err(|error| error.to_string())
+    let built = build_pet_context_menu(&app, &state.unwrap_or_default())
+        .map_err(|error| error.to_string())?;
+    // **先存进 State 再弹。** `popup_menu` 是非阻塞的：菜单还挂在屏幕上，
+    // 这个函数就已经返回了。菜单对象在这里被回收的话，macOS 那边的 NSMenu
+    // 会跟着释放，用户看到的是「右键了一下，闪了一下就没了」。
+    let mut guard = menu.0.lock().unwrap();
+    let current = guard.insert(built);
+    pet.popup_menu(current).map_err(|error| error.to_string())
 }
 
 // ── 托盘 ────────────────────────────────────────────────────────────────
@@ -1020,6 +1337,7 @@ fn main() {
             search_local_files,
             read_local_attachment,
             show_pet_context_menu,
+            set_pet_roam,
             get_server_url,
             save_server_url,
             close_setup_window,
@@ -1028,7 +1346,12 @@ fn main() {
             let handle = app.handle().clone();
             let settings = settings::load(&handle);
             app.manage(SettingsState(std::sync::Mutex::new(settings.clone())));
-            app.manage(PetContextMenu(build_pet_context_menu(&handle)?));
+            // 空的。菜单在第一次右键时才建，那时才知道宠物现在是什么造型、
+            // 什么大小、什么主动性——启动时建一份的话，勾会永远停在启动那一刻。
+            app.manage(PetContextMenu(std::sync::Mutex::new(None)));
+
+            ROAMING.store(settings.roam, std::sync::atomic::Ordering::Relaxed);
+            spawn_roam_loop(handle.clone());
 
             build_tray(&handle, &settings)?;
             build_app_menu(&handle)?;

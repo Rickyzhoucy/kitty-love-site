@@ -633,6 +633,30 @@
   font-weight: 600;
 }
 
+/* 「自由行动」是这一格里唯一的开关，开着的时候用**实心** accent。
+   造型那边可以用 accent-soft，因为八个格子里总有一个是选中的，对比出来就行；
+   开关不一样，它得能单独看出「现在是开着的」。
+   而 accent-soft 在暗色主题下是「accent 混 76% 黑」——开着比关着还暗，
+   读起来像被禁用了。这个坑在 @ 候选菜单那儿已经踩过一次。 */
+.tile[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  font-weight: 600;
+}
+
+.tile[aria-pressed='true'] .tileIcon,
+.tile[aria-pressed='true']:hover .tileIcon {
+  color: var(--color-on-accent);
+}
+
+/* 开着的时候鼠标划过要有反馈，但不能退回浅底——那看起来像"关掉了"。
+   改成压深一档。 */
+.tile[aria-pressed='true']:hover {
+  color: var(--color-on-accent);
+  background: var(--color-accent-strong);
+}
+
 .segmented {
   display: grid;
   grid-auto-columns: 1fr;

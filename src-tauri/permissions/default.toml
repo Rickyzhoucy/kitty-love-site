@@ -25,6 +25,12 @@ commands.allow = ["get_desktop_settings", "update_desktop_settings"]
 [[permission]]
 identifier = "allow-window-control"
 description = "Shows the main window and remembers where the pet window was dragged to."
+#
+# **往 main.rs 里加一个 #[tauri::command] 是不够的，必须同时加在这儿。**
+# 这两个窗口加载的是远端页面（自托管的服务器），Tauri 对远端来源只放行
+# 这份清单里的命令，漏了的那个会被静默拒绝——前端 invoke 抛异常，而宠物
+# 窗口没有开发者工具，看到的现象是「点了没反应」。set_pet_roam 就是这么
+# 丢了一轮：菜单勾能打上（那是前端自己的 state），但宠物不动，也关不掉。
 commands.allow = [
   "show_main_window",
   "remember_pet_position",
@@ -32,6 +38,7 @@ commands.allow = [
   "set_pet_ready",
   "set_pet_expanded",
   "show_pet_context_menu",
+  "set_pet_roam",
 ]
 
 # 服务器地址。给打包进来的本地设置页用——那一页是「连不上服务器时」唯一

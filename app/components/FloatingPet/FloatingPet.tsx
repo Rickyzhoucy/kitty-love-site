@@ -21,6 +21,7 @@ import {
     PawPrint,
     Pencil,
     Footprints,
+    MousePointer2,
     Palette,
     Ruler,
     Volleyball,
@@ -43,8 +44,11 @@ import {
     openMainWindow,
     openPetContextMenu,
     requestPetWindowRoom,
+    setPetRoam,
     startPetWindowDragging,
+    type DesktopSettings,
 } from '@/lib/desktopPet';
+import { isTauriDesktop } from '@/lib/desktop';
 import { PET_ASSETS, type PetAssetId } from './petConfig';
 import type { PetInitiative } from './petBodyProtocol';
 import { usePet } from './usePet';
@@ -117,6 +121,18 @@ export default function FloatingPet() {
     const [conversationId, setConversationId] = useState<string | null>(null);
     const [newName, setNewName] = useState('');
     const [initiative, setInitiative] = useState<PetInitiative>('normal');
+    /**
+     * 自由行动：点哪儿它走哪儿。
+     *
+     * 两边的实现不在同一层——网页里是页面点击 + 改元素位置
+     * （usePetInteraction），桌面上是轮询鼠标键 + 移动窗口（Rust 的
+     * spawn_roam_loop）。这个 state 只是那个开关的当前值。
+     *
+     * **默认值两边不一样，这是故意的。** 网页里它一直是开着的，是这只宠物
+     * 一直以来的样子；桌面上每一次点击都发生在别的应用里，默认开等于你点
+     * 什么它都要跑一趟，所以那边默认关，得自己去菜单里打开。
+     */
+    const [roaming, setRoaming] = useState(false);
     const { size, setSize, scale } = usePetSize();
     const bodyRef = useRef<HTMLElement | null>(null);
     const speechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -232,7 +248,9 @@ export default function FloatingPet() {
         onOpenMenu: handleOpenMenu,
         onInteraction: handleMove,
         sizeToken: size,
-        clickToWalk: !isPetWindow,
+        // 宠物窗口里恒为 false：那边收不到窗口外的点击，「点哪儿走哪儿」
+        // 由 Rust 移动窗口来做（src-tauri/src/main.rs 的 spawn_roam_loop）。
+        clickToWalk: !isPetWindow && roaming,
     });
 
     useEffect(() => {
@@ -444,6 +462,26 @@ export default function FloatingPet() {
                 : '我会偶尔自己活动');
     }, [showSpeech]);
 
+    /**
+     * 开关自由行动。
+     *
+     * 两边存的地方不一样，因为两边的「一直有效」意思不同：桌面版关掉应用再
+     * 打开还该跟着走，所以存进 DesktopSettings（Rust 侧写盘）；网页版存在
+     * 这台机器的 localStorage 里，和位置、主动性一个待遇。
+     */
+    const toggleRoam = useCallback((next: boolean) => {
+        setRoaming(next);
+        setMenuType('none');
+        if (isPetWindow) {
+            void setPetRoam(next).catch(error => {
+                console.error('Failed to toggle desktop roam', error);
+            });
+        } else {
+            localStorage.setItem('companionPetRoam', next ? 'on' : 'off');
+        }
+        showSpeech(next ? '好，你点哪儿我去哪儿～' : '那我先待在这儿');
+    }, [isPetWindow, showSpeech]);
+
     // 系统原生右键菜单只负责选择命令；真正的动作、外观切换和复杂面板仍然
     // 走网页里原来的实现，避免 Rust 和 React 各养一套宠物业务逻辑。
     useEffect(() => {
@@ -486,6 +524,11 @@ export default function FloatingPet() {
                 if (option) setSize(option.id);
                 return;
             }
+            if (command === 'roam') {
+                // 原生菜单项是个勾选框，点一下就是「切到另一边」。
+                toggleRoam(!roaming);
+                return;
+            }
             if (command.startsWith('initiative:')) {
                 const next = command.slice('initiative:'.length);
                 if (next === 'normal' || next === 'quiet' || next === 'off') {
@@ -495,7 +538,41 @@ export default function FloatingPet() {
         };
         window.addEventListener('kitty-pet-context-command', handle);
         return () => window.removeEventListener('kitty-pet-context-command', handle);
-    }, [changeInitiative, chooseAppearance, isPetWindow, runAction, setSize]);
+    }, [changeInitiative, chooseAppearance, isPetWindow, roaming, runAction, setSize, toggleRoam]);
+
+    /**
+     * 桌面版自由行动时，走动的是**窗口**，网页这边完全不知道自己在动——
+     * 不接这个信号的话，宠物会保持站立姿势一路滑过桌面，像张被拖走的贴纸。
+     */
+    useEffect(() => {
+        if (!isPetWindow) return;
+        const handle = (event: Event) => {
+            const detail = (event as CustomEvent<{ moving: boolean; facing: 'left' | 'right' }>).detail;
+            if (!detail) return;
+            setFacing(detail.facing);
+            setActivity(detail.moving ? 'walking' : 'idle');
+        };
+        window.addEventListener('kitty-pet-roam', handle);
+        return () => window.removeEventListener('kitty-pet-roam', handle);
+    }, [isPetWindow, setActivity, setFacing]);
+
+    /** 开关的当前值：桌面版归 Rust 管，网页版存在本机。 */
+    useEffect(() => {
+        if (shouldSkip) return;
+        if (!isPetWindow) {
+            // 没存过就是开着——网页里「点哪儿走哪儿」本来就是默认行为，
+            // 加了开关不该顺手把它关掉。
+            const stored = localStorage.getItem('companionPetRoam');
+            setRoaming(stored === null ? true : stored === 'on');
+            return;
+        }
+        if (!isTauriDesktop()) return;
+        void (async () => {
+            const { invoke } = await import('@tauri-apps/api/core');
+            const settings = await invoke<DesktopSettings>('get_desktop_settings');
+            setRoaming(settings.roam);
+        })().catch(() => {});
+    }, [isPetWindow, shouldSkip]);
 
     if (shouldSkip) return null;
 
@@ -713,6 +790,14 @@ export default function FloatingPet() {
                                 onClick={() => setMenuType('settings')}>
                                 <BellRing size={19} className={styles.tileIcon} aria-hidden />主动性
                             </button>
+                            {/* 自由行动是这一格里唯一的**开关**，其余都是「打开某个面板」。
+                                所以它自己就把状态显示出来（aria-pressed + 实心底），
+                                不像别的格子那样点进去才知道现在选的是什么。 */}
+                            <button type="button" className={styles.tile}
+                                aria-pressed={roaming}
+                                onClick={() => toggleRoam(!roaming)}>
+                                <MousePointer2 size={19} className={styles.tileIcon} aria-hidden />自由行动
+                            </button>
                             <button type="button" className={styles.tile}
                                 onClick={() => setMenuType('rename')}>
                                 <Pencil size={19} className={styles.tileIcon} aria-hidden />改名
@@ -823,7 +908,14 @@ export default function FloatingPet() {
                 onContextMenu={isPetWindow
                     ? (event) => {
                         event.preventDefault();
-                        void openPetContextMenu();
+                        // 把当前状态一起报上去，菜单才知道该给哪一项打勾。
+                        // Rust 那边没有这些值的副本——见 lib/desktopPet.ts。
+                        void openPetContextMenu({
+                            appearance: pet?.assetId ?? undefined,
+                            size,
+                            initiative,
+                            roam: roaming,
+                        });
                     }
                     : undefined}
                 aria-label={loading ? '正在加载伴侣宠物' : `打开 ${pet?.name ?? '伴侣'} 菜单`}

@@ -98,6 +98,16 @@ export default function DesktopPetBridge() {
                 }),
             );
 
+            // 自由行动时窗口是 Rust 在挪，网页这边完全不知道自己在动——
+            // 不转发的话，宠物会一路「站着」滑过整个桌面，像被拖走的贴纸。
+            cleanups.push(
+                await listen<{ moving: boolean; facing: 'left' | 'right' }>('pet-roam', event => {
+                    window.dispatchEvent(new CustomEvent('kitty-pet-roam', {
+                        detail: event.payload,
+                    }));
+                }),
+            );
+
             cleanups.push(
                 await listen<string>('pet-command', event => {
                     if (event.payload === 'walk') {
