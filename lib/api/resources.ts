@@ -73,6 +73,7 @@ export interface Photo {
     id: string;
     attachmentId: string;
     url: string;
+    thumbnailUrl?: string | null;
     caption: string;
     date?: string | null;
     createdAt: string;

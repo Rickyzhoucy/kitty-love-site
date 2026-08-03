@@ -1,14 +1,16 @@
+import hashlib
 import logging
 from datetime import timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
+from pydantic import Field as PydanticField
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import Field as PydanticField
 
+from app import local_executor, passkeys, runtime_config
 from app.agents.cognition import CognitionInput
 from app.agents.conversation import AgentRuntime
 from app.agents.reflection import (
@@ -94,7 +96,11 @@ from app.pet_state import (
     save_state,
     species_of,
 )
-from app.photo_service import ALLOWED_PHOTO_TYPES, PhotoService
+from app.photo_service import (
+    ALLOWED_PHOTO_TYPES,
+    PhotoService,
+    legacy_photo_thumbnail_key,
+)
 from app.schemas import (
     ApiModel,
     AttachmentRead,
@@ -155,7 +161,6 @@ from app.schemas import (
 from app.services import CrudService
 from app.site_config import EDITABLE_KEYS as EDITABLE_SITE_CONFIG_KEYS
 from app.site_config import load as load_site_config
-from app import local_executor, passkeys, runtime_config
 from app.storage import ObjectStorage, get_storage
 
 logger = logging.getLogger(__name__)
@@ -191,6 +196,9 @@ def attachment_response_headers(attachment: Attachment) -> dict[str, str]:
         "response-content-type": (
             attachment.content_type if inline else "application/octet-stream"
         ),
+        # 对象键不可变；private 禁止共享代理缓存两个人的私密附件。即使预签名 URL
+        # 过期，已经通过鉴权下载到这台设备的副本仍可从浏览器缓存读取。
+        "response-cache-control": "private, max-age=86400, immutable",
     }
 
 
@@ -296,6 +304,62 @@ async def update_photo(
 async def delete_photo(photo_id: str, db: Db, _: CurrentUser):
     await PhotoService().delete(db, photo_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+PHOTO_THUMBNAIL_CACHE = "private, max-age=86400, immutable"
+
+
+@router.get("/photos/{photo_id}/thumbnail")
+async def photo_thumbnail(
+    photo_id: str,
+    request: Request,
+    db: Db,
+    storage: Storage,
+    settings: Annotated[Settings, Depends(get_settings)],
+    _: CurrentUser,
+) -> Response:
+    """返回稳定、可浏览器缓存的相册缩略图。
+
+    只有几十 KB 的缩略图经 API 返回，换来稳定 URL、会话鉴权和真正可复用的
+    私有缓存；点开后的 MB 级原图仍走预签名重定向，不占 API 带宽。
+    """
+    photo = await db.get(Photo, photo_id)
+    if photo is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "照片不存在")
+
+    if photo.attachment_id:
+        attachment = await db.get(Attachment, photo.attachment_id)
+        if (
+            attachment is None
+            or attachment.derived_bucket is None
+            or attachment.thumbnail_key is None
+        ):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "缩略图不存在")
+        bucket = attachment.derived_bucket
+        object_key = attachment.thumbnail_key
+    else:
+        if not photo.legacy_url:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "缩略图不存在")
+        bucket = settings.minio_derived_bucket
+        object_key = legacy_photo_thumbnail_key(photo.id)
+
+    try:
+        payload = await storage.get_bytes(bucket, object_key)
+    except Exception as error:
+        logger.warning(
+            "photo thumbnail unavailable photo_id=%s bucket=%s key=%s: %s",
+            photo.id,
+            bucket,
+            object_key,
+            error,
+        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "缩略图不存在") from error
+
+    etag = f'"{hashlib.sha256(payload).hexdigest()}"'
+    headers = {"Cache-Control": PHOTO_THUMBNAIL_CACHE, "ETag": etag}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return Response(content=payload, media_type="image/webp", headers=headers)
 
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -1390,6 +1454,8 @@ async def attachment_content(
             attachment_response_headers(attachment),
         ),
         status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        # 不能超过 900 秒的默认签名有效期；最终图片响应另有一天的 private 缓存。
+        headers={"Cache-Control": "private, max-age=600"},
     )
 
 

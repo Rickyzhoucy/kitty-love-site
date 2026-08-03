@@ -8,6 +8,18 @@ from app.schemas import PhotoCreate, PhotoRead, PhotoUpdate
 # 相册允许展示的图片类型（与附件内联白名单一致；SVG 因 XSS 风险不放行）
 ALLOWED_PHOTO_TYPES = frozenset({"image/gif", "image/jpeg", "image/png", "image/webp"})
 
+# 缩略图 URL 带显式版本。缩略图响应可以放心标 immutable；以后调整尺寸、质量或
+# 旋转算法时只要升这个版本，浏览器会请求新 URL，不需要让用户手工清缓存。
+PHOTO_THUMBNAIL_VERSION = 1
+
+
+def photo_thumbnail_url(photo_id: str) -> str:
+    return f"/api/v1/photos/{photo_id}/thumbnail?v={PHOTO_THUMBNAIL_VERSION}"
+
+
+def legacy_photo_thumbnail_key(photo_id: str) -> str:
+    return f"legacy-photo/{photo_id}/thumbnail-v{PHOTO_THUMBNAIL_VERSION}.webp"
+
 
 class PhotoService:
     @staticmethod
@@ -23,6 +35,7 @@ class PhotoService:
                 if photo.attachment_id
                 else photo.legacy_url or ""
             ),
+            thumbnail_url=photo_thumbnail_url(photo.id),
         )
 
     async def list(self, db: AsyncSession, limit: int = 500) -> list[PhotoRead]:

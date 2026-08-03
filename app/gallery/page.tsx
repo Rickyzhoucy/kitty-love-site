@@ -12,6 +12,7 @@ import { useToast } from '../components/ui/Toast';
 import { photosApi, type Photo } from '@/lib/api/resources';
 import { uploadAttachment } from '@/lib/api/attachments';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
+import FallbackImage from '../components/ui/FallbackImage';
 
 export default function Gallery() {
     const [photos, setPhotos] = useState<Photo[]>([]);
@@ -194,12 +195,13 @@ export default function Gallery() {
                             onClick={() => setSelectedPhoto(photo)}
                         >
                             {photo.url ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                    src={photo.url}
+                                <FallbackImage
+                                    primarySrc={photo.thumbnailUrl}
+                                    fallbackSrc={photo.url}
                                     alt={photo.caption}
                                     className="w-full h-auto object-cover transition-transform duration-500 ease-spring group-hover:scale-105"
                                     loading="lazy"
+                                    decoding="async"
                                 />
                             ) : (
                                 <div className="flex aspect-square items-center justify-center bg-gradient-to-br from-accent-soft to-secondary-soft">

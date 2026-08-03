@@ -81,6 +81,7 @@ class PhotoUpdate(ApiModel):
 
 class PhotoRead(Entity, PhotoCreate):
     url: str
+    thumbnail_url: str | None = None
 
 
 class MilestoneCreate(ApiModel):

@@ -3,7 +3,7 @@ from zipfile import BadZipFile, ZipFile
 
 from docx import Document
 from openpyxl import load_workbook
-from PIL import Image
+from PIL import Image, ImageOps
 from pypdf import PdfReader
 
 
@@ -100,6 +100,9 @@ def thumbnail_webp(content: bytes, content_type: str) -> bytes | None:
     if not content_type.startswith("image/"):
         return None
     with Image.open(BytesIO(content)) as image:
+        # 手机照片常把方向只写进 EXIF；不先转正，缩略图会横躺或倒置，而原图在
+        # 浏览器里又是正的，点开前后方向就跳了。
+        image = ImageOps.exif_transpose(image)
         image.thumbnail((512, 512), Image.Resampling.LANCZOS)
         output = BytesIO()
         image.convert("RGB").save(output, "WEBP", quality=82, method=6)

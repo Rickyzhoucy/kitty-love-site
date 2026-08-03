@@ -13,10 +13,11 @@ import Modal from './components/ui/Modal';
 import Button from './components/ui/Button';
 import { Input } from './components/ui/Input';
 import { useToast } from './components/ui/Toast';
-import { configApi, photosApi } from '@/lib/api/resources';
+import { configApi, photosApi, type Photo } from '@/lib/api/resources';
 import { useResourceEvents } from '@/lib/api/useResourceEvents';
 import { cn } from '@/lib/utils';
 import { daysSince } from '@/lib/date';
+import FallbackImage from './components/ui/FallbackImage';
 
 const QUICK_LINKS = [
   { href: '/guestbook', num: '01', label: '留言板', en: 'Guestbook', icon: BookHeart },
@@ -28,7 +29,7 @@ const QUICK_LINKS = [
 const MARQUEE_ITEMS = ['我们的小世界', 'Our Little World', '柴米油盐', 'Every Little Thing', '来日方长', 'Forever & Always'];
 
 /** 缩略图聚合簇：三张层叠小卡，hover 扇形展开 */
-function ThumbCluster({ icon: Icon, photos }: { icon: LucideIcon; photos?: string[] }) {
+function ThumbCluster({ icon: Icon, photos }: { icon: LucideIcon; photos?: Photo[] }) {
   const tileMotion = [
     'z-0 -rotate-6 group-hover:-translate-x-[150%] group-hover:-rotate-12',
     'z-10 group-hover:scale-110',
@@ -37,19 +38,25 @@ function ThumbCluster({ icon: Icon, photos }: { icon: LucideIcon; photos?: strin
   return (
     <span className="relative block h-16 w-20" aria-hidden>
       {tileMotion.map((motionCls, i) => {
-        const url = photos?.[i];
+        const photo = photos?.[i];
         return (
           <span
-            key={i}
+            key={photo?.id ?? i}
             className={cn(
               'absolute inset-y-0 left-1/2 w-14 -translate-x-1/2 overflow-hidden rounded-lg border-2 border-surface bg-accent-soft shadow-soft',
               'transition-all duration-300 ease-spring',
               motionCls
             )}
           >
-            {url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={url} alt="" className="h-full w-full object-cover" loading="lazy" />
+            {photo?.url ? (
+              <FallbackImage
+                primarySrc={photo.thumbnailUrl || photo.url}
+                fallbackSrc={photo.url}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+                decoding="async"
+              />
             ) : (
               <span className="flex h-full w-full items-center justify-center">
                 <Icon size={18} className="text-accent" />
@@ -66,7 +73,7 @@ export default function Home() {
   const [showLetter, setShowLetter] = useState(false);
   const [config, setConfig] = useState<Record<string, string>>({});
   const [daysTogether, setDaysTogether] = useState<number | null>(null);
-  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [photoPreviews, setPhotoPreviews] = useState<Photo[]>([]);
   /** 正在编辑「在一起」的日子；null 表示没在编辑。 */
   const [editingAnniversary, setEditingAnniversary] = useState<string | null>(null);
   const [savingAnniversary, setSavingAnniversary] = useState(false);
@@ -93,7 +100,7 @@ export default function Home() {
   const loadPhotoUrls = useCallback(async () => {
     try {
       const photos = await photosApi.list();
-      setPhotoUrls(photos.map(photo => photo.url).filter(Boolean).slice(0, 3));
+      setPhotoPreviews(photos.filter(photo => photo.url).slice(0, 3));
     } catch (error) {
       console.error('Failed to fetch photos', error);
     }
@@ -101,7 +108,7 @@ export default function Home() {
 
   useEffect(() => {
     photosApi.list()
-      .then(photos => setPhotoUrls(photos.map(photo => photo.url).filter(Boolean).slice(0, 3)))
+      .then(photos => setPhotoPreviews(photos.filter(photo => photo.url).slice(0, 3)))
       .catch(error => console.error('Failed to fetch photos', error));
   }, []);
   useResourceEvents(['photos'], () => void loadPhotoUrls());
@@ -282,7 +289,7 @@ export default function Home() {
                   </span>
                 </span>
                 <span className="hidden sm:block shrink-0">
-                  <ThumbCluster icon={Icon} photos={item.href === '/gallery' ? photoUrls : undefined} />
+                  <ThumbCluster icon={Icon} photos={item.href === '/gallery' ? photoPreviews : undefined} />
                 </span>
                 <ArrowUpRight
                   size={26}

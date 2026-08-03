@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from app.models import Attachment, Photo
 from app.storage import get_storage
 
 
@@ -13,6 +14,7 @@ class FakeStorage:
 
     def __init__(self) -> None:
         self.get_headers: list[dict[str, str] | None] = []
+        self.payload = b"thumbnail-webp"
 
     def build_object_key(self, owner_id: str, filename: str) -> str:
         return f"{owner_id}/fixed/{filename}"
@@ -34,6 +36,9 @@ class FakeStorage:
 
     async def sha256(self, bucket: str, object_key: str) -> str:
         return self.sha
+
+    async def get_bytes(self, bucket: str, object_key: str) -> bytes:
+        return self.payload
 
 
 class FakeJobQueue:
@@ -103,6 +108,9 @@ async def test_presign_and_complete_upload(authenticated_client):
     )
     assert photo.status_code == 201, photo.text
     assert photo.json()["url"].endswith(f"/{attachment['id']}/content")
+    assert photo.json()["thumbnailUrl"].endswith(
+        f"/photos/{photo.json()['id']}/thumbnail?v=1"
+    )
 
 
 async def test_complete_rejects_wrong_digest(authenticated_client):
@@ -172,4 +180,82 @@ async def test_attachment_download_forces_unsafe_types_to_download(
             "attachment; filename=\"unsafe'page.svg\""
         ),
         "response-content-type": "application/octet-stream",
+        "response-cache-control": "private, max-age=86400, immutable",
     }
+    assert response.headers["cache-control"] == "private, max-age=600"
+
+
+async def test_photo_thumbnail_is_private_versioned_and_revalidates(
+    authenticated_client,
+    session_maker,
+):
+    storage = FakeStorage()
+    app = authenticated_client._transport.app
+    app.dependency_overrides[get_storage] = lambda: storage
+    app.state.job_queue = FakeJobQueue()
+    request = {
+        "filename": "cached.jpg",
+        "contentType": "image/jpeg",
+        "size": 12,
+        "sha256": "a" * 64,
+    }
+    presigned = await authenticated_client.post("/api/v1/attachments/presign", json=request)
+    completed = await authenticated_client.post(
+        "/api/v1/attachments/complete",
+        json={
+            **request,
+            "bucket": presigned.json()["bucket"],
+            "objectKey": presigned.json()["objectKey"],
+        },
+    )
+    attachment_id = completed.json()["id"]
+    photo = await authenticated_client.post(
+        "/api/v1/photos",
+        json={"attachmentId": attachment_id, "caption": "cached"},
+    )
+    thumbnail_url = photo.json()["thumbnailUrl"]
+
+    async with session_maker() as db:
+        attachment = await db.get(Attachment, attachment_id)
+        assert attachment is not None
+        attachment.derived_bucket = "derived-assets"
+        attachment.thumbnail_key = f"owner/{attachment.id}/thumbnail.webp"
+        await db.commit()
+
+    first = await authenticated_client.get(thumbnail_url)
+    assert first.status_code == 200
+    assert first.content == storage.payload
+    assert first.headers["content-type"] == "image/webp"
+    assert first.headers["cache-control"] == "private, max-age=86400, immutable"
+    assert first.headers["etag"].startswith('"')
+
+    cached = await authenticated_client.get(
+        thumbnail_url,
+        headers={"If-None-Match": first.headers["etag"]},
+    )
+    assert cached.status_code == 304
+    assert cached.content == b""
+
+
+async def test_legacy_photo_uses_the_same_thumbnail_contract(
+    authenticated_client,
+    session_maker,
+):
+    storage = FakeStorage()
+    app = authenticated_client._transport.app
+    app.dependency_overrides[get_storage] = lambda: storage
+    async with session_maker() as db:
+        legacy = Photo(legacy_url="/uploads/old.jpg", caption="old")
+        db.add(legacy)
+        await db.commit()
+        await db.refresh(legacy)
+        photo_id = legacy.id
+
+    listed = await authenticated_client.get("/api/v1/photos")
+    body = next(item for item in listed.json() if item["id"] == photo_id)
+    assert body["url"] == "/uploads/old.jpg"
+    assert body["thumbnailUrl"] == f"/api/v1/photos/{photo_id}/thumbnail?v=1"
+
+    thumbnail = await authenticated_client.get(body["thumbnailUrl"])
+    assert thumbnail.status_code == 200
+    assert thumbnail.content == storage.payload
