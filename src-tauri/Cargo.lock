@@ -1863,6 +1863,7 @@ dependencies = [
 name = "kitty-love-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "keyring",
  "serde",
  "serde_json",

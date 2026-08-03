@@ -16,6 +16,9 @@
 mod local_fs;
 mod settings;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+
 use settings::{DesktopSettings, SettingsState};
 use tauri::{
     menu::{
@@ -245,6 +248,46 @@ fn run_local_tool(
 
     audit(&app, &tool, &arg("path"), &outcome);
     outcome
+}
+
+/// 聊天框里打 `@` 时的文件候选。
+///
+/// **直接在本机查，不绕云端。** 这是打字时的即时补全，走一趟服务器再回来
+/// 会明显发涩；而且候选列表里全是文件路径，没有任何理由让它经过网络。
+#[tauri::command]
+fn search_local_files(
+    state: tauri::State<'_, SettingsState>,
+    query: String,
+) -> Vec<local_fs::EntryInfo> {
+    let roots = { state.0.lock().unwrap().allowed_roots.clone() };
+    local_fs::search_all(&roots, &query)
+}
+
+/// 把选中的文件读出来，交给网页层走现有的附件上传管线。
+///
+/// **返回 base64 而不是让网页层自己去读。** 网页层根本没有文件系统访问权
+/// ——这正是我们要的：能读什么由这一层的白名单决定，网页层只是个搬运工。
+#[tauri::command]
+fn read_local_attachment(
+    app: AppHandle,
+    state: tauri::State<'_, SettingsState>,
+    path: String,
+) -> Result<serde_json::Value, String> {
+    let roots = { state.0.lock().unwrap().allowed_roots.clone() };
+    let outcome = local_fs::read_for_attach(&roots, &path);
+    // 附件也要进审计：这是文件内容真正离开这台电脑的一刻，
+    // 比只读一眼更值得记。
+    audit(
+        &app,
+        "attach",
+        &path,
+        &outcome.as_ref().map(|_| serde_json::Value::Null).map_err(|e| e.clone()),
+    );
+    let (name, bytes) = outcome?;
+    Ok(serde_json::json!({
+        "name": name,
+        "base64": BASE64.encode(&bytes),
+    }))
 }
 
 /// 把每一次本地调用记在本机。
@@ -719,6 +762,8 @@ fn main() {
             set_pet_ready,
             set_pet_expanded,
             run_local_tool,
+            search_local_files,
+            read_local_attachment,
             show_pet_context_menu,
             get_server_url,
             save_server_url,

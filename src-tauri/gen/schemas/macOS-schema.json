@@ -195,6 +195,12 @@
           "markdownDescription": "Loads the device session token from the operating-system credential vault."
         },
         {
+          "description": "Searches allow-listed folders for @-mention candidates and reads a chosen file for upload.",
+          "type": "string",
+          "const": "allow-local-attach",
+          "markdownDescription": "Searches allow-listed folders for @-mention candidates and reads a chosen file for upload."
+        },
+        {
           "description": "Runs read-only local file lookups inside the user's allow-listed directories.",
           "type": "string",
           "const": "allow-local-files",

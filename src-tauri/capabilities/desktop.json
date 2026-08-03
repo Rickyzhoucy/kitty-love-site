@@ -25,6 +25,7 @@
     "autostart:default",
     "allow-server-url",
     "allow-local-files",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "allow-local-attach"
   ]
 }

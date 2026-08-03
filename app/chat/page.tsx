@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Paperclip } from 'lucide-react';
 import {
     getAttachment,
     uploadAttachment,
@@ -19,6 +20,12 @@ import { subscribeServerEvent } from '@/lib/api/events';
 import { PET_ASSETS } from '@/app/components/FloatingPet/petConfig';
 import { usePet } from '@/app/components/FloatingPet/usePet';
 import Lightbox, { type LightboxImage } from '@/app/companion/Lightbox';
+import {
+    formatSize,
+    readLocalFileForUpload,
+    useLocalFileCandidates,
+    type LocalFileCandidate,
+} from '@/lib/localFileMention';
 import styles from './page.module.css';
 
 /**
@@ -298,6 +305,40 @@ export default function ChatPage() {
         setMentionQuery(MENTION_AT_CARET.exec(upto)?.[1] ?? null);
     }, []);
 
+    /**
+     * `@` 的第二类候选：这台电脑上的文件（只在桌面版，且只在授权目录里）。
+     *
+     * 选中之后走的是**附件**这条路，不是往消息里插一个路径让宠物自己去读
+     * ——私聊里的宠物拿不到本地文件工具，那一档带着联网搜索，
+     * 不该和本地文件权限同轮出现（见 backend/app/agents/roles.py）。
+     */
+    const fileCandidates = useLocalFileCandidates(mentionQuery);
+
+    /** 把光标前那截 `@半截词` 整个删掉。选文件时用——文件走附件，不留文字。 */
+    const dropMentionText = useCallback(() => {
+        const element = composerRef.current;
+        if (!element) return;
+        const caret = element.selectionStart;
+        const start = element.value.slice(0, caret).lastIndexOf('@');
+        if (start < 0) return;
+        setDraft(element.value.slice(0, start) + element.value.slice(caret));
+        setMentionQuery(null);
+        requestAnimationFrame(() => {
+            element.focus();
+            element.setSelectionRange(start, start);
+        });
+    }, []);
+
+    const attachLocalFile = useCallback(async (candidate: LocalFileCandidate) => {
+        dropMentionText();
+        try {
+            const file = await readLocalFileForUpload(candidate.path);
+            await addFiles([file]);
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : String(reason));
+        }
+    }, [addFiles, dropMentionText]);
+
     /** 选中候选：把光标前那截 `@半截名字` 换成完整的 `@名字 `。 */
     const applyMention = useCallback(() => {
         const element = composerRef.current;
@@ -493,7 +534,7 @@ export default function ChatPage() {
                     void addFiles(event.dataTransfer.files);
                 }}
             >
-                {mentionMatches.length > 0 && (
+                {(mentionMatches.length > 0 || fileCandidates.length > 0) && (
                     <div className={styles.mentionMenu} role="listbox" aria-label="可以叫的">
                         {mentionMatches.map(candidate => (
                             <button
@@ -512,6 +553,30 @@ export default function ChatPage() {
                                 <span aria-hidden="true">{candidate.emoji}</span>
                                 <span className={styles.mentionName}>{candidate.name}</span>
                                 <span className={styles.mentionHint}>就着聊天记录帮个忙</span>
+                            </button>
+                        ))}
+
+                        {/* 这台电脑上的文件。只有桌面版、且只在授权目录里的会出现。
+                            选中之后直接变成附件——不往消息里插路径。 */}
+                        {fileCandidates.map(candidate => (
+                            <button
+                                key={candidate.path}
+                                type="button"
+                                role="option"
+                                aria-selected="false"
+                                className={styles.mentionItem}
+                                title={candidate.path}
+                                // onMouseDown 同上：textarea 失焦会先把菜单关掉。
+                                onMouseDown={event => {
+                                    event.preventDefault();
+                                    void attachLocalFile(candidate);
+                                }}
+                            >
+                                <Paperclip size={14} aria-hidden="true" />
+                                <span className={styles.mentionName}>{candidate.name}</span>
+                                <span className={styles.mentionHint}>
+                                    {formatSize(candidate.size)} · 作为附件带上
+                                </span>
                             </button>
                         ))}
                     </div>

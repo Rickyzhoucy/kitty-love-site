@@ -305,7 +305,12 @@
   bottom: calc(100% + 6px);
   left: clamp(16px, 5vw, 48px);
   z-index: 5;
-  width: min(280px, calc(100vw - 32px));
+  /* 文件候选进来之后这里可能有十几条，比原来「只有宠物一条」时宽一点、
+     并且必须能滚——不封顶的话菜单会从输入框一路顶到屏幕外。 */
+  width: min(340px, calc(100vw - 32px));
+  max-height: min(320px, 46vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   border: 1px solid color-mix(in oklch, var(--color-ink), transparent 88%);
   border-radius: var(--radius-md);

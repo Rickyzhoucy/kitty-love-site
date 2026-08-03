@@ -24,6 +24,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 本地文件当附件时要经 IPC 传字节，base64 是网页层能直接收的形式。
+base64 = "0.22"
 url = "2.5"
 
 [features]

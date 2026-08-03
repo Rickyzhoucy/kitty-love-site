@@ -254,6 +254,90 @@ fn glob_match(pattern: &str, name: &str) -> bool {
     pi == p.len()
 }
 
+/// 单个附件的上限。比服务端的 50MB 小得多，因为这条路要把整个文件
+/// base64 之后经 IPC 传给网页层——几十兆走这条路会让界面卡住好几秒。
+/// 真要传大文件，用聊天框里原来那个上传按钮。
+pub const MAX_ATTACH_BYTES: u64 = 10 * 1024 * 1024;
+
+/// 给 `@` 候选用：在**所有**授权目录里按文件名片段找。
+///
+/// 和 `search` 的区别是不需要先指定目录——用户在输入框里打 `@年度`，
+/// 这时候还没有"当前目录"的概念，得把所有授权范围都扫一遍。
+pub fn search_all(roots: &[String], query: &str) -> Vec<EntryInfo> {
+    let needle = query.trim().to_lowercase();
+    let mut found = Vec::new();
+    for root in roots {
+        let Ok(dir) = expand_tilde(root).canonicalize() else {
+            continue;
+        };
+        collect_files(&dir, &needle, &mut found, 0);
+        if found.len() >= CANDIDATE_LIMIT {
+            break;
+        }
+    }
+    // 名字短的排前面：打 `readme` 时 `readme.md` 应该在
+    // `readme-old-backup-2024.md` 前头。
+    found.sort_by_key(|item| item.name.chars().count());
+    found.truncate(CANDIDATE_LIMIT);
+    found
+}
+
+/// 候选列表最多这么多条。菜单里滚不完的候选没有意义。
+const CANDIDATE_LIMIT: usize = 20;
+
+fn collect_files(dir: &Path, needle: &str, out: &mut Vec<EntryInfo>, depth: usize) {
+    if depth > 5 || out.len() >= CANDIDATE_LIMIT {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            // 这些目录里全是构建产物，不是人写的东西。扫进去只会把候选淹掉，
+            // 而且很慢。
+            if matches!(name.as_str(), "node_modules" | "target" | "venv" | "__pycache__") {
+                continue;
+            }
+            collect_files(&path, needle, out, depth + 1);
+        } else if needle.is_empty() || name.to_lowercase().contains(needle) {
+            if let Some(info) = describe(&path) {
+                out.push(info);
+            }
+        }
+        if out.len() >= CANDIDATE_LIMIT {
+            return;
+        }
+    }
+}
+
+/// 读出文件字节，交给网页层当附件上传。
+///
+/// **仍然过白名单。** 候选列表是本机生成的，但 `path` 是从网页层传回来的
+/// 字符串——中间隔了一层不可信边界，不能因为"候选是我给的"就跳过校验。
+pub fn read_for_attach(roots: &[String], requested: &str) -> Result<(String, Vec<u8>), String> {
+    let file = resolve_within(roots, requested)?;
+    let meta = fs::metadata(&file).map_err(|e| format!("读不了：{e}"))?;
+    if meta.is_dir() {
+        return Err("这是个文件夹，不能当附件".into());
+    }
+    if meta.len() > MAX_ATTACH_BYTES {
+        return Err(format!(
+            "文件太大了（超过 {} MB）。大文件用聊天框里的上传按钮。",
+            MAX_ATTACH_BYTES / 1024 / 1024
+        ));
+    }
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "文件".into());
+    let bytes = fs::read(&file).map_err(|e| format!("读不了：{e}"))?;
+    Ok((name, bytes))
+}
+
 pub fn info(roots: &[String], requested: &str) -> Result<EntryInfo, String> {
     let path = resolve_within(roots, requested)?;
     describe(&path).ok_or_else(|| format!("看不了「{requested}」的信息"))
@@ -289,6 +373,55 @@ mod tests {
         assert!(resolve_within(&roots, "/etc").is_err());
         // 没有白名单时一律拒绝
         assert!(resolve_within(&[], inside.to_str().unwrap()).is_err());
+    }
+
+    /// `@` 候选：只在授权目录里找，且不能把隐藏文件和构建产物翻出来。
+    #[test]
+    fn candidates_stay_inside_the_roots() {
+        let tmp = std::env::temp_dir().join("kitty-candidates-test");
+        let _ = fs::remove_dir_all(&tmp);
+        let inside = tmp.join("inside");
+        fs::create_dir_all(inside.join("node_modules")).unwrap();
+        fs::create_dir_all(tmp.join("outside")).unwrap();
+        fs::write(inside.join("年度总结.md"), b"x").unwrap();
+        fs::write(inside.join("readme.md"), b"x").unwrap();
+        fs::write(inside.join(".secret"), b"x").unwrap();
+        fs::write(inside.join("node_modules/junk.md"), b"x").unwrap();
+        fs::write(tmp.join("outside/别人的.md"), b"x").unwrap();
+
+        let roots = vec![inside.to_string_lossy().into_owned()];
+        let names: Vec<String> = search_all(&roots, "md")
+            .into_iter()
+            .map(|item| item.name)
+            .collect();
+
+        assert!(names.contains(&"年度总结.md".to_string()));
+        assert!(names.contains(&"readme.md".to_string()));
+        // 授权目录外的不该出现——候选列表也是一种信息泄露。
+        assert!(!names.iter().any(|n| n == "别人的.md"));
+        // node_modules 里全是构建产物，扫进去只会把真正的候选淹掉。
+        assert!(!names.iter().any(|n| n == "junk.md"));
+        // 隐藏文件永远不出现。
+        assert!(!names.iter().any(|n| n.starts_with('.')));
+    }
+
+    /// 附件读取也要过白名单——路径是从网页层传回来的，不能因为
+    /// 「候选是我给的」就信它。
+    #[test]
+    fn attachment_read_is_also_jailed() {
+        let tmp = std::env::temp_dir().join("kitty-attach-test");
+        let _ = fs::remove_dir_all(&tmp);
+        let inside = tmp.join("inside");
+        fs::create_dir_all(&inside).unwrap();
+        fs::write(inside.join("ok.txt"), b"hello").unwrap();
+        fs::write(tmp.join("outside.txt"), b"nope").unwrap();
+
+        let roots = vec![inside.to_string_lossy().into_owned()];
+        let (name, bytes) =
+            read_for_attach(&roots, inside.join("ok.txt").to_str().unwrap()).unwrap();
+        assert_eq!(name, "ok.txt");
+        assert_eq!(bytes, b"hello");
+        assert!(read_for_attach(&roots, tmp.join("outside.txt").to_str().unwrap()).is_err());
     }
 
     /// 符号链接指向白名单外时也要拒绝——这是 canonicalize 存在的理由。
