@@ -242,6 +242,20 @@ fn run_local_tool(
             local_fs::info(&roots, &arg("path")).map(|item| serde_json::json!({ "info": item }))
         }
         "local_write" => write_with_consent(&app, &roots, &arg("path"), &arg("content")),
+        "local_run" => {
+            // argv 数组，不是一个命令行字符串——见 run_command_with_consent。
+            let args: Vec<String> = arguments
+                .get("args")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            run_command_with_consent(&app, &roots, &arg("program"), &args, &arg("cwd"))
+        }
         // **默认拒绝。** 服务端将来加了新工具而这里还没实现时，结果应该是
         // 「不支持」，而不是掉进某个分支去做一件没想清楚的事。
         other => Err(format!("这个版本的桌面端不支持「{other}」")),
@@ -310,6 +324,106 @@ fn write_with_consent(
         "path": target.to_string_lossy(),
         "bytes": content.len(),
         "backedUpTo": backup.map(|p| p.to_string_lossy().into_owned()),
+    }))
+}
+
+/// 在授权目录里跑一条命令。**这是整套本地能力里最危险的一个。**
+///
+/// ## 不经 shell
+///
+/// 参数是一个 argv 数组，直接交给 `Command`，**不拼成字符串丢给 `sh -c`**。
+/// 这一条是这里最重要的设计：走 shell 的话，`;`、`&&`、`|`、`$(...)`、反引号
+/// 全都会被解释，于是「参数」和「命令」的边界就没了——模型只要在某个文件名
+/// 参数里带上 `; rm -rf ~`，闸门就形同虚设。argv 数组里那些字符只是普通字符。
+///
+/// ## 不做「安全命令白名单」
+///
+/// 枚举安全命令是走不通的：`git` 看着无害，
+/// `git config --global core.pager 'sh -c ...'` 就不是。真正的安全来自
+/// 工作目录受限 + 每次人工确认 + 不经 shell 这三条。
+///
+/// ## 每次都问
+///
+/// 和写文件一样，没有「10 分钟内允许」。命令的破坏力比写一个文件大得多，
+/// 而一次确认省下的那两秒不值得拿这个换。
+fn run_command_with_consent(
+    app: &AppHandle,
+    roots: &[String],
+    program: &str,
+    args: &[String],
+    cwd: &str,
+) -> Result<serde_json::Value, String> {
+    use std::process::{Command, Stdio};
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+    let (dir, display) = local_fs::prepare_command(roots, program, args, cwd)?;
+
+    let approved = app
+        .dialog()
+        .message(format!(
+            "在这个目录里执行：\n{}\n\n命令：\n{display}\n\n\
+             命令不经过 shell，所以 ; && | $() 这些只是普通字符，不会被解释。\n\
+             最多跑 {} 秒。",
+            dir.display(),
+            local_fs::COMMAND_TIMEOUT_SECS,
+        ))
+        .title("要执行这条命令吗？")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom("执行".into(), "取消".into()))
+        .blocking_show();
+
+    if !approved {
+        return Err("你拒绝了这条命令。".into());
+    }
+
+    let mut child = Command::new(program)
+        .args(args)
+        .current_dir(&dir)
+        // 不继承标准输入：需要交互的命令（比如等密码的 sudo）会直接读到 EOF
+        // 退出，而不是挂在那儿等一个永远不会来的输入。
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("跑不起来：{e}（这个命令存在吗？）"))?;
+
+    // 超时就杀掉。没有这一条的话，一个卡住的子进程会让整轮对话干等到派发超时，
+    // 而那个进程还在后台继续跑。
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(local_fs::COMMAND_TIMEOUT_SECS);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                break None;
+            }
+            Err(e) => return Err(format!("等不到结果：{e}")),
+        }
+    };
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("读不到输出：{e}"))?;
+    let clip = |bytes: &[u8]| {
+        let text = String::from_utf8_lossy(bytes);
+        if text.len() > local_fs::MAX_OUTPUT_BYTES {
+            format!("{}\n…（输出太长，已截断）", &text[..local_fs::MAX_OUTPUT_BYTES])
+        } else {
+            text.into_owned()
+        }
+    };
+
+    Ok(serde_json::json!({
+        "command": display,
+        "cwd": dir.to_string_lossy(),
+        "timedOut": status.is_none(),
+        "exitCode": status.and_then(|s| s.code()),
+        "stdout": clip(&output.stdout),
+        "stderr": clip(&output.stderr),
     }))
 }
 

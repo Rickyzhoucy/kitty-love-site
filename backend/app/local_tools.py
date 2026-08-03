@@ -81,6 +81,30 @@ def build_local_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         """
         return await run(runtime, "local_write", path=path, content=content)
 
+    @tool("local_run")
+    async def local_run(
+        program: str,
+        args: list[str],
+        cwd: str,
+        runtime: ToolRuntime,
+    ) -> Any:
+        """在**用户自己电脑上**的某个授权目录里执行一条命令。
+
+        **`args` 是参数数组，不是一整行命令。** 命令不经过 shell，所以
+        `;` `&&` `|` `$()` 这些**只是普通字符，不会被解释**。想连续做几件事
+        就分几次调用，别试图拼成一行。
+
+        - `program`：命令名，比如 `ls`、`git`、`python3`。不能带路径。
+        - `args`：参数数组，比如 `["-la"]`、`["status", "--short"]`。
+        - `cwd`：在哪个目录里跑，必须是授权目录（或其子目录）。
+
+        **每一次都会弹系统确认框给用户看完整命令**，他同意了才会真的执行。
+        被拒绝时直接说明，不要换个写法重试。最多跑 30 秒，超时会被杀掉。
+
+        返回 exitCode / stdout / stderr / timedOut。
+        """
+        return await run(runtime, "local_run", program=program, args=args, cwd=cwd)
+
     @tool("local_roots")
     async def local_roots(runtime: ToolRuntime) -> Any:
         """看用户授权了哪些目录给你。
@@ -89,4 +113,12 @@ def build_local_tools(session_maker: async_sessionmaker[AsyncSession]) -> list:
         """
         return await run(runtime, "local_roots")
 
-    return [local_list, local_read, local_search, local_info, local_write, local_roots]
+    return [
+        local_list,
+        local_read,
+        local_search,
+        local_info,
+        local_write,
+        local_run,
+        local_roots,
+    ]

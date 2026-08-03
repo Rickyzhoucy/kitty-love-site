@@ -86,6 +86,14 @@ LOCAL_FILE_TOOLS = frozenset(
         "local_search",
         "local_info",
         "local_write",
+        # `local_run` 在用户机器上执行命令。它和 local_write 一样每次弹系统
+        # 确认框，而那道闸的前提同样是「用户此刻就在电脑前」。
+        #
+        # **这也是整个名单只给 CONVERSATION 的最强理由。** 前面几个工具漏给
+        # ASSIST 顶多是读到不该读的；这一个漏出去，一条从私聊里来的自由文本
+        # 就能变成一次真实的命令执行请求——即使还有确认框，
+        # 让用户去逐条审核一个不该存在的请求，本身就是设计失败。
+        "local_run",
         "local_roots",
     }
 )
