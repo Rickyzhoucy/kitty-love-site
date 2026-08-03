@@ -99,6 +99,8 @@ export default function FloatingPet() {
     const { pet, loading, rename, setAssetId, refetch } = usePet(shouldSkip);
     const [menuType, setMenuType] = useState<MenuType>('none');
     const [speech, setSpeech] = useState<string | null>(null);
+    /** 当前这句能不能直接回。见 showSpeech 的注释。 */
+    const [speechRepliable, setSpeechRepliable] = useState(false);
     const [chatOpen, setChatOpen] = useState(false);
     const [ritualOpen, setRitualOpen] = useState(false);
     const [chatInput, setChatInput] = useState('');
@@ -112,9 +114,17 @@ export default function FloatingPet() {
     const bodyRef = useRef<HTMLElement | null>(null);
     const speechTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    /**
+     * `duration === 0` 的那些才是「它真的在跟你说话」。
+     *
+     * 其余的是几秒就消失的状态提示（「正在查…」「新造型登场啦」）。
+     * 给状态提示挂一个回复框没有意义——你还没打完字它就消失了，
+     * 而且那句话本来也不是一句可以回的话。
+     */
     const showSpeech = useCallback((text: string, duration = 3_000) => {
         if (speechTimerRef.current) clearTimeout(speechTimerRef.current);
         setSpeech(text);
+        setSpeechRepliable(duration === 0);
         if (duration > 0) {
             speechTimerRef.current = setTimeout(() => setSpeech(null), duration);
         }
@@ -553,6 +563,10 @@ export default function FloatingPet() {
                     petEmoji={petEmoji}
                     side={bubbleSide}
                     onClose={() => setSpeech(null)}
+                    // 只有「它真的在跟你说话」那种气泡才给回复框，
+                    // 几秒就消失的状态提示不给。见 showSpeech 的注释。
+                    onReply={speechRepliable ? (value) => void sendMessage(value) : undefined}
+                    sending={sending}
                 />
             )}
 

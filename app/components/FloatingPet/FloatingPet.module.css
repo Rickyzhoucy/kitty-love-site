@@ -259,6 +259,64 @@
   background: color-mix(in oklch, var(--color-ink), transparent 82%);
 }
 
+/* 气泡里的回复框。
+ *
+ * 刻意做得很轻：一条分隔线加一行输入，不给它自己的卡片背景。这仍然是**同一张
+ * 纸条**——它说的话在上面，你回的话从下面接上去，而不是「气泡下面又挂了一个
+ * 聊天窗」。做重了就变成两个控件叠在一起，那正是原来那个对话面板的问题。 */
+.speechReply {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in oklch, var(--color-ink), transparent 92%);
+}
+
+.speechReplyInput {
+  min-width: 0;
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in oklch, var(--color-ink), transparent 88%);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--color-sunken), transparent 55%);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.speechReplyInput:focus-visible {
+  border-color: var(--color-accent);
+  background: var(--color-surface);
+}
+
+.speechReplyInput:disabled {
+  opacity: 0.6;
+}
+
+.speechReplySend {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+/* 没输入内容时按钮压暗但**不隐藏**——一个会凭空出现和消失的发送按钮，
+   比一个暗着的更让人犹豫。 */
+.speechReplySend:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 .speechScroll::-webkit-scrollbar-track {
   background: transparent;
 }
