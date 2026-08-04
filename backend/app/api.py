@@ -96,6 +96,13 @@ from app.perception import current_session, upsert_session
 from app.perception import record_event as record_perception_event
 from app.pet_cognition import PetCognitionService
 from app.pet_mediation import run_mediation
+from app.stickers import (
+    StickerRejected,
+    delete_sticker,
+    list_stickers,
+    move_to_front,
+    save_sticker,
+)
 from app.pet_state import (
     DEFAULT_ASSET,
     MAX_OFFLINE_SECONDS,
@@ -116,6 +123,9 @@ from app.schemas import (
     ChatMessageRead,
     ChatStreamRequest,
     ChatThreadRead,
+    StickerCreate,
+    StickerRead,
+    StickerReorder,
     CompleteUploadRequest,
     ConversationCreate,
     ConversationRead,
@@ -1267,6 +1277,88 @@ async def record_pet_event(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+# ── 表情包 ──────────────────────────────────────────────────────────────
+
+
+@router.get("/stickers", response_model=list[StickerRead])
+async def read_stickers(db: Db, user: CurrentUser):
+    """这个空间里的表情，自己的在前。
+
+    一次把两个人的都返回，前端分「我的 / 对方的」两个标签展示——分两次请求
+    只会让面板打开时闪一下。
+    """
+    items = await list_stickers(db, user.id)
+    if not items:
+        return []
+    attachments = {
+        row.id: row
+        for row in await db.scalars(
+            select(Attachment).where(
+                Attachment.id.in_([item.attachment_id for item in items])
+            )
+        )
+    }
+    result = []
+    for item in items:
+        attachment = attachments.get(item.attachment_id)
+        if attachment is None:
+            continue
+        result.append(
+            {
+                "id": item.id,
+                "createdAt": item.created_at,
+                "ownerId": item.owner_id,
+                "attachmentId": item.attachment_id,
+                # **一律指向原图，不用 thumbnail**：缩略图是静态 webp，
+                # GIF 走那条路就不会动了——而会动是表情一半的意义。
+                "url": f"/api/v1/attachments/{attachment.id}/content",
+                "contentType": attachment.content_type,
+                "mine": item.owner_id == user.id,
+            }
+        )
+    return result
+
+
+@router.post("/stickers", response_model=StickerRead, status_code=status.HTTP_201_CREATED)
+async def add_sticker(data: StickerCreate, db: Db, user: CurrentUser):
+    try:
+        sticker = await save_sticker(db, user.id, data.attachment_id)
+    except StickerRejected as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    attachment = await db.get(Attachment, sticker.attachment_id)
+    await db.commit()
+    return {
+        "id": sticker.id,
+        "createdAt": sticker.created_at,
+        "ownerId": sticker.owner_id,
+        "attachmentId": sticker.attachment_id,
+        "url": f"/api/v1/attachments/{attachment.id}/content",
+        "contentType": attachment.content_type,
+        "mine": True,
+    }
+
+
+@router.delete("/stickers/{sticker_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_sticker(sticker_id: str, db: Db, user: CurrentUser) -> Response:
+    """只能删自己的。对方的表情在面板里可见、可发，但不可删。"""
+    try:
+        await delete_sticker(db, user.id, sticker_id)
+    except StickerRejected as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/stickers/reorder", status_code=status.HTTP_204_NO_CONTENT)
+async def reorder_stickers(
+    data: StickerReorder, db: Db, user: CurrentUser
+) -> Response:
+    """把选中的挪到最前。抄微信：没有拖拽，只有「移到最前」。"""
+    await move_to_front(db, user.id, data.sticker_ids)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/chat/thread", response_model=ChatThreadRead)
 async def read_chat_thread(db: Db, user: CurrentUser):
     """聊天页一次拉全。
@@ -1346,7 +1438,8 @@ async def send_direct_message(
         partner = await resolve_partner(db, user.id)
         attachments = await verify_attachments(db, user.id, data.attachment_ids)
         message = await send_message(
-            db, user.id, partner.id, data.body, attachments, data.reply_to_id
+            db, user.id, partner.id, data.body, attachments,
+            data.reply_to_id, data.sticker,
         )
     except PartnerUnavailable as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error

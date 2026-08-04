@@ -592,6 +592,8 @@ class DirectMessageCreate(ApiModel):
     attachment_ids: list[str] = Field(default_factory=list, max_length=8)
     #: 在回复哪一条。必须是同一条线里的消息，服务端会校验。
     reply_to_id: str | None = Field(default=None, max_length=32)
+    #: 这条是一张表情。影响的是渲染（无气泡、固定尺寸、GIF 会动）。
+    sticker: bool = False
 
 
 class DirectMessageRead(ApiModel):
@@ -603,6 +605,28 @@ class DirectMessageRead(ApiModel):
     attachment_ids: list[str]
     read_at: datetime | None
     reply_to_id: str | None = None
+    sticker: bool = False
+
+
+class StickerRead(ApiModel):
+    id: str
+    created_at: datetime
+    owner_id: str
+    attachment_id: str
+    #: 直接给可用的地址，前端不用再逐个去查附件。
+    url: str
+    content_type: str
+    #: 是不是自己存的。决定面板里能不能删。
+    mine: bool
+
+
+class StickerCreate(ApiModel):
+    attachment_id: str = Field(max_length=32)
+
+
+class StickerReorder(ApiModel):
+    #: 要挪到最前的那些，按给定顺序排列。
+    sticker_ids: list[str] = Field(max_length=200)
 
 
 class PetInterjectionRead(ApiModel):

@@ -1005,6 +1005,11 @@ class DirectMessage(StringIdMixin, CreatedAtMixin, Base):
     body: Mapped[str] = mapped_column(Text, default="")
     attachment_ids: Mapped[list[str]] = mapped_column("attachmentIds", JsonType, default=list)
     memory_excluded: Mapped[bool] = mapped_column("memoryExcluded", Boolean, default=False)
+    #: 这条是不是一张表情。
+    #:
+    #: **必须显式标，不能靠「单张图片且没有正文」去猜**——那个条件对普通照片
+    #: 同样成立，猜的结果是发张照片被渲染成表情（无气泡、固定尺寸）。
+    sticker: Mapped[bool] = mapped_column(Boolean, default=False)
     #: 这条在回复哪一条。两边的消息都可以被引用。
     #:
     #: **SET NULL 而不是 CASCADE**：被引用的那条如果哪天没了，这条回复本身
@@ -1021,6 +1026,41 @@ class DirectMessage(StringIdMixin, CreatedAtMixin, Base):
         # 未读查询是最热的路径：收件人 + 未读 + 时间
         Index("DirectMessage_recipient_readAt_idx", "recipientId", "readAt"),
         Index("DirectMessage_createdAt_idx", "createdAt"),
+    )
+
+
+class Sticker(StringIdMixin, CreatedAtMixin, Base):
+    """存下来的表情。
+
+    ## 两个维度缺一不可
+
+    `ownerId` 是**谁存的**——表情库各存各的，删除也只能删自己那份。
+    `spaceId` 是**租户边界**——没有它，查询只按 owner 过滤，将来多一个空间时
+    别人的表情就会漏进来。这两件事不是一回事，别用一个字段兼着。
+
+    ## 为什么排序是一个整数而不是拖拽
+
+    微信的做法是「勾选若干个 → 移到最前」，不是拖拽。几百个表情拖拽排序是
+    灾难，而人真正想要的只是把常用的顶上来。一个整数够用：越小越靠前。
+    """
+
+    __tablename__ = "Sticker"
+    space_id: Mapped[str] = mapped_column(
+        "spaceId", ForeignKey("CoupleSpace.id", ondelete="CASCADE")
+    )
+    owner_id: Mapped[str] = mapped_column(
+        "ownerId", ForeignKey("User.id", ondelete="CASCADE")
+    )
+    #: 图本身。**RESTRICT**：附件还被表情引用着就不该被清理掉。
+    attachment_id: Mapped[str] = mapped_column(
+        "attachmentId", ForeignKey("Attachment.id", ondelete="RESTRICT")
+    )
+    #: 越小越靠前。「移到最前」就是给一个比现有最小值更小的数。
+    sort_order: Mapped[int] = mapped_column("sortOrder", Integer, default=0)
+    __table_args__ = (
+        # 同一张图在同一个人的库里只存一份——重复长按不该攒出一堆一样的。
+        UniqueConstraint("ownerId", "attachmentId"),
+        Index("Sticker_owner_sort_idx", "ownerId", "sortOrder"),
     )
 
 

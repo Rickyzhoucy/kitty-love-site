@@ -684,3 +684,138 @@
 @media (prefers-reduced-motion: reduce) {
   .recordingLive { animation: none; }
 }
+
+/* ── 表情包 ──────────────────────────────────────────────────────────── */
+
+.stickerPanel {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-sunken);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.stickerTabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.stickerTabs button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-ink-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* 选中的标签用实心 accent。**不用 accent-soft**：它在暗色主题下是
+   「accent 混黑」，选中反而比未选中更暗，读起来像被禁用。 */
+.stickerTabs button[aria-pressed='true'] {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  font-weight: 600;
+}
+
+.stickerSpacer { flex: 1; }
+
+.stickerTextButton {
+  color: var(--color-accent) !important;
+  font-size: 12px !important;
+}
+
+.stickerGrid {
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+}
+
+.stickerCell,
+.stickerUpload {
+  display: grid;
+  aspect-ratio: 1;
+  place-items: center;
+  padding: 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-sunken), transparent 55%);
+  cursor: pointer;
+}
+
+.stickerCell img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.stickerCell:hover {
+  border-color: var(--color-accent);
+}
+
+/* 整理模式里被勾中的。实心边框 + 缩一点，颜色之外还有形状差别。 */
+.stickerCell[data-selected='true'] {
+  border-color: var(--color-accent);
+  border-width: 2px;
+  transform: scale(0.92);
+}
+
+.stickerUpload {
+  gap: 3px;
+  border: 1px dashed var(--color-sunken);
+  color: var(--color-ink-muted);
+  font-size: 11px;
+}
+
+.stickerUpload input { display: none; }
+
+.stickerEmpty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 18px 8px;
+  color: var(--color-ink-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.stickerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-sunken);
+  color: var(--color-ink-muted);
+  font-size: 12px;
+}
+
+.stickerActions button {
+  padding: 5px 12px;
+  border: 1px solid var(--color-sunken);
+  border-radius: 999px;
+  color: var(--color-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.stickerDanger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #c0392b !important;
+  border-color: #c0392b !important;
+}
+
+/* 聊天流里的表情：没有气泡，固定尺寸。 */
+.stickerBubble img {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+}

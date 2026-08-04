@@ -20,9 +20,11 @@ import { PET_ASSETS } from '@/app/components/FloatingPet/petConfig';
 import { usePet } from '@/app/components/FloatingPet/usePet';
 import Lightbox, { type LightboxImage } from '@/app/companion/Lightbox';
 import LocalFileMentionMenu, { useLocalFileMention } from '@/app/components/LocalFileMentionMenu';
-import { Reply, X } from 'lucide-react';
+import { Reply, Smile, X } from 'lucide-react';
 import { useImeGuard } from '@/lib/imeGuard';
 import VoiceButton from './VoiceButton';
+import StickerPanel from './StickerPanel';
+import { saveSticker, type Sticker } from '@/lib/api/stickers';
 import styles from './page.module.css';
 
 /**
@@ -136,6 +138,7 @@ export default function ChatPage() {
     const [zoomed, setZoomed] = useState<LightboxImage | null>(null);
     /** 正在引用的那条。发送后清空。 */
     const [quoting, setQuoting] = useState<DirectMessage | null>(null);
+    const [stickersOpen, setStickersOpen] = useState(false);
     /**
      * 正在等宠物回话的那条消息。
      *
@@ -195,6 +198,24 @@ export default function ChatPage() {
     useEffect(() => {
         void load();
     }, [load]);
+
+    /** 发一个表情。**带 sticker 标记**——不标的话对方那边会当成普通图片，
+        套上气泡、按缩略图渲染，GIF 也就不动了。 */
+    const sendSticker = useCallback((sticker: Sticker) => {
+        setStickersOpen(false);
+        void sendDirectMessage('', [sticker.attachmentId], quoting?.id ?? null, true)
+            .then(() => { setQuoting(null); return load(); })
+            .catch(() => setError('表情没发出去'));
+    }, [quoting, load]);
+
+    /** 把聊天里的一张图存成自己的表情。 */
+    const keepAsSticker = useCallback((attachmentId: string) => {
+        void saveSticker(attachmentId)
+            .then(() => setError('已存为表情'))
+            .catch(reason => setError(
+                reason instanceof Error ? reason.message : '存不进去'));
+    }, []);
+
 
     /**
      * 「看到了」要有人在场的证据，光是页面开着不算。
@@ -446,6 +467,13 @@ export default function ChatPage() {
                     key={item.id}
                     type="button"
                     className={styles.attachedImage}
+                    // 右键存表情。**桌面上长按不是习惯动作**，右键才是；
+                    // 触屏那边浏览器会把长按翻译成 contextmenu，所以一套就够。
+                    onContextMenu={event => {
+                        event.preventDefault();
+                        keepAsSticker(item.id);
+                    }}
+                    title="右键存为表情"
                     onClick={() => setZoomed({
                         src: apiUrl(item.downloadUrl),
                         alt: item.filename,
@@ -566,9 +594,23 @@ export default function ChatPage() {
                             {divider && <div className={styles.dayDivider}>{divider}</div>}
                             {item.message.attachmentIds.length > 0 && (
                                 <div className={`${styles.row} ${mine ? styles.rowMine : ''}`}>
-                                    <div className={styles.attachedRow}>
-                                        {renderAttachments(item.message.attachmentIds)}
-                                    </div>
+                                    {item.message.sticker ? (
+                                        /* 表情不套气泡、不走缩略图。缩略图是静态 webp，
+                                           GIF 从那条路出来就是一张定格。 */
+                                        <div className={styles.stickerBubble}>
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img
+                                                src={apiUrl(
+                                                    `/api/v1/attachments/${item.message.attachmentIds[0]}/content`,
+                                                )}
+                                                alt="表情"
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className={styles.attachedRow}>
+                                            {renderAttachments(item.message.attachmentIds)}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             {(item.message.body || quoted || item.message.replyToId) && (
@@ -675,6 +717,14 @@ export default function ChatPage() {
             >
                 <LocalFileMentionMenu controller={fileMention} />
 
+                {stickersOpen && (
+                    <StickerPanel
+                        onPick={sendSticker}
+                        onError={setError}
+                        onClose={() => setStickersOpen(false)}
+                    />
+                )}
+
                 {/* 正在引用谁。**要能取消**——选错了却撤不掉，就只能把话发出去
                     或者刷新页面。 */}
                 {quoting && (
@@ -743,6 +793,15 @@ export default function ChatPage() {
                         aria-label="添加图片或文件"
                     >
                         {uploading ? '⏳' : '＋'}
+                    </button>
+                    <button
+                        type="button"
+                        className={styles.attachButton}
+                        onClick={() => setStickersOpen(value => !value)}
+                        aria-label="表情"
+                        aria-expanded={stickersOpen}
+                    >
+                        <Smile size={18} />
                     </button>
                     {/* 按住说话。录完直接当附件发出去，和拖进来一张图同一条路径
                         ——不为语音单开一套上传。 */}

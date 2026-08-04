@@ -93,6 +93,7 @@ async def send_message(
     body: str,
     attachment_ids: list[str],
     reply_to_id: str | None = None,
+    sticker: bool = False,
 ) -> DirectMessage:
     space = await require_same_space(db, sender_id, recipient_id)
 
@@ -110,6 +111,7 @@ async def send_message(
         body=body.strip(),
         attachment_ids=attachment_ids,
         reply_to_id=reply_to_id,
+        sticker=sticker,
     )
     db.add(message)
     await db.flush()
