@@ -1005,6 +1005,13 @@ class DirectMessage(StringIdMixin, CreatedAtMixin, Base):
     body: Mapped[str] = mapped_column(Text, default="")
     attachment_ids: Mapped[list[str]] = mapped_column("attachmentIds", JsonType, default=list)
     memory_excluded: Mapped[bool] = mapped_column("memoryExcluded", Boolean, default=False)
+    #: 这条在回复哪一条。两边的消息都可以被引用。
+    #:
+    #: **SET NULL 而不是 CASCADE**：被引用的那条如果哪天没了，这条回复本身
+    #: 还是说过的话，不该跟着消失——前端遇到空引用显示「原消息已不在」。
+    reply_to_id: Mapped[str | None] = mapped_column(
+        "replyToId", ForeignKey("DirectMessage.id", ondelete="SET NULL"), nullable=True
+    )
     #: NULL 表示还没被打开。宠物只知道这一个事实——它**不知道**你在不在忙，
     #: 所以永远不许编造原因（计划文档 §3.2）。
     read_at: Mapped[datetime | None] = mapped_column(

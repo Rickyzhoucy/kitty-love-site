@@ -1345,10 +1345,11 @@ async def send_direct_message(
     try:
         partner = await resolve_partner(db, user.id)
         attachments = await verify_attachments(db, user.id, data.attachment_ids)
+        message = await send_message(
+            db, user.id, partner.id, data.body, attachments, data.reply_to_id
+        )
     except PartnerUnavailable as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
-
-    message = await send_message(db, user.id, partner.id, data.body, attachments)
 
     # @ 了宠物就让它就着最近的对话答一句。**只排队，不在这里等**：模型要十几秒，
     # 而这段时间是卡在发消息这个请求里的——用户敲完回车，自己的话要等宠物想完

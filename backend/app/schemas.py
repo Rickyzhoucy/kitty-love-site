@@ -590,6 +590,8 @@ class PetEventWrite(ApiModel):
 class DirectMessageCreate(ApiModel):
     body: str = Field(default="", max_length=20_000)
     attachment_ids: list[str] = Field(default_factory=list, max_length=8)
+    #: 在回复哪一条。必须是同一条线里的消息，服务端会校验。
+    reply_to_id: str | None = Field(default=None, max_length=32)
 
 
 class DirectMessageRead(ApiModel):
@@ -600,6 +602,7 @@ class DirectMessageRead(ApiModel):
     body: str
     attachment_ids: list[str]
     read_at: datetime | None
+    reply_to_id: str | None = None
 
 
 class PetInterjectionRead(ApiModel):

@@ -471,3 +471,216 @@
     max-width: 82%;
   }
 }
+
+/* ── 引用回复 ────────────────────────────────────────────────────────── */
+
+/* 每行的引用按钮。**鼠标划过才出现**：常驻的话每条消息旁边都挂个图标，
+   把话本身的分量冲淡了。键盘 focus 时也要出现，否则 Tab 过去看不见它。 */
+.quoteAction {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  padding: 4px;
+  border: 0;
+  border-radius: 999px;
+  opacity: 0;
+  color: var(--color-ink-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.row:hover .quoteAction,
+.quoteAction:focus-visible {
+  opacity: 1;
+}
+
+.quoteAction:hover {
+  color: var(--color-accent);
+}
+
+/* 气泡里的被引原文。左边一条竖线是「这是别处的话」的通用记号。 */
+.quotedBlock {
+  display: block;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 4px 0 4px 8px;
+  border: 0;
+  border-left: 2px solid currentColor;
+  opacity: 0.72;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quotedWho {
+  display: block;
+  margin-bottom: 1px;
+  font-weight: 600;
+}
+
+/* 引用只留一行：它是路标，不是内容。想看全文点它跳过去。 */
+.quotedText {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 跳转到原消息后闪一下。没有这个提示，页面滚过去了人也不知道停在哪。 */
+[data-flash='true'] .bubble {
+  animation: quote-flash 1.4s ease-out;
+}
+
+@keyframes quote-flash {
+  0%, 40% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent), transparent 55%); }
+  100% { box-shadow: 0 0 0 3px transparent; }
+}
+
+/* 输入框上方的「正在回复谁」。 */
+.quotingBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border-left: 2px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-accent), transparent 92%);
+  font-size: 12px;
+}
+
+.quotingWho {
+  flex: none;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.quotingText {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--color-ink-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quotingCancel {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-ink-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.quotingCancel:hover {
+  color: var(--color-ink);
+}
+
+/* ── 按住说话 ────────────────────────────────────────────────────────── */
+
+.voiceButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--color-sunken);
+  border-radius: 999px;
+  color: var(--color-ink-muted);
+  background: transparent;
+  cursor: pointer;
+  /* 按住不该选中周围的文字，也不该触发 iOS 的长按菜单 */
+  user-select: none;
+  touch-action: none;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.voiceButton:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.voiceActive {
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+
+.voiceButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 录音浮层。盖住内容是故意的：正在录音是个独占状态，这时候点别的都没意义。 */
+.recordingOverlay {
+  position: fixed;
+  z-index: 60;
+  bottom: 120px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 28px;
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--color-ink), transparent 12%);
+  color: var(--color-surface);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.recordingLive,
+.recordingCancel {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 999px;
+}
+
+.recordingLive {
+  background: var(--color-accent);
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+
+/* 取消态换成一眼能认出的危险色。**这一步不能只靠文案**——手指还压在屏幕上，
+   人只会瞥一眼颜色。 */
+.recordingCancel {
+  background: #c0392b;
+}
+
+@keyframes recording-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.recordingTime {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.recordingHint {
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+/* 聊天流里的语音条。用原生 controls：播放/进度/音量这套交互浏览器已经
+   做得很好，自己实现一遍只会在键盘和读屏上更差。 */
+.voiceClip {
+  max-width: min(260px, 70vw);
+  height: 36px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recordingLive { animation: none; }
+}

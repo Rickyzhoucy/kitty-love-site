@@ -20,7 +20,9 @@ import { PET_ASSETS } from '@/app/components/FloatingPet/petConfig';
 import { usePet } from '@/app/components/FloatingPet/usePet';
 import Lightbox, { type LightboxImage } from '@/app/companion/Lightbox';
 import LocalFileMentionMenu, { useLocalFileMention } from '@/app/components/LocalFileMentionMenu';
+import { Reply, X } from 'lucide-react';
 import { useImeGuard } from '@/lib/imeGuard';
+import VoiceButton from './VoiceButton';
 import styles from './page.module.css';
 
 /**
@@ -68,6 +70,18 @@ const ASSIST_WAIT_MS = 70_000;
 
 function isImage(attachment: Attachment): boolean {
     return attachment.contentType.startsWith('image/');
+}
+
+/**
+ * 这是不是一条语音。
+ *
+ * 也认文件名后缀：Tauri 那条上传路径不猜 MIME，一律申报
+ * `application/octet-stream`（见后端 complete_upload 的注释），只看
+ * contentType 的话桌面版发出去的语音会被当成普通文件。
+ */
+function isVoice(attachment: Attachment): boolean {
+    return attachment.contentType.startsWith('audio/')
+        || /\.(webm|m4a|mp3|ogg|wav)$/i.test(attachment.filename);
 }
 
 function humanSize(bytes: number): string {
@@ -120,6 +134,8 @@ export default function ChatPage() {
     const [error, setError] = useState<string | null>(null);
     const [attachmentCache, setAttachmentCache] = useState<Record<string, Attachment>>({});
     const [zoomed, setZoomed] = useState<LightboxImage | null>(null);
+    /** 正在引用的那条。发送后清空。 */
+    const [quoting, setQuoting] = useState<DirectMessage | null>(null);
     /**
      * 正在等宠物回话的那条消息。
      *
@@ -139,6 +155,21 @@ export default function ChatPage() {
     const { pet } = usePet();
     /** 回车发送在输入法下的护栏，见 lib/imeGuard.ts。 */
     const ime = useImeGuard();
+
+    /** 按 id 找消息，渲染引用块要用。 */
+    const messageById = useMemo(
+        () => new Map((thread?.messages ?? []).map(item => [item.id, item])),
+        [thread],
+    );
+
+    /** 跳回被引用的那条并高亮一下。找不到（已被删）就什么都不做。 */
+    const jumpTo = useCallback((id: string) => {
+        const node = document.getElementById(`msg-${id}`);
+        if (!node) return;
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        node.dataset.flash = 'true';
+        setTimeout(() => { delete node.dataset.flash; }, 1400);
+    }, []);
 
     const petEmoji = PET_ASSETS.find(asset => asset.id === pet?.assetId)?.emoji ?? '🐾';
     const petName = pet?.name ?? '它';
@@ -275,7 +306,10 @@ export default function ChatPage() {
             }));
         }
         try {
-            const sent = await sendDirectMessage(body, attachments.map(item => item.id));
+            const sent = await sendDirectMessage(
+                body, attachments.map(item => item.id), quoting?.id ?? null,
+            );
+            setQuoting(null);
             // 叫了宠物就立刻挂上「正在想」。后端是排队后台答的，十几秒里
             // 屏幕上不该什么都没有——那正是「我都不知道他收没收到」的来源。
             if (mentionsPet(body, petName)) {
@@ -286,6 +320,7 @@ export default function ChatPage() {
             setError(reason instanceof Error ? reason.message : '没发出去');
             setDraft(body);
             setPending(attachments);
+            // 引用也要还回去：不还的话用户得重新找一遍那条消息。
         } finally {
             setSending(false);
         }
@@ -395,7 +430,18 @@ export default function ChatPage() {
         const resolved = ids.map(id => attachmentCache[id]).filter(Boolean);
         if (!resolved.length) return null;
         return resolved.map(item =>
-            isImage(item) ? (
+            // 语音条：**不是普通附件那种「点开下载」**。语音要能就地播，
+            // 跳出去开个新标签页听一段两秒的话毫无道理。
+            isVoice(item) ? (
+                <audio
+                    key={item.id}
+                    className={styles.voiceClip}
+                    src={apiUrl(item.downloadUrl)}
+                    controls
+                    preload="metadata"
+                    aria-label="语音消息"
+                />
+            ) : isImage(item) ? (
                 <button
                     key={item.id}
                     type="button"
@@ -512,8 +558,11 @@ export default function ChatPage() {
                     }
 
                     const mine = item.message.senderId !== thread?.partner.id;
+                    const quoted = item.message.replyToId
+                        ? messageById.get(item.message.replyToId)
+                        : undefined;
                     return (
-                        <div key={item.message.id}>
+                        <div key={item.message.id} id={`msg-${item.message.id}`}>
                             {divider && <div className={styles.dayDivider}>{divider}</div>}
                             {item.message.attachmentIds.length > 0 && (
                                 <div className={`${styles.row} ${mine ? styles.rowMine : ''}`}>
@@ -522,13 +571,55 @@ export default function ChatPage() {
                                     </div>
                                 </div>
                             )}
-                            {item.message.body && (
+                            {(item.message.body || quoted || item.message.replyToId) && (
                                 <div className={`${styles.row} ${mine ? styles.rowMine : ''}`}>
+                                    {/* 引用按钮挂在行上，鼠标划过才出现——常驻的话
+                                        每条消息旁边都挂个图标，把话本身的分量冲淡了。 */}
+                                    <button
+                                        type="button"
+                                        className={styles.quoteAction}
+                                        onClick={() => {
+                                            setQuoting(item.message);
+                                            composerRef.current?.focus();
+                                        }}
+                                        aria-label="引用这条"
+                                        title="引用这条"
+                                    >
+                                        <Reply size={14} />
+                                    </button>
                                     <div
                                         className={`${styles.bubble} ${
                                             mine ? styles.fromMe : styles.fromPartner
                                         }`}
                                     >
+                                        {/* 被引用的原文。**点它跳回原消息**——引用的
+                                            价值在于「哪句话」，看不到上下文就只是装饰。 */}
+                                        {item.message.replyToId && (
+                                            quoted ? (
+                                                <button
+                                                    type="button"
+                                                    className={styles.quotedBlock}
+                                                    onClick={() => jumpTo(quoted.id)}
+                                                >
+                                                    <span className={styles.quotedWho}>
+                                                        {quoted.senderId === thread?.partner.id
+                                                            ? thread?.partner.displayName
+                                                            : '我'}
+                                                    </span>
+                                                    <span className={styles.quotedText}>
+                                                        {quoted.body
+                                                            || (quoted.attachmentIds.length
+                                                                ? '［附件］' : '')}
+                                                    </span>
+                                                </button>
+                                            ) : (
+                                                <div className={styles.quotedBlock}>
+                                                    <span className={styles.quotedText}>
+                                                        原消息已不在
+                                                    </span>
+                                                </div>
+                                            )
+                                        )}
                                         {item.message.body}
                                     </div>
                                 </div>
@@ -584,6 +675,28 @@ export default function ChatPage() {
             >
                 <LocalFileMentionMenu controller={fileMention} />
 
+                {/* 正在引用谁。**要能取消**——选错了却撤不掉，就只能把话发出去
+                    或者刷新页面。 */}
+                {quoting && (
+                    <div className={styles.quotingBar}>
+                        <span className={styles.quotingWho}>
+                            回复 {quoting.senderId === thread?.partner.id
+                                ? thread?.partner.displayName : '自己'}
+                        </span>
+                        <span className={styles.quotingText}>
+                            {quoting.body || (quoting.attachmentIds.length ? '［附件］' : '')}
+                        </span>
+                        <button
+                            type="button"
+                            className={styles.quotingCancel}
+                            onClick={() => setQuoting(null)}
+                            aria-label="取消引用"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                )}
+
                 {pending.length > 0 && (
                     <div className={styles.pendingRow}>
                         {pending.map(item => (
@@ -631,6 +744,33 @@ export default function ChatPage() {
                     >
                         {uploading ? '⏳' : '＋'}
                     </button>
+                    {/* 按住说话。录完直接当附件发出去，和拖进来一张图同一条路径
+                        ——不为语音单开一套上传。 */}
+                    <VoiceButton
+                        disabled={uploading || sending}
+                        onError={setError}
+                        onRecorded={clip => {
+                            void (async () => {
+                                setUploading(true);
+                                try {
+                                    const attachment = await uploadAttachment(clip.file);
+                                    setAttachmentCache(current => ({
+                                        ...current, [attachment.id]: attachment,
+                                    }));
+                                    await sendDirectMessage(
+                                        '', [attachment.id], quoting?.id ?? null,
+                                    );
+                                    setQuoting(null);
+                                    await load();
+                                } catch (reason) {
+                                    setError(reason instanceof Error
+                                        ? reason.message : '语音没发出去');
+                                } finally {
+                                    setUploading(false);
+                                }
+                            })();
+                        }}
+                    />
                     <textarea
                         ref={composerRef}
                         value={draft}

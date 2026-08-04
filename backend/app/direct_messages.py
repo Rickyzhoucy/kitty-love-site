@@ -92,14 +92,24 @@ async def send_message(
     recipient_id: str,
     body: str,
     attachment_ids: list[str],
+    reply_to_id: str | None = None,
 ) -> DirectMessage:
     space = await require_same_space(db, sender_id, recipient_id)
+
+    # **被引用的那条必须是这条线里的。** 只信客户端传来的 id 的话，任何人都能
+    # 拿一个别的空间的消息 id 当引用——渲染时那段正文就跟着漏到这条线上来。
+    if reply_to_id is not None:
+        quoted = await db.get(DirectMessage, reply_to_id)
+        if quoted is None or quoted.space_id != space.id:
+            raise PartnerUnavailable("被引用的消息不在这段对话里。")
+
     message = DirectMessage(
         space_id=space.id,
         sender_id=sender_id,
         recipient_id=recipient_id,
         body=body.strip(),
         attachment_ids=attachment_ids,
+        reply_to_id=reply_to_id,
     )
     db.add(message)
     await db.flush()

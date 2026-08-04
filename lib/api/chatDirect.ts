@@ -18,6 +18,8 @@ export interface DirectMessage {
     attachmentIds: string[];
     /** null 表示还没被打开。宠物的中介行为全以它为唯一依据。 */
     readAt: string | null;
+    /** 这条在回复哪一条。原消息被删掉时会变回 null（外键 SET NULL）。 */
+    replyToId: string | null;
 }
 
 /** 宠物在聊天流里说的话。**必须与真人消息视觉上明确区分**（§3.2）。 */
@@ -60,8 +62,9 @@ export function fetchThread(): Promise<ChatThread> {
 export function sendDirectMessage(
     body: string,
     attachmentIds: string[] = [],
+    replyToId: string | null = null,
 ): Promise<DirectMessage> {
-    return api.post<DirectMessage>('/chat/messages', { body, attachmentIds });
+    return api.post<DirectMessage>('/chat/messages', { body, attachmentIds, replyToId });
 }
 
 /** 标为已读。调用后宠物的唠叨会立刻停——「打开了就安静」。 */

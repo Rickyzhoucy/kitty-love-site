@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    按住说话要用麦克风。
+
+    **没有这一条，打包后的应用会被 macOS 直接拒绝**，而且是静默拒绝：
+    网页里 getUserMedia 抛 NotAllowedError，用户看到的只是「按住没反应」，
+    系统连授权弹窗都不会出。
+
+    浏览器里开发时不需要它（权限归浏览器管），所以这个坑只在打包后暴露
+    ——正是那种「我这儿好好的」的问题。Tauri 会把这个文件合并进 bundle 的
+    Info.plist。
+  -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>按住说话时用来录制语音消息，只会发给你的另一半。</string>
+</dict>
+</plist>
