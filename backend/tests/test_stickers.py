@@ -154,3 +154,54 @@ async def test_every_attachment_route_uses_the_shared_rule():
         "又有端点自己写归属判断了。附件的可读性只有一条规则："
         "may_read_attachment。"
     )
+
+
+@pytest.mark.anyio
+async def test_partner_stickers_can_be_sent_not_just_viewed(session_maker):
+    """对方的表情要能**发**，不只是能看。
+
+    面板里写着「可见、可发、不可删」，但发消息那道校验只认「附件属于我」——
+    于是对方的表情按下去就是「表情没发出去」，那半个面板全是摆设。
+
+    同时守住反面：放行只开给**表情**，不是「对方的附件都能转发」。对方发过的
+    照片、语音、文档不该变成我可以随手再发一遍的东西。
+    """
+    from sqlalchemy import select
+
+    from app.auth import hash_password
+    from app.couple_space import ensure_space
+    from app.direct_messages import PartnerUnavailable, verify_attachments
+    from app.models import Attachment, Sticker, User
+
+    async with session_maker() as db:
+        me = await db.scalar(select(User).limit(1))
+        partner = User(
+            username="honey3", display_name="宝贝",
+            password_hash=hash_password("x" * 12),
+        )
+        db.add(partner)
+        await db.flush()
+        space = await ensure_space(db, me.id)
+
+        theirs = Attachment(
+            owner_id=partner.id, bucket="b", object_key="s1", filename="cute.gif",
+            content_type="image/gif", size=10, sha256="e" * 64, status="ready",
+        )
+        private = Attachment(
+            owner_id=partner.id, bucket="b", object_key="p1", filename="photo.png",
+            content_type="image/png", size=10, sha256="f" * 64, status="ready",
+        )
+        db.add_all([theirs, private])
+        await db.flush()
+        db.add(Sticker(
+            space_id=space.id, owner_id=partner.id,
+            attachment_id=theirs.id, sort_order=0,
+        ))
+        await db.commit()
+
+        # 对方存的表情：我发得出去
+        assert await verify_attachments(db, me.id, [theirs.id]) == [theirs.id]
+
+        # 对方的普通附件：仍然发不出去
+        with pytest.raises(PartnerUnavailable):
+            await verify_attachments(db, me.id, [private.id])

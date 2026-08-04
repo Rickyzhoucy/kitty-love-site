@@ -206,7 +206,11 @@ export default function ChatPage() {
         setStickersOpen(false);
         void sendDirectMessage('', [sticker.attachmentId], quoting?.id ?? null, true)
             .then(() => { setQuoting(null); return load(); })
-            .catch(() => setError('表情没发出去'));
+            // 把服务端说的原因原样带出来。原来一律显示「表情没发出去」，
+            // 而后端其实回的是「有附件不存在或不属于你」——那句话直接指向
+            // 了病因，被这层笼统文案盖掉之后只能靠猜。
+            .catch(reason => setError(
+                reason instanceof Error ? reason.message : '表情没发出去'));
     }, [quoting, load]);
 
     /** 把聊天里的一张图存成自己的表情。 */

@@ -17,8 +17,14 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.couple_space import CoupleSpaceUnavailable, ensure_space, member_ids, require_same_space
-from app.models import Attachment, DirectMessage, PetInterjection, User, utcnow
+from app.couple_space import (
+    CoupleSpaceUnavailable,
+    ensure_space,
+    member_ids,
+    member_space,
+    require_same_space,
+)
+from app.models import Attachment, DirectMessage, PetInterjection, Sticker, User, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +70,19 @@ async def verify_attachments(
     user_id: str,
     attachment_ids: list[str],
 ) -> list[str]:
-    """校验附件都属于当前用户。
+    """校验这些附件我有权发。
 
     不校验的话，只要猜到 id 就能把别人的附件挂到自己的消息上——虽然这个站
-    只有两个人，但那两个人的边界也是边界。
+    只有两个人，那两个人的边界也是边界。
+
+    **两类放行，不是一类：**
+
+    1. 自己的附件；
+    2. **同一个情侣空间里的表情**——表情本来就是「可见、可发、不可删」，
+       只认第一条的话，对方的表情就成了只能看不能发，面板里那半边全是摆设。
+
+    第 2 条刻意只开给表情，不是「对方的附件都能转发」：那会把对方发过的
+    照片、语音、文档也变成我可以随手再发一遍的东西。
     """
     unique = list(dict.fromkeys(attachment_ids))
     if not unique:
@@ -80,6 +95,16 @@ async def verify_attachments(
             )
         )
     )
+    space = await member_space(db, user_id)
+    if space is not None:
+        owned |= set(
+            await db.scalars(
+                select(Sticker.attachment_id).where(
+                    Sticker.attachment_id.in_(unique),
+                    Sticker.space_id == space.id,
+                )
+            )
+        )
     missing = [item for item in unique if item not in owned]
     if missing:
         raise PartnerUnavailable("有附件不存在或不属于你。")
