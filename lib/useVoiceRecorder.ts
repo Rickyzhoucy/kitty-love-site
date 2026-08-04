@@ -80,6 +80,15 @@ export function useVoiceRecorder(): VoiceRecorder {
     const startedAtRef = useRef(0);
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const cancelledRef = useRef(false);
+    /**
+     * 按下之后、麦克风还没开好之前就松手了。
+     *
+     * `getUserMedia` 要几百毫秒才把设备交出来。这段时间里松手的话，`stop()`
+     * 看到 recorderRef 还是 null 就直接返回了——而随后 recorder 照常启动，
+     * **麦克风一直开着录下去**，系统的录音指示灯也一直亮。用一个标志让
+     * start() 收尾时发现「其实已经不要了」并立刻释放。
+     */
+    const abandonedRef = useRef(false);
 
     /** 把麦克风真的关掉。不做这一步，系统的录音指示灯会一直亮着。 */
     const releaseMic = useCallback(() => {
@@ -95,6 +104,7 @@ export function useVoiceRecorder(): VoiceRecorder {
     const start = useCallback(async (): Promise<string | null> => {
         setError(null);
         cancelledRef.current = false;
+        abandonedRef.current = false;
         setStarting(true);
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -104,6 +114,12 @@ export function useVoiceRecorder(): VoiceRecorder {
             recorder.ondataavailable = event => {
                 if (event.data.size > 0) chunksRef.current.push(event.data);
             };
+            if (abandonedRef.current) {
+                // 麦克风开好之前人已经松手了。别启动，直接把设备还回去。
+                stream.getTracks().forEach(track => track.stop());
+                setStarting(false);
+                return null;
+            }
             recorder.start();
             recorderRef.current = recorder;
             setStarting(false);
@@ -135,7 +151,12 @@ export function useVoiceRecorder(): VoiceRecorder {
         error: string | null;
     }> => {
         const recorder = recorderRef.current;
-        if (!recorder) return { clip: null, error: null };
+        if (!recorder) {
+            // 还没开好就松手了：标记一下，让 start() 收尾时把麦克风还回去。
+            abandonedRef.current = true;
+            setStarting(false);
+            return { clip: null, error: null };
+        }
         const seconds = (Date.now() - startedAtRef.current) / 1000;
 
         const blob = await new Promise<Blob>(resolve => {
@@ -147,8 +168,18 @@ export function useVoiceRecorder(): VoiceRecorder {
         releaseMic();
 
         if (cancelledRef.current) return { clip: null, error: null };
-        // 太短基本都是误触——按下去马上松开。发出去只会是一段杂音。
-        if (seconds < 1) {
+
+        /**
+         * 下限只用来挡**误触**，不是「说得太短」。
+         *
+         * 原来是 1 秒，实际体感却像两秒才发得出去——因为**计时是从麦克风
+         * 真正打开那一刻起的**，而 `getUserMedia` 交出设备要几百毫秒、首次
+         * 授权更久。按住两秒、前一秒半在开麦克风，真正录到的就只有半秒。
+         *
+         * 「嗯」「好」这种一个字本来就是零点几秒，不该发不出去。所以下限压到
+         * 0.25 秒——比任何一次手滑点击都长，比任何一个字都短。
+         */
+        if (seconds < 0.25 || blob.size === 0) {
             const message = '太短了，按住多说一会儿';
             setError(message);
             return { clip: null, error: message };
@@ -161,7 +192,8 @@ export function useVoiceRecorder(): VoiceRecorder {
         // webm 是流式容器，不写总时长——浏览器读出来是 NaN，原生播放器显示
         // 「--:--」，看着像坏了。而录的时候我们本来就知道多长，让这个数跟着
         // 文件走是零成本的：附件的 filename 本来就会存下来，不用加字段。
-        const rounded = Math.round(seconds);
+        // 至少记 1 秒：不足一秒的语音显示「0″」看着像坏的。
+        const rounded = Math.max(1, Math.round(seconds));
         return {
             clip: {
                 file: new File(

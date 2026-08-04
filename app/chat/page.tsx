@@ -20,7 +20,7 @@ import { PET_ASSETS } from '@/app/components/FloatingPet/petConfig';
 import { usePet } from '@/app/components/FloatingPet/usePet';
 import Lightbox, { type LightboxImage } from '@/app/companion/Lightbox';
 import LocalFileMentionMenu, { useLocalFileMention } from '@/app/components/LocalFileMentionMenu';
-import { Reply, Smile, X } from 'lucide-react';
+import { Plus, Reply, Smile, X } from 'lucide-react';
 import { useImeGuard } from '@/lib/imeGuard';
 import VoiceButton from './VoiceButton';
 import StickerPanel from './StickerPanel';
@@ -791,7 +791,7 @@ export default function ChatPage() {
                         disabled={uploading || pending.length >= MAX_PENDING}
                         aria-label="添加图片或文件"
                     >
-                        {uploading ? '⏳' : '＋'}
+                        <Plus size={18} />
                     </button>
                     <button
                         type="button"

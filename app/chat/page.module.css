@@ -399,17 +399,28 @@
   padding: 12px clamp(16px, 5vw, 48px) 18px;
 }
 
+/* 输入框左边那一排。**三个必须是同一个类。**
+   原来它们各长各的：＋ 是 40×42 圆角矩形里的一个**全角文字字形**（笔画粗细
+   和视觉重心都和图标对不上，而且落在文字基线上而非居中），表情是同尺寸的
+   lucide 图标，麦克风又是 38×38 的正圆——三种尺寸、两种圆角、两种「图标」，
+   排在一起自然歪歪扭扭。
+
+   现在统一：40×40 正圆、flex 居中、同一套描边，内容一律是 18px 的 lucide
+   图标。用 grid place-items 而不是 line-height 对齐，字形和图标才会落在
+   同一个光学中心上。 */
 .attachButton {
-  flex: none;
+  display: grid;
   width: 40px;
-  height: 42px;
+  height: 40px;
+  flex: none;
   padding: 0;
   border: 1px solid color-mix(in oklch, var(--color-ink), transparent 90%);
-  border-radius: var(--radius-md);
+  border-radius: 999px;
+  place-items: center;
   color: var(--color-ink-muted);
   background: var(--color-surface);
-  font-size: 17px;
   cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 
 .attachButton:hover:not(:disabled) {
@@ -586,27 +597,11 @@
 
 /* ── 按住说话 ────────────────────────────────────────────────────────── */
 
+/* 麦克风和左边那两个是同一套（见 .attachButton），这里只补按住录音特有的：
+   按住时不该选中周围文字，也不该触发 iOS 的长按菜单。 */
 .voiceButton {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border: 1px solid var(--color-sunken);
-  border-radius: 999px;
-  color: var(--color-ink-muted);
-  background: transparent;
-  cursor: pointer;
-  /* 按住不该选中周围的文字，也不该触发 iOS 的长按菜单 */
   user-select: none;
   touch-action: none;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-
-.voiceButton:hover:not(:disabled) {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
 }
 
 .voiceActive {

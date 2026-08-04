@@ -69,7 +69,7 @@ export default function VoiceButton({
 
             <button
                 type="button"
-                className={`${styles.voiceButton} ${
+                className={`${styles.attachButton} ${styles.voiceButton} ${
                     recorder.recording || recorder.starting ? styles.voiceActive : ''
                 }`}
                 disabled={disabled}
