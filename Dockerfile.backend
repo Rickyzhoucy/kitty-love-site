@@ -64,15 +64,40 @@ RUN if [ -n "$PYPI_PACKAGE_BASE" ]; then \
 
 # **依赖里有一个 git 依赖（skills-ref），托管在 github.com 上。**
 #
-# 从这台境内机器实测五次 `git ls-remote`：OK OK FAIL FAIL OK。也就是说它
-# 大约四成会失败，报的是 `GnuTLS recv error (-110)`，整个构建随之挂掉——
-# 而失败与否纯看运气，同一份代码重跑一次可能就过了。
+# 从这台境内机器实测：直连 `git ls-remote` 只有约三分之一成功，失败的那些
+# 要卡满 40 秒才断，整个构建随之挂掉——纯看运气，同一份代码重跑一次可能就过了。
 #
-# 这里不走第三方 GitHub 代理：那等于把依赖的来源交给一个不受控的中间人，
-# 为了构建方便引入供应链风险不划算。改为**重试**，并让卡住的连接尽快放弃：
-# lowSpeedLimit/Time = 30 秒内低于 1KB/s 就断开，否则一次卡死能拖十几分钟。
+# 让卡住的连接尽快放弃：30 秒内低于 1KB/s 就断开，否则一次卡死能拖十几分钟。
 RUN git config --global http.lowSpeedLimit 1000 \
     && git config --global http.lowSpeedTime 30
+
+# 走不走 GitHub 镜像。境内构建传 `https://gh-proxy.org`，留空则直连。
+#
+# ## 这里为什么可以用第三方代理
+#
+# 这段注释原来写着「不走第三方代理，那等于把依赖来源交给不受控的中间人」。
+# **那个判断漏了一件事：uv.lock 把这个依赖锁到了具体的 commit**
+# （`…#38a2ff82958afee88dadf4831509e6f7e9d8ef4e`）。
+#
+# git 对象是内容寻址的——commit id 就是其内容的哈希。中间人给回别的代码，
+# 算出来的 commit 就不是这一个，git 在检出时直接失败。所以代理在这里只是
+# 一条**可达性**通路，不是**信任**通路，拿不到「悄悄换掉依赖」的能力。
+#
+# 反过来说，哪天这个依赖改成跟分支名（`#main` 之类），这条推理就不成立了，
+# 那时要么锁回 commit，要么把代理去掉。
+#
+# 实测对比（生产机，各 6 次 / 3 次）：
+#   直连 github.com  ：1/3 成功，失败要卡 40 秒
+#   gh-proxy.org     ：6/6 成功，每次 1–3 秒
+#
+# 用 `insteadOf` 而不是改写 uv.lock 里的 URL：锁文件里的地址是这个包的身份，
+# 改了它 uv 会当成另一个包。这条只在 git 真正发起请求时替换，uv 那边看到的
+# 还是原来的 github.com 地址。
+ARG GITHUB_PROXY=""
+RUN if [ -n "$GITHUB_PROXY" ]; then \
+      git config --global url."${GITHUB_PROXY}/https://github.com/".insteadOf "https://github.com/" \
+      && echo "github 走镜像：$GITHUB_PROXY"; \
+    fi
 
 # 重试。PyPI 那部分现在走镜像站，很快，所以重试的代价基本只是再试一次 git。
 #

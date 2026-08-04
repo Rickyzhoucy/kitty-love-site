@@ -271,6 +271,34 @@ async def test_user_memory_controls_are_bounded_by_system_policy(authenticated_c
     assert updated.json()["directMessageEnabled"] is False
 
 
+async def test_background_surface_can_register_a_brand_new_session(authenticated_client):
+    """后台上报的**新**会话不能 500。
+
+    这一条是照着线上故障补的：`PerceptionSession.revision` 的 `default=1` 由
+    SQLAlchemy 在 INSERT 时填，构造对象时还是 None，而 upsert 里紧接着就
+    `max(session.revision, data.revision)`。
+
+    只有 `foreground=True` 的路径侥幸不炸——那条分支里的 `db.execute` 触发
+    autoflush，顺带把 INSERT 冲下去、revision 被填上。原来的用例正好全是
+    `foreground: True`，所以这个洞一直没被发现，而桌宠窗口和压在底层的主窗口
+    恰恰都是后台上报。
+    """
+    response = await authenticated_client.put(
+        "/api/v1/perception/session",
+        json={
+            "deviceSessionId": "device-in-the-background",
+            "surface": "tauri_pet",
+            "route": "/desktop-pet",
+            "pageKind": "desktop_pet",
+            "pageContext": {"pageTitle": "桌面宠物"},
+            "foreground": False,
+            "revision": 1,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["revision"] == 1
+
+
 async def test_perception_session_is_shared_through_server(authenticated_client):
     response = await authenticated_client.put(
         "/api/v1/perception/session",

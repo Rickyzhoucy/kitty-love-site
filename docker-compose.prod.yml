@@ -26,6 +26,11 @@ x-apt-mirror: &apt-mirror
       # 否则 `uv sync --frozen` 依然直连 Fastly（见 Dockerfile.backend 里
       # 那段注释——构建会挂在一条不动的连接上，看着像死机）。
       PYPI_PACKAGE_BASE: ${PYPI_PACKAGE_BASE:-}
+      # 依赖里那个 github 上的 git 包（skills-ref）。境内直连只有约三分之一
+      # 成功、失败还要卡满 40 秒，构建随之挂掉。可以放心走镜像是因为 uv.lock
+      # 把它锁到了具体 commit——git 对象内容寻址，中间人换了代码算出来的
+      # commit 就对不上（详见 Dockerfile.backend 里那段）。
+      GITHUB_PROXY: ${GITHUB_PROXY:-}
 
 services:
   web:

@@ -162,11 +162,23 @@ async def upsert_session(
         )
     )
     if session is None:
+        # **revision 必须在这里显式给。**
+        #
+        # 列上的 `default=1` 是 SQLAlchemy 在 INSERT 时填的，不是构造对象时——
+        # 新对象在落库之前 `session.revision` 一直是 None，于是下面那句
+        # `max(session.revision, data.revision)` 抛
+        # `'>' not supported between 'int' and 'NoneType'`，整个请求 500。
+        #
+        # 它看起来时灵时不灵，是因为下面 `if data.foreground:` 那条 `db.execute`
+        # 会触发 autoflush，顺带把这条 INSERT 冲下去、revision 被填上 1。
+        # 也就是说：**前台上报的新会话正常，后台上报的新会话必炸**——而桌宠窗口
+        # 和压在底层的主窗口恰好都是后台。
         session = PerceptionSession(
             space_id=space.id,
             user_id=user_id,
             surface=data.surface,
             device_session_id=data.device_session_id,
+            revision=data.revision,
             expires_at=now + SESSION_TTL,
         )
         db.add(session)
