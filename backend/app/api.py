@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import Field as PydanticField
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import or_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,7 +61,10 @@ from app.future_letters import (
 )
 from app.localtime import local_today
 from app.memory import MemoryService
+from app.couple_space import member_space
 from app.models import (
+    DirectMessage,
+    Sticker,
     ActionReceipt,
     Attachment,
     AuthAttempt,
@@ -1854,6 +1857,57 @@ async def get_attachment(
     return await attachment_response(attachment)
 
 
+async def may_read_attachment(db, user_id: str, attachment) -> bool:
+    """这个人能不能取这个附件。
+
+    原来的规则是「只有主人能取，相册照片除外」——于是**对方在私聊里发给你的
+    任何附件你都取不到**：图片是碎的，语音和表情根本不出现。这个洞一直都在，
+    只是表情和语音把它显眼地暴露了出来（图片至少还留个破图占位）。
+
+    现在四条路任一成立即可：
+
+    1. 自己的附件；
+    2. 相册里的照片——本来就是共享的；
+    3. **私聊里出现过的**，且我是这条消息的收发方之一；
+    4. 同一个情侣空间里的表情——对方的表情面板里可见、可发，自然也要能显示。
+
+    第 3 条为什么在 Python 里比对而不是让数据库做包含查询：`attachmentIds` 是
+    JSON 列，Postgres 有 JSONB 包含运算符而 SQLite 没有，写成方言相关的查询会让
+    测试和生产走两条不同的代码路径。这个站只有两个人一条会话线，取回来自己比
+    完全不是瓶颈。
+    """
+    if attachment.owner_id == user_id:
+        return True
+    linked_photo = await db.scalar(
+        select(Photo.id).where(Photo.attachment_id == attachment.id)
+    )
+    if linked_photo is not None:
+        return True
+
+    in_thread = await db.scalars(
+        select(DirectMessage.attachment_ids).where(
+            or_(
+                DirectMessage.sender_id == user_id,
+                DirectMessage.recipient_id == user_id,
+            )
+        )
+    )
+    if any(attachment.id in (ids or []) for ids in in_thread):
+        return True
+
+    space = await member_space(db, user_id)
+    if space is not None:
+        sticker = await db.scalar(
+            select(Sticker.id).where(
+                Sticker.attachment_id == attachment.id,
+                Sticker.space_id == space.id,
+            )
+        )
+        if sticker is not None:
+            return True
+    return False
+
+
 @router.get(
     "/attachments/{attachment_id}/content",
     name="attachment_content",
@@ -1867,8 +1921,7 @@ async def attachment_content(
     attachment = await db.get(Attachment, attachment_id)
     if attachment is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "附件不存在")
-    linked_photo = await db.scalar(select(Photo.id).where(Photo.attachment_id == attachment_id))
-    if attachment.owner_id != user.id and linked_photo is None:
+    if not await may_read_attachment(db, user.id, attachment):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "附件不存在")
     return RedirectResponse(
         await storage.presign_get(
@@ -1892,8 +1945,7 @@ async def attachment_thumbnail(
     attachment = await db.get(Attachment, attachment_id)
     if attachment is None or attachment.derived_bucket is None or attachment.thumbnail_key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "缩略图不存在")
-    linked_photo = await db.scalar(select(Photo.id).where(Photo.attachment_id == attachment_id))
-    if attachment.owner_id != user.id and linked_photo is None:
+    if not await may_read_attachment(db, user.id, attachment):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "缩略图不存在")
     return RedirectResponse(
         await storage.presign_get(
@@ -1916,7 +1968,7 @@ async def attachment_preview(
     storage: Storage,
 ) -> RedirectResponse:
     attachment = await db.get(Attachment, attachment_id)
-    if attachment is None or attachment.owner_id != user.id:
+    if attachment is None or not await may_read_attachment(db, user.id, attachment):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "文档预览不存在")
     if attachment.preview_key and attachment.derived_bucket:
         bucket, object_key = attachment.derived_bucket, attachment.preview_key

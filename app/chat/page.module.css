@@ -674,15 +674,80 @@
   font-size: 12px;
 }
 
-/* 聊天流里的语音条。用原生 controls：播放/进度/音量这套交互浏览器已经
-   做得很好，自己实现一遍只会在键盘和读屏上更差。 */
-.voiceClip {
-  max-width: min(260px, 70vw);
-  height: 36px;
+/* 聊天流里的语音条，照微信那种。
+   **没用原生 `<audio controls>`**：webm 不写总时长，原生播放器显示「--:--」，
+   一条正常的语音看着像坏文件；而且整条播放器摆在聊天流里太重——语音要的是
+   「点一下就响」，不是拖进度条。时长在录制时算好并写进了文件名。 */
+.voiceRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* 自己发的：气泡在右、时长在左，和消息的方向一致。 */
+.voiceRowMine {
+  flex-direction: row-reverse;
+}
+
+.voiceBubble {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+}
+
+.voiceMine {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+
+/* 三道弧线。静止时就是个喇叭的形状，不用图例说明这是语音。 */
+.voiceIcon {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+}
+
+.voiceIcon i {
+  width: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.55;
+}
+
+.voiceIcon i:nth-child(1) { height: 6px; }
+.voiceIcon i:nth-child(2) { height: 11px; }
+.voiceIcon i:nth-child(3) { height: 16px; }
+
+/* 播放时依次亮起来，像声音一波波出来。 */
+.voiceIcon[data-playing] i {
+  animation: voice-wave 1s ease-in-out infinite;
+}
+
+.voiceIcon[data-playing] i:nth-child(2) { animation-delay: 0.15s; }
+.voiceIcon[data-playing] i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes voice-wave {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.voiceLength {
+  flex: none;
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .recordingLive { animation: none; }
+  .voiceIcon[data-playing] i { animation: none; opacity: 1; }
 }
 
 /* ── 表情包 ──────────────────────────────────────────────────────────── */

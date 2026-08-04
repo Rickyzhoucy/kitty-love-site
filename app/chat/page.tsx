@@ -24,6 +24,7 @@ import { Reply, Smile, X } from 'lucide-react';
 import { useImeGuard } from '@/lib/imeGuard';
 import VoiceButton from './VoiceButton';
 import StickerPanel from './StickerPanel';
+import VoiceBubble from './VoiceBubble';
 import { saveSticker, type Sticker } from '@/lib/api/stickers';
 import styles from './page.module.css';
 
@@ -447,20 +448,18 @@ export default function ChatPage() {
     }, [petName]);
     applyMentionRef.current = applyMention;
 
-    const renderAttachments = (ids: string[]) => {
+    const renderAttachments = (ids: string[], mine: boolean) => {
         const resolved = ids.map(id => attachmentCache[id]).filter(Boolean);
         if (!resolved.length) return null;
         return resolved.map(item =>
             // 语音条：**不是普通附件那种「点开下载」**。语音要能就地播，
             // 跳出去开个新标签页听一段两秒的话毫无道理。
             isVoice(item) ? (
-                <audio
+                <VoiceBubble
                     key={item.id}
-                    className={styles.voiceClip}
-                    src={apiUrl(item.downloadUrl)}
-                    controls
-                    preload="metadata"
-                    aria-label="语音消息"
+                    src={item.downloadUrl}
+                    filename={item.filename}
+                    mine={mine}
                 />
             ) : isImage(item) ? (
                 <button
@@ -608,7 +607,7 @@ export default function ChatPage() {
                                         </div>
                                     ) : (
                                         <div className={styles.attachedRow}>
-                                            {renderAttachments(item.message.attachmentIds)}
+                                            {renderAttachments(item.message.attachmentIds, mine)}
                                         </div>
                                     )}
                                 </div>

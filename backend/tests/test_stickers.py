@@ -86,3 +86,51 @@ async def test_move_to_front_puts_the_chosen_one_first(authenticated_client):
     assert moved.status_code == 204
     after = [item["id"] for item in (await authenticated_client.get("/api/v1/stickers")).json()]
     assert after[0] == last
+
+
+@pytest.mark.anyio
+async def test_partner_can_read_attachments_that_reached_the_thread(session_maker):
+    """**对方发给你的附件你要取得到。**
+
+    原来的规则是「只有主人能取，相册照片除外」，于是私聊里收到的图片是碎的、
+    语音和表情根本不出现——这个洞一直都在，表情和语音只是把它显眼地暴露了。
+
+    这里直接测那条规则本身，不绕 HTTP：要验的是「谁能读」，不是路由。
+    """
+    from sqlalchemy import select
+
+    from app.api import may_read_attachment
+    from app.auth import hash_password
+    from app.direct_messages import send_message
+    from app.models import Attachment, User
+
+    async with session_maker() as db:
+        me = await db.scalar(select(User).limit(1))
+        partner = User(
+            username="honey2",
+            display_name="宝贝",
+            password_hash=hash_password("x" * 12),
+        )
+        db.add(partner)
+        await db.flush()
+
+        mine = Attachment(
+            owner_id=me.id, bucket="b", object_key="k1", filename="pic.png",
+            content_type="image/png", size=10, sha256="a" * 64, status="ready",
+        )
+        draft = Attachment(
+            owner_id=me.id, bucket="b", object_key="k2", filename="draft.png",
+            content_type="image/png", size=10, sha256="b" * 64, status="ready",
+        )
+        db.add_all([mine, draft])
+        await db.flush()
+
+        await send_message(db, me.id, partner.id, "", [mine.id])
+        await db.commit()
+
+        # 发出去的：收件人读得到
+        assert await may_read_attachment(db, partner.id, mine) is True
+        # 没发出去的：仍然只有主人能读——放行范围不能顺手扩大成「同一个空间」
+        assert await may_read_attachment(db, partner.id, draft) is False
+        # 主人自己当然读得到
+        assert await may_read_attachment(db, me.id, draft) is True

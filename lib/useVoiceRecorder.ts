@@ -156,9 +156,19 @@ export function useVoiceRecorder(): VoiceRecorder {
         const extension = blob.type.includes('mp4') ? 'm4a'
             : blob.type.includes('mpeg') ? 'mp3'
                 : 'webm';
+        // **把时长写进文件名。**
+        //
+        // webm 是流式容器，不写总时长——浏览器读出来是 NaN，原生播放器显示
+        // 「--:--」，看着像坏了。而录的时候我们本来就知道多长，让这个数跟着
+        // 文件走是零成本的：附件的 filename 本来就会存下来，不用加字段。
+        const rounded = Math.round(seconds);
         return {
             clip: {
-                file: new File([blob], `voice-${Date.now()}.${extension}`, { type: blob.type }),
+                file: new File(
+                    [blob],
+                    `voice-${Date.now()}-${rounded}s.${extension}`,
+                    { type: blob.type },
+                ),
                 seconds,
             },
             error: null,
