@@ -134,3 +134,23 @@ async def test_partner_can_read_attachments_that_reached_the_thread(session_make
         assert await may_read_attachment(db, partner.id, draft) is False
         # 主人自己当然读得到
         assert await may_read_attachment(db, me.id, draft) is True
+
+
+@pytest.mark.anyio
+async def test_every_attachment_route_uses_the_shared_rule():
+    """五个附件端点不能各写一份归属判断。
+
+    上一轮就是这么漏的：改了 content / thumbnail / preview 三个**下载**端点，
+    漏了 `GET /attachments/{id}` 这个**元数据**端点——而前端是先调它填缓存的，
+    取不到就把整条消息过滤掉，收件方看到的是「什么都没有」而不是坏图。
+
+    直接扫源码而不是逐个发请求：要守的正是「别再冒出第六处各写一份的判断」。
+    """
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1] / "app" / "api.py"
+    text = source.read_text(encoding="utf-8")
+    assert "owner_id != user.id" not in text, (
+        "又有端点自己写归属判断了。附件的可读性只有一条规则："
+        "may_read_attachment。"
+    )

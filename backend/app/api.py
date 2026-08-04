@@ -1852,7 +1852,11 @@ async def get_attachment(
     storage: Storage,
 ) -> AttachmentRead:
     attachment = await db.get(Attachment, attachment_id)
-    if attachment is None or attachment.owner_id != user.id:
+    # **这一个最容易漏，但它是最先被调用的。** 前端拿它填 attachmentCache，
+    # 取不到就把整条消息过滤掉——收件方看到的不是坏图或坏播放器，是
+    # 什么都没有。上一轮只改了 content/thumbnail/preview 三个下载端点，
+    # 漏了这个元数据端点，于是「对方发来的附件看不见」照旧。
+    if attachment is None or not await may_read_attachment(db, user.id, attachment):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "附件不存在")
     return await attachment_response(attachment)
 
@@ -2000,9 +2004,9 @@ async def attachment_document_ir(
     attachment = await db.get(Attachment, attachment_id)
     if (
         attachment is None
-        or attachment.owner_id != user.id
         or attachment.derived_bucket is None
         or attachment.document_ir_key is None
+        or not await may_read_attachment(db, user.id, attachment)
     ):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document IR 不存在")
     return RedirectResponse(
